@@ -13,7 +13,7 @@
 #include <Windows.h>
 using namespace DirectX;
 
-static SCENE scene = SCENE_GAME;
+static SCENE scene = SCENE_TITLE;
 
 #if !defined(_DEBUG)
 static void AlertDebugSceneUnavailable(const wchar_t* detail)

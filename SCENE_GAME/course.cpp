@@ -1,13 +1,16 @@
 ﻿#include "course.h"
 #include "player.h"
 #include "billboard.h"
+#include "sprite2d.h"
 #include "sprite3d.h"
 #include "font.h"
+#include "MultiLineClickFont.h"
 #include "define.h"
 #include "keyboard.h"
+#include "input_manager.h"
 #include "main.h"
+#include "mouse.h"
 #include "renderer.h"
-#include "imgui/imgui.h"
 
 #include <Windows.h>
 #include <algorithm>
@@ -57,19 +60,23 @@ namespace
 
 	CourseMode g_Mode = CourseMode::FreeFlight;
 	int g_SelectedCourse = -1;
-	int g_WorkingCourseIndex = -1;
 	int g_NextGate = 0;
 	XMFLOAT3 g_LastPlayerPos = {};
 	std::chrono::steady_clock::time_point g_CountdownStarted;
 	std::chrono::steady_clock::time_point g_RaceStarted;
 	double g_RaceElapsed = 0.0;
-	bool g_HasLastSaveResult = false;
-	bool g_LastSaveSucceeded = false;
-	char g_CourseName[128] = "course";
+	bool g_MenuOpen = false;
+	int g_MenuCursor = 0;
 
 	DrawFont* g_pTimerText = nullptr;
 	DrawFont* g_pCountdownText = nullptr;
 	DrawFont* g_pGoalText = nullptr;
+	DrawFont* g_pGoalHintText = nullptr;
+	DrawFont* g_pCourseHintText = nullptr;
+	DrawFont* g_pMenuTitleText = nullptr;
+	DrawFont* g_pMenuHintText = nullptr;
+	MultiLineClickFont* g_pMenuText = nullptr;
+	Sprite2D* g_pMenuBackground = nullptr;
 
 	std::string Trim(const std::string& value)
 	{
@@ -372,20 +379,9 @@ namespace
 		}
 	}
 
-	void SetCourseNameBuffer(const std::string& name)
-	{
-		std::snprintf(
-			g_CourseName,
-			sizeof(g_CourseName),
-			"%s",
-			name.c_str());
-		g_CourseName[sizeof(g_CourseName) - 1] = '\0';
-	}
-
 	void StartCourseCreate(int courseIndex)
 	{
 		g_WorkingCourse = {};
-		g_WorkingCourseIndex = courseIndex;
 		if (courseIndex >= 0 &&
 			courseIndex < static_cast<int>(g_Courses.size()))
 		{
@@ -393,10 +389,8 @@ namespace
 		}
 		else
 		{
-			g_WorkingCourse.name = "course";
+			g_WorkingCourse.name.clear();
 		}
-		SetCourseNameBuffer(g_WorkingCourse.name);
-		g_HasLastSaveResult = false;
 		g_Mode = CourseMode::CourseCreate;
 		RebuildRings(g_WorkingCourse.points);
 	}
@@ -407,45 +401,60 @@ namespace
 		g_Mode = CourseMode::FreeFlight;
 		g_NextGate = 0;
 		g_RaceElapsed = 0.0;
-		g_WorkingCourseIndex = -1;
 		ClearRings();
 		SAFE_DELETE(g_StartMarker);
 	}
 
-	void SaveWorkingCourse(void)
+	std::string CreateAutomaticCourseName(void)
 	{
-		g_WorkingCourse.name = Trim(g_CourseName);
+		const std::time_t currentTime = std::time(nullptr);
+		std::tm localTime = {};
+		localtime_s(&localTime, &currentTime);
+
+		char text[64] = {};
+		std::snprintf(
+			text,
+			sizeof(text),
+			"course_%04d%02d%02d_%02d%02d%02d",
+			localTime.tm_year + 1900,
+			localTime.tm_mon + 1,
+			localTime.tm_mday,
+			localTime.tm_hour,
+			localTime.tm_min,
+			localTime.tm_sec);
+		return text;
+	}
+
+	bool SaveWorkingCourse(void)
+	{
 		if (g_WorkingCourse.name.empty())
 		{
-			g_WorkingCourse.name = "course";
-			SetCourseNameBuffer(g_WorkingCourse.name);
+			g_WorkingCourse.name = CreateAutomaticCourseName();
 		}
 
-		const std::string filePath =
-			std::string(COURSE_DIRECTORY) + "\\" +
-			SanitizeFileStem(g_WorkingCourse.name) + ".yml";
-		if (!g_WorkingCourse.filePath.empty() &&
-			g_WorkingCourse.filePath != filePath)
+		if (g_WorkingCourse.filePath.empty())
 		{
-			DeleteFileA(g_WorkingCourse.filePath.c_str());
+			g_WorkingCourse.filePath =
+				std::string(COURSE_DIRECTORY) + "\\" +
+				SanitizeFileStem(g_WorkingCourse.name) + ".yml";
 		}
-		g_WorkingCourse.filePath = filePath;
-		g_LastSaveSucceeded = SaveCourseFile(g_WorkingCourse);
-		g_HasLastSaveResult = true;
 
-		if (g_LastSaveSucceeded)
+		if (!SaveCourseFile(g_WorkingCourse))
 		{
-			LoadCourseList();
-			for (int i = 0; i < static_cast<int>(g_Courses.size()); ++i)
+			return false;
+		}
+
+		LoadCourseList();
+		for (int i = 0; i < static_cast<int>(g_Courses.size()); ++i)
+		{
+			if (g_Courses[i].filePath == g_WorkingCourse.filePath)
 			{
-				if (g_Courses[i].filePath == g_WorkingCourse.filePath)
-				{
-					g_SelectedCourse = i;
-					break;
-				}
+				g_SelectedCourse = i;
+				break;
 			}
-			ReturnToFreeFlight();
 		}
+		ReturnToFreeFlight();
+		return true;
 	}
 
 	void AddCoursePoint(void)
@@ -572,15 +581,243 @@ namespace
 		g_Mode = CourseMode::RaceCountdown;
 	}
 
-	const char* GetModeLabel(void)
+	int GetMenuItemCount(void)
 	{
-		switch (g_Mode)
+		return g_Mode == CourseMode::RaceCountdown ||
+			g_Mode == CourseMode::RaceRunning ||
+			g_Mode == CourseMode::RaceGoal
+			? 1
+			: 4;
+	}
+
+	std::vector<std::string> BuildMenuLines(void)
+	{
+		std::vector<std::string> lines;
+		if (g_Mode == CourseMode::CourseCreate)
 		{
-		case CourseMode::CourseCreate: return "COURSE CREATE";
-		case CourseMode::RaceCountdown: return "RACE COUNTDOWN";
-		case CourseMode::RaceRunning: return "RACE";
-		case CourseMode::RaceGoal: return "GOAL";
-		default: return "FREE FLIGHT";
+			lines = {
+				"SAVE & EXIT",
+				"UNDO LAST POINT",
+				"DISCARD & EXIT",
+				"RESUME EDIT",
+			};
+		}
+		else if (g_Mode == CourseMode::RaceCountdown ||
+			g_Mode == CourseMode::RaceRunning ||
+			g_Mode == CourseMode::RaceGoal)
+		{
+			lines = { "ABORT RACE" };
+		}
+		else
+		{
+			const bool hasCourse =
+				g_SelectedCourse >= 0 &&
+				g_SelectedCourse < static_cast<int>(g_Courses.size());
+			const std::string courseName =
+				hasCourse ? g_Courses[g_SelectedCourse].name : "NONE";
+			lines = {
+				"RESUME",
+				"RACE START: " + courseName,
+				"EDIT COURSE: " + courseName,
+				"NEW COURSE",
+			};
+		}
+
+		for (int i = 0; i < static_cast<int>(lines.size()); ++i)
+		{
+			if (i == g_MenuCursor)
+			{
+				lines[i] = "> " + lines[i];
+			}
+		}
+		return lines;
+	}
+
+	void RefreshMenuText(void)
+	{
+		if (!g_pMenuText)
+		{
+			return;
+		}
+
+		const std::vector<std::string> lines = BuildMenuLines();
+		std::string text;
+		for (const std::string& line : lines)
+		{
+			if (!text.empty())
+			{
+				text += "\n";
+			}
+			text += line;
+		}
+		g_pMenuText->SetText(text);
+	}
+
+	void SetMenuOpen(bool open)
+	{
+		if (g_MenuOpen == open)
+		{
+			return;
+		}
+
+		g_MenuOpen = open;
+		if (g_MenuOpen)
+		{
+			g_MenuCursor = 0;
+			UnLockMouse();
+			Player_SetControlEnabled(false);
+			RefreshMenuText();
+		}
+		else
+		{
+			LockMouse();
+			Player_SetControlEnabled(g_Mode != CourseMode::RaceCountdown);
+		}
+	}
+
+	void MoveMenuCursor(int direction)
+	{
+		const int itemCount = GetMenuItemCount();
+		if (itemCount <= 0)
+		{
+			return;
+		}
+		g_MenuCursor = (g_MenuCursor + direction + itemCount) % itemCount;
+		RefreshMenuText();
+	}
+
+	void SelectCourse(int direction)
+	{
+		if (g_Courses.empty())
+		{
+			return;
+		}
+		g_SelectedCourse = (g_SelectedCourse + direction +
+			static_cast<int>(g_Courses.size())) %
+			static_cast<int>(g_Courses.size());
+		RefreshMenuText();
+	}
+
+	void ExecuteMenuItem(int item)
+	{
+		if (g_Mode == CourseMode::CourseCreate)
+		{
+			switch (item)
+			{
+			case 0:
+				if (SaveWorkingCourse())
+				{
+					SetMenuOpen(false);
+				}
+				break;
+			case 1:
+				if (!g_WorkingCourse.points.empty())
+				{
+					g_WorkingCourse.points.pop_back();
+					RebuildRings(g_WorkingCourse.points);
+				}
+				break;
+			case 2:
+				ReturnToFreeFlight();
+				SetMenuOpen(false);
+				break;
+			case 3:
+				SetMenuOpen(false);
+				break;
+			default:
+				break;
+			}
+			return;
+		}
+
+		if (g_Mode == CourseMode::RaceCountdown ||
+			g_Mode == CourseMode::RaceRunning ||
+			g_Mode == CourseMode::RaceGoal)
+		{
+			if (item == 0)
+			{
+				ReturnToFreeFlight();
+				SetMenuOpen(false);
+			}
+			return;
+		}
+
+		switch (item)
+		{
+		case 0:
+			SetMenuOpen(false);
+			break;
+		case 1:
+			if (g_SelectedCourse >= 0 &&
+				g_SelectedCourse < static_cast<int>(g_Courses.size()) &&
+				g_Courses[g_SelectedCourse].points.size() >= 2)
+			{
+				SetMenuOpen(false);
+				StartRace();
+			}
+			break;
+		case 2:
+			if (g_SelectedCourse >= 0 &&
+				g_SelectedCourse < static_cast<int>(g_Courses.size()))
+			{
+				SetMenuOpen(false);
+				StartCourseCreate(g_SelectedCourse);
+			}
+			break;
+		case 3:
+			SetMenuOpen(false);
+			StartCourseCreate(-1);
+			break;
+		default:
+			break;
+		}
+	}
+
+	void UpdateMenu(void)
+	{
+		if (!g_pMenuText)
+		{
+			return;
+		}
+
+		g_pMenuText->Update();
+		if (g_pMenuText->IsClick())
+		{
+			const int clickedLine = g_pMenuText->GetClickedLineIndex();
+			if (clickedLine >= 0 && clickedLine < GetMenuItemCount())
+			{
+				g_MenuCursor = clickedLine;
+				RefreshMenuText();
+				ExecuteMenuItem(clickedLine);
+				return;
+			}
+		}
+
+		if (Input_IsActionTrigger(INPUT_ACTION_MENU_UP))
+		{
+			MoveMenuCursor(-1);
+		}
+		else if (Input_IsActionTrigger(INPUT_ACTION_MENU_DOWN))
+		{
+			MoveMenuCursor(1);
+		}
+		else if (g_Mode == CourseMode::FreeFlight &&
+			Input_IsActionTrigger(INPUT_ACTION_MENU_LEFT))
+		{
+			SelectCourse(-1);
+		}
+		else if (g_Mode == CourseMode::FreeFlight &&
+			Input_IsActionTrigger(INPUT_ACTION_MENU_RIGHT))
+		{
+			SelectCourse(1);
+		}
+		else if (Input_IsActionTrigger(INPUT_ACTION_CANCEL))
+		{
+			SetMenuOpen(false);
+		}
+		else if (Input_IsActionTrigger(INPUT_ACTION_DECIDE))
+		{
+			ExecuteMenuItem(g_MenuCursor);
 		}
 	}
 }
@@ -589,8 +826,8 @@ void Course_Initialize(void)
 {
 	g_Mode = CourseMode::FreeFlight;
 	g_SelectedCourse = -1;
-	g_WorkingCourseIndex = -1;
-	g_HasLastSaveResult = false;
+	g_MenuOpen = false;
+	g_MenuCursor = 0;
 	LoadCourseList();
 
 	g_pTimerText = new DrawFont(
@@ -614,16 +851,67 @@ void Course_Initialize(void)
 		{ 1.0f, 0.9f, 0.3f, 1.0f },
 		"GOAL",
 		TA_MIDDLE);
+	g_pGoalHintText = new DrawFont(
+		{ SCREEN_X * 0.5f, SCREEN_Y * 0.48f },
+		28.0f,
+		0.0f,
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		"PRESS ENTER / A",
+		TA_MIDDLE);
+	g_pCourseHintText = new DrawFont(
+		{ SCREEN_X * 0.5f, SCREEN_Y - 125.0f },
+		22.0f,
+		0.0f,
+		{ 0.9f, 0.9f, 0.9f, 1.0f },
+		"P: PLACE POINT   U: UNDO   ESC / START: MENU",
+		TA_MIDDLE);
+	g_pMenuTitleText = new DrawFont(
+		{ SCREEN_X * 0.5f, 120.0f },
+		42.0f,
+		0.0f,
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		"GAME MENU",
+		TA_MIDDLE);
+	g_pMenuHintText = new DrawFont(
+		{ SCREEN_X * 0.5f, SCREEN_Y - 80.0f },
+		22.0f,
+		0.0f,
+		{ 0.8f, 0.8f, 0.8f, 1.0f },
+		"UP / DOWN: SELECT   ENTER / A: DECIDE   ESC / START: CLOSE",
+		TA_MIDDLE);
+	g_pMenuText = new MultiLineClickFont(
+		{ SCREEN_X * 0.5f, SCREEN_Y * 0.5f },
+		34.0f,
+		0.0f,
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		{ 1.0f, 0.85f, 0.25f, 1.0f },
+		"RESUME\nRACE START: NONE\nEDIT COURSE: NONE\nNEW COURSE",
+		1.5f,
+		TA_MIDDLE);
+	g_pMenuBackground = new Sprite2D(
+		{ SCREEN_X * 0.5f, SCREEN_Y * 0.5f },
+		{ SCREEN_X * 0.78f, SCREEN_Y * 0.82f },
+		0.0f,
+		{ 0.0f, 0.0f, 0.0f, 0.55f },
+		BLENDSTATE_ALFA,
+		L"asset\\texture\\fade.png");
 }
 
 void Course_Finalize(void)
 {
+	SetMenuOpen(false);
 	Player_SetControlEnabled(true);
 	ClearRings();
 	SAFE_DELETE(g_StartMarker);
 	SAFE_DELETE(g_pTimerText);
 	SAFE_DELETE(g_pCountdownText);
 	SAFE_DELETE(g_pGoalText);
+	SAFE_DELETE(g_pGoalHintText);
+	SAFE_DELETE(g_pCourseHintText);
+	SAFE_DELETE(g_pMenuTitleText);
+	SAFE_DELETE(g_pMenuHintText);
+	SAFE_DELETE(g_pMenuText);
+	SAFE_DELETE(g_pMenuBackground);
 	g_Courses.clear();
 	g_WorkingCourse = {};
 	g_RaceCourse = {};
@@ -631,15 +919,28 @@ void Course_Finalize(void)
 
 void Course_Update(void)
 {
+	if (Input_IsActionTrigger(INPUT_ACTION_PAUSE))
+	{
+		SetMenuOpen(!g_MenuOpen);
+	}
+
+	if (g_MenuOpen)
+	{
+		UpdateMenu();
+		return;
+	}
+
 	if (g_Mode == CourseMode::CourseCreate)
 	{
-		const bool imguiCapturesKeyboard =
-			ImGui::GetCurrentContext() != nullptr &&
-			ImGui::GetIO().WantCaptureKeyboard;
-		if (!imguiCapturesKeyboard &&
-			Keyboard_IsKeyDownTrigger(KK_P))
+		if (Keyboard_IsKeyDownTrigger(KK_P))
 		{
 			AddCoursePoint();
+		}
+		if (Keyboard_IsKeyDownTrigger(KK_U) &&
+			!g_WorkingCourse.points.empty())
+		{
+			g_WorkingCourse.points.pop_back();
+			RebuildRings(g_WorkingCourse.points);
 		}
 		return;
 	}
@@ -655,6 +956,13 @@ void Course_Update(void)
 			g_LastPlayerPos = Player_GetPos();
 			Player_SetControlEnabled(true);
 		}
+		return;
+	}
+
+	if (g_Mode == CourseMode::RaceGoal &&
+		Input_IsActionTrigger(INPUT_ACTION_DECIDE))
+	{
+		ReturnToFreeFlight();
 		return;
 	}
 
@@ -685,6 +993,11 @@ void Course_Update(void)
 		}
 	}
 	g_LastPlayerPos = currentPlayerPos;
+}
+
+bool Course_IsMenuOpen(void)
+{
+	return g_MenuOpen;
 }
 
 void Course_Draw(void)
@@ -723,6 +1036,11 @@ void Course_DrawHud(void)
 		return;
 	}
 
+	if (g_Mode == CourseMode::CourseCreate && g_pCourseHintText)
+	{
+		g_pCourseHintText->Draw();
+	}
+
 	if (g_Mode == CourseMode::RaceCountdown ||
 		g_Mode == CourseMode::RaceRunning ||
 		g_Mode == CourseMode::RaceGoal)
@@ -751,117 +1069,22 @@ void Course_DrawHud(void)
 		{
 			g_pGoalText->Draw();
 		}
+		if (g_Mode == CourseMode::RaceGoal && g_pGoalHintText)
+		{
+			g_pGoalHintText->Draw();
+		}
 	}
 }
 
-void Course_DrawDebug(void)
+void Course_DrawMenu(void)
 {
-	if (Direct3D_IsTakingScreenshot())
+	if (Direct3D_IsTakingScreenshot() || !g_MenuOpen)
 	{
 		return;
 	}
 
-	ImGui::Begin("Expo Course");
-	ImGui::Text("Mode: %s", GetModeLabel());
-
-	if (g_Mode == CourseMode::FreeFlight)
-	{
-		if (ImGui::Button("New Course"))
-		{
-			StartCourseCreate(-1);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Reload List"))
-		{
-			LoadCourseList();
-		}
-
-		ImGui::Separator();
-		ImGui::Text("Course List");
-		for (int i = 0; i < static_cast<int>(g_Courses.size()); ++i)
-		{
-			const std::string label =
-				g_Courses[i].name + "##course_" + std::to_string(i);
-			if (ImGui::Selectable(label.c_str(), g_SelectedCourse == i))
-			{
-				g_SelectedCourse = i;
-			}
-		}
-
-		if (g_SelectedCourse >= 0 &&
-			g_SelectedCourse < static_cast<int>(g_Courses.size()))
-		{
-			const CourseData& selected = g_Courses[g_SelectedCourse];
-			ImGui::Text(
-				"Points: %d  Logs: %d",
-				static_cast<int>(selected.points.size()),
-				static_cast<int>(selected.logs.size()));
-			if (ImGui::Button("Edit Course"))
-			{
-				StartCourseCreate(g_SelectedCourse);
-			}
-			ImGui::SameLine();
-			const bool canPlay = selected.points.size() >= 2;
-			if (!canPlay)
-			{
-				ImGui::BeginDisabled();
-			}
-			if (ImGui::Button("Play"))
-			{
-				StartRace();
-			}
-			if (!canPlay)
-			{
-				ImGui::EndDisabled();
-			}
-		}
-	}
-	else if (g_Mode == CourseMode::CourseCreate)
-	{
-		ImGui::InputText("Name", g_CourseName, sizeof(g_CourseName));
-		ImGui::Text("P: place point");
-		ImGui::Text("Points: %d", static_cast<int>(g_WorkingCourse.points.size()));
-		if (ImGui::Button("Undo Last Point") &&
-			!g_WorkingCourse.points.empty())
-		{
-			g_WorkingCourse.points.pop_back();
-			RebuildRings(g_WorkingCourse.points);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Save"))
-		{
-			SaveWorkingCourse();
-		}
-		if (ImGui::Button("Free Flight"))
-		{
-			ReturnToFreeFlight();
-		}
-		if (g_HasLastSaveResult)
-		{
-			ImGui::Text(
-				"%s",
-				g_LastSaveSucceeded ? "Saved." : "Save failed.");
-		}
-	}
-	else
-	{
-		ImGui::Text(
-			"Ring: %d / %d",
-			(std::max)(0, g_NextGate - 1),
-			(std::max)(0, static_cast<int>(g_RaceCourse.points.size()) - 1));
-		if (g_Mode == CourseMode::RaceCountdown)
-		{
-			ImGui::Text("Starting...");
-		}
-		else if (g_Mode == CourseMode::RaceGoal)
-		{
-			ImGui::Text("Time: %s", FormatRaceTime(g_RaceElapsed).c_str());
-		}
-		if (ImGui::Button("Free Flight"))
-		{
-			ReturnToFreeFlight();
-		}
-	}
-
-	ImGui::End();
+	if (g_pMenuBackground) g_pMenuBackground->Draw();
+	if (g_pMenuTitleText) g_pMenuTitleText->Draw();
+	if (g_pMenuText) g_pMenuText->Draw();
+	if (g_pMenuHintText) g_pMenuHintText->Draw();
 }

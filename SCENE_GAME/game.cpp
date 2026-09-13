@@ -6,7 +6,6 @@
 #include "renderer.h"
 #include "sunlight.h"
 #include "ui.h"
-#include "keyboard.h"
 #include "mouse.h"
 #include "imgui/imgui.h"
 
@@ -14,9 +13,8 @@ static bool g_PrevLeftButton = false;
 
 static void Game_UpdateMouseLock(void)
 {
-	if (Keyboard_IsKeyDownTrigger(KK_ESCAPE))
+	if (Course_IsMenuOpen())
 	{
-		UnLockMouse();
 		return;
 	}
 
@@ -114,7 +112,7 @@ void Game_Draw(void)
 	Ui_Draw();
 	Course_DrawHud();
 	Player_DrawDebug();
-	Course_DrawDebug();
+	Course_DrawMenu();
 	Sunlight_DrawDebug();
 }
 

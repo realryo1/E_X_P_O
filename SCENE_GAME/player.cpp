@@ -301,6 +301,7 @@ void Player_DrawLocalShadow(
 
 void Player_DrawDebug(void)
 {
+#if defined(_DEBUG)
 	if (!Player_IsReady() || Direct3D_IsTakingScreenshot())
 	{
 		return;
@@ -338,4 +339,5 @@ void Player_DrawDebug(void)
 	}
 
 	ImGui::End();
+#endif
 }

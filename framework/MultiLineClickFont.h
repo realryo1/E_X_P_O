@@ -41,6 +41,7 @@ float m_LineSpacing;
 std::vector<std::string> m_Lines;
 std::vector<FontLineRect> m_LineRects;
 bool m_IsHoverEx;
+int m_HoverLineIndex;
 bool m_WasLeftDownEx;
 bool m_IsClickEx;
 int m_ClickedLineIndex;

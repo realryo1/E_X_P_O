@@ -710,6 +710,7 @@ void Sunlight_EndLocalShadow(void)
 
 void Sunlight_DrawDebug(void)
 {
+#if defined(_DEBUG)
 	if (Direct3D_IsTakingScreenshot())
 	{
 		return;
@@ -796,4 +797,5 @@ void Sunlight_DrawDebug(void)
 	{
 		RequestRedraw();
 	}
+#endif
 }

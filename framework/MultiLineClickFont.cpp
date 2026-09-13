@@ -20,6 +20,7 @@ XMFLOAT4 normalColor, XMFLOAT4 hoverColor, const std::string& text, float lineSp
 , m_FontSize(fontSize)
 , m_LineSpacing((std::max)(lineSpacing, 0.1f))
 , m_IsHoverEx(false)
+, m_HoverLineIndex(-1)
 , m_WasLeftDownEx(false)
 , m_IsClickEx(false)
 , m_ClickedLineIndex(-1)
@@ -42,6 +43,9 @@ if (line.empty())
 continue;
 }
 
+SetColor(static_cast<int>(i) == m_HoverLineIndex
+	? m_HoverColorEx
+	: m_NormalColorEx);
 SetPos({ originalPos.x, originalPos.y + static_cast<float>(i) * m_FontSize * m_LineSpacing });
 DrawFont::SetText(line);
 DrawFont::Draw();
@@ -60,11 +64,8 @@ Mouse_GetState(&ms);
 
 const int hoverLineIndex = HitTestLineIndex(ms.x, ms.y);
 const bool hover = (hoverLineIndex >= 0);
-if (hover != m_IsHoverEx)
-{
 m_IsHoverEx = hover;
-SetColor(m_IsHoverEx ? m_HoverColorEx : m_NormalColorEx);
-}
+m_HoverLineIndex = hoverLineIndex;
 
 const bool leftDown = ms.leftButton;
 const bool pressedThisFrame = (leftDown && !m_WasLeftDownEx);

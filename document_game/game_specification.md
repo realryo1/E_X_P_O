@@ -38,13 +38,12 @@
 - 空飛ぶタクシー `asset/model/flytaxi.glb`。ロード完了後に `Player_Update` が出現させる。
 - カメラヨー基準のW / 左スティック上による前進、マウス左右にゆっくり追従する機体旋回、旋回中のロール傾斜、Space / Shiftによる徐々に変化する上下移動。上昇・下降の速度ベクトルは前進速度と合成する（前進中は斜め、停止中は垂直移動）。三人称視点は `playercamera.cpp`（Far 2000）。
 - 当たり判定は床とリングのみ。建物・パビリオンには当たらない。
-- Player用ImGui（`Expo Player`）：移動速度、`原点に戻る`、`スロープへ`。建物・リングの実行時高さ調節は無い。
-- Course用ImGui（`Expo Course`）：コース一覧、新規作成・編集、保存、再生。コース作成中は`P`で現在位置を追加する。1つ目の座標には`cube.fbx`のスタートマーカーを表示し、2つ目以降を`asset/texture/makulogo.png`のビルボード輪にする。
+- Courseメニュー：`Esc` / パッドSTARTで開くゲーム内メニューから、フリー飛行・レース・コース編集・新規作成を選択する。矢印キー / 左スティック / 決定ボタンで操作し、コース選択中は左右キーで対象コースを切り替える。コース作成中は`P`で現在位置を追加し、`U`で最後の座標を取り消す。保存時の名前は`course_YYYYMMDD_HHMMSS`形式で自動生成する。1つ目の座標には`cube.fbx`のスタートマーカーを表示し、2つ目以降を`asset/texture/makulogo.png`のビルボード輪にする。
 - レースモード：コースの1つ目の座標へ移動し、3秒のカウントダウン後に計測を開始する。2つ目以降の輪を座標順に通過し、左上へ`00:00:00`（分:秒:センチ秒）形式で表示する。ゴール時はタイムスタンプとタイムを`asset/course/*.yml`の`logs`へ追記する。
 - プレイヤーの通常移動速度は`0.12`。レース中にゴール以外の輪を通過すると、通常の前進速度へ`0.30`の速度を0.4秒間加算する。時間終了後も通常の減速幅で加算成分が滑らかに減衰し、急停止しない。次の輪を通過すると持続時間を更新する。
-- 太陽用ImGui（`Expo Sunlight`）：方位・仰角・色・強度・連動環境光・スカイドームヨーオフセット・粗さ・金属度・3段近傍シャドウ・バイアス・影の明るさ。スカイドーム以外のモデルは `S_PBR` とglTF PBRマテリアルを使用し、全対象モデルが影を受ける。影の投影元は床、LOD2、遠景LOD2、リング、タクシーで、LOD3表示時も建物影はLOD2ベースとする。スカイドームは `S_SKYBOX`。起動既定は方位 `-170.0°`、仰角・色はHDR抽出値、強度 `2.0`、環境光倍率 `0.8`、ヨーオフセット `0`、粗さ `0.81`、金属度 `0`、シャドウ範囲 `0–10m / 10–70m / 70–160m`、バイアス `0.0005`、影の明るさ `0.25`。
+- Debugビルド用ImGui（`Expo Player` / `Expo Sunlight`）：速度・ワープ操作および太陽・シャドウ調整を行う。Releaseビルドでは表示しない。スカイドーム以外のモデルは `S_PBR` とglTF PBRマテリアルを使用し、全対象モデルが影を受ける。影の投影元は床、LOD2、遠景LOD2、リング、タクシーで、LOD3表示時も建物影はLOD2ベースとする。スカイドームは `S_SKYBOX`。起動既定は方位 `-170.0°`、仰角・色はHDR抽出値、強度 `2.0`、環境光倍率 `0.8`、ヨーオフセット `0`、粗さ `0.81`、金属度 `0`、シャドウ範囲 `0–10m / 10–70m / 70–160m`、バイアス `0.0005`、影の明るさ `0.25`。
 - 建物の固定Y `-9.010`、リングの固定Y `-1.550`、床の沈み込み `-0.080`。カメラ Far は 2000。
-- ポインタ操作：`Esc` でポインタ解除、ImGui 以外の左クリックで再ロック。解除中はマウス相対移動を視点に使わない。
+- ポインタ操作：`Esc` / パッドSTARTでゲーム内メニューを開き、メニュー中はポインタを表示する。メニューを閉じるとポインタを再ロックする。メニュー中は機体操作を停止する。
 
 ### 操作
 
@@ -52,7 +51,7 @@
 | :--- | :--- |
 | 共通 | `F2` スクリーンショット、`F11` ボーダレス切替 |
 | Title | `Space` / `Enter` / パッドA で Game。Debugビルドは右上 `DEBUG` で検証シーン |
-| Game | W / 左スティック上で前進、Spaceで上昇、Shiftで下降、マウス左右で機体旋回、右スティックで視点。`Esc` でポインタ解除、ImGui以外のウィンドウクリックで再ロック。解除中は視点回転停止。上下移動は前進中なら斜め、停止中なら垂直になる。A/Dの横移動とSの後退は行わない。`Expo Course` のコース作成中は`P`で輪を配置する |
+| Game | W / 左スティック上で前進、Spaceで上昇、Shiftで下降、マウス左右で機体旋回、右スティックで視点。`Esc` / パッドSTARTでメニューを開閉し、矢印キー / 左スティックとSpace / Enter / パッドAでメニューを操作する。メニュー中は機体操作を停止する。上下移動は前進中なら斜め、停止中なら垂直になる。A/Dの横移動とSの後退は行わない。コース作成中は`P`で輪を配置し、`U`で最後の輪を取り消す |
 | Debug | `Tab` で MODEL → LIGHTING → TOON。`Esc` でマウスロック解除 |
 
 ### 触るファイル
@@ -61,10 +60,10 @@
 
 | ファイル | 役割 |
 | :--- | :--- |
-| [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | シーン入口。Field / Player / PlayerCamera / Sunlight / Ui の呼び出し。`Esc` でポインタ解除、ImGui以外のクリックで再ロック |
+| [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | シーン入口。Field / Player / PlayerCamera / Sunlight / Ui の呼び出し。ゲーム内メニュー開閉中のマウスロックを制御 |
 | [`SCENE_GAME/field.cpp`](../SCENE_GAME/field.cpp) | マニフェスト、ENU、`ExpoDrawJob`、フェード中スキップ付き `Field_PumpLoad`、固定Yオフセット、スカイドームヨー |
 | [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | 空飛ぶタクシーの出現、ホバー移動、描画、`Player_DrawDebug`（速度・ワープ・`スロープへ`） |
-| [`SCENE_GAME/course.cpp`](../SCENE_GAME/course.cpp) | コース一覧、YAML入出力、作成・レースモード、ビルボード輪、タイマー、ゴールログ |
+| [`SCENE_GAME/course.cpp`](../SCENE_GAME/course.cpp) | ゲーム内メニュー、コース一覧、YAML入出力、作成・レースモード、ビルボード輪、タイマー、ゴールログ |
 | [`SCENE_GAME/playercamera.cpp`](../SCENE_GAME/playercamera.cpp) | 三人称、Far 2000、`Camera_Initialize`、`SetCameraPosition` |
 | [`SCENE_GAME/sunlight.cpp`](../SCENE_GAME/sunlight.cpp) | 平行太陽、連動環境光、スカイドームヨー連動、`Sunlight_DrawDebug`（窓名 `Expo Sunlight`） |
 | [`SCENE_GAME/ui.cpp`](../SCENE_GAME/ui.cpp) | DrawFont HUD。タイトル、操作案内、ロード状況、メモリ |
@@ -110,7 +109,7 @@
 - 衝突判定: 床と大屋根リングのみ。LOD3近景パビリオンは描画専用で非衝突（通り抜ける）。`Collision_MoveAABB` で床・リングへの侵入を防ぐ。リングはXZフラット格子で近傍三角形のみ判定し軽量に動作する。詳細は [collision.md](../document_framework/collision.md)。
 - 機体姿勢とホバー物理: `flytaxi.glb`（長辺約0.8スケール）。W / 左スティック上で前進加減速、Space / Shiftで上下加減速と前進速度ベクトル合成（前進中は斜め、停止中は垂直移動）。マウス左右で旋回し、機体はロール方向へゆっくり傾斜、正面へ戻ると水平復帰する。A/D横移動およびS後退は不使用。
 - カメラ制御: `playercamera.cpp` による三人称視点（Far 2000）。毎フレーム `RequestRedraw` を呼ぶ。
-- マウスロック制御: `Esc` でポインタ解除、ImGui以外のウィンドウ左クリックで再ロック。解除中は視点回転を停止。ロック中は `game.cpp` が `Mouse_GetState` せず視点側が一度だけ読む。
+- マウスロック制御: `Esc` / パッドSTARTでゲーム内メニューを開く。メニュー中は `UnLockMouse` と操作停止を行い、閉じると `LockMouse` する。メニュー中は視点回転を停止し、通常時は `game.cpp` が `Mouse_GetState` せず視点側が一度だけ読む。
 
 ## 4. シーン仕様
 
@@ -127,12 +126,12 @@
 `null2` の見た目修正はリサーチ復帰後。モデルと座標は [plateau.md](plateau.md)。
 
 - `Game_Initialize`: `PlayerCamera_Initialize`、`Field_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
-- `Game_Update`: `Field_PumpLoad`、マウスロック切替、`PlayerCamera_UpdateInput`、`Player_Update`、`Ui_Update`、`PlayerCamera_Update`、`Sunlight_Update` の順。カメラ入力を先に更新し、プレイヤーが最新のヨーを使用する。`Esc` で `UnLockMouse`、ImGui 以外のウィンドウ左クリックで `LockMouse`。解除中はマウス相対移動を視点に使わない。ロック中は `game.cpp` が `Mouse_GetState` しない（相対移動量は視点側が一度だけ読む）。
-- `Game_Draw`: `PlayerCamera_Draw` のあと、深度ありで `Sunlight_Apply`、注視点周辺の局所 ShadowMap（床・LOD2・遠景LOD2・リング・タクシーを投影）、場とプレイヤーの描画、マテリアルを白へ戻してから `Ui_Draw`、`Player_DrawDebug`、`Sunlight_DrawDebug`。
+- `Game_Update`: `Field_PumpLoad`、マウスロック切替、`PlayerCamera_UpdateInput`、`Player_Update`、`Course_Update`、`PlayerCamera_Update`、`Ui_Update`、`Sunlight_Update` の順。カメラ入力を先に更新し、プレイヤーが最新のヨーを使用する。メニュー開閉とコース操作は`Course_Update`で処理し、メニュー中は操作を停止する。ロック中は `game.cpp` が `Mouse_GetState` しない（相対移動量は視点側が一度だけ読む）。
+- `Game_Draw`: `PlayerCamera_Draw` のあと、深度ありで `Sunlight_Apply`、注視点周辺の局所 ShadowMap（床・LOD2・遠景LOD2・リング・タクシーを投影）、場とプレイヤーの描画、マテリアルを白へ戻してから `Ui_Draw`、HUD、ゲーム内メニュー、Debugビルド用の`Player_DrawDebug` / `Sunlight_DrawDebug`。
 - 初期ロード制御: フェードが不透明なあいだ、`Field_PumpLoad` は GLB を読まない。描画が終わるまで同じフレームでは再ポンプしない。
 - プレイヤー出現: `asset/model/flytaxi.glb`。読み込み後に表示長辺約0.8へ一様スケールし、`Field_GetSpawnPos()` の高度でホバーを開始する。出現時にマウスロックする。
 - レース処理: `Course_Draw` は1つ目の座標へ`cube.fbx`のスタートマーカーを置き、2つ目以降のコース座標へカメラ方向を向く両面ビルボードを描画する。レースではプレイヤーの前フレーム位置から現フレーム位置への線分が、次の輪の平面を半径内で通過した場合だけ次の輪へ進む。コースの点は1つ目をスタート位置、2つ目以降を配列順の輪として使用する。レースのカウントダウン中は`Player_SetControlEnabled(false)`で移動を停止する。
-- コースYAML入出力: `Course` のYAMLは`name`、`points`、`logs`で構成する。保存時に`asset/course`を作成し、コース名から安全なファイル名を生成する。
+- コースYAML入出力: `Course` のYAMLは`name`、`points`、`logs`で構成する。保存時に`asset/course`を作成し、新規コース名とファイル名を自動生成する。
 - 画面再描画: `PlayerCamera_Update` が毎フレーム `RequestRedraw` する。通常シーンのPresent間引きと両立させるためである。
 
 現行スコープ外の将来拡張:
