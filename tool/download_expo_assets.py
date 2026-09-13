@@ -1,0 +1,115 @@
+# -*- coding: utf-8 -*-
+"""ダウンロード済みの公式ZIPを、変換ツールが読む配置へ展開する。"""
+
+from __future__ import annotations
+
+import argparse
+import shutil
+import sys
+import zipfile
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_ORIGINAL = PROJECT_ROOT / "data_original"
+THREE_D_TILES_DIR = DATA_ORIGINAL / "3dtiles"
+ORTHO_DIR = DATA_ORIGINAL / "ortho"
+ORTHO_NAME = "27999_osaka-shi_city_2025_ortho_1_op"
+
+
+def safe_extract(archive: Path, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    root = destination.resolve()
+    with zipfile.ZipFile(archive) as source:
+        for member in source.infolist():
+            target = (destination / member.filename).resolve()
+            if target != root and root not in target.parents:
+                raise RuntimeError(f"ZIP内の不正なパスです: {member.filename}")
+            source.extract(member, destination)
+
+
+def find_directory(root: Path, predicate) -> Path | None:
+    for path in root.rglob("*"):
+        if path.is_dir() and predicate(path):
+            return path
+    return None
+
+
+def move_to_expected(source: Path, expected: Path) -> None:
+    if expected.is_dir():
+        return
+    expected.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() == expected.resolve():
+        return
+    shutil.move(str(source), str(expected))
+
+
+def normalize_tiles() -> None:
+    expected_names = (
+        "27999_osaka-shi_city_2025_citygml_1_op_bldg_lod1",
+        "27999_osaka-shi_city_2025_citygml_1_op_bldg_lod2",
+        "27999_osaka-shi_city_2025_citygml_1_op_bldg_lod3",
+    )
+    for name in expected_names:
+        expected = THREE_D_TILES_DIR / name
+        if expected.is_dir():
+            continue
+        source = find_directory(
+            THREE_D_TILES_DIR,
+            lambda path, name=name: path.name == name and (path / "tileset.json").is_file(),
+        )
+        if source is None:
+            raise RuntimeError(f"3D Tilesの展開先が見つかりません: {name}")
+        move_to_expected(source, expected)
+
+
+def normalize_ortho() -> None:
+    expected = ORTHO_DIR / ORTHO_NAME
+    if expected.is_dir():
+        return
+    source = find_directory(
+        ORTHO_DIR,
+        lambda path: path.name == ORTHO_NAME and any(path.glob("*.tif")),
+    )
+    if source is None:
+        raise RuntimeError(f"オルソ画像の展開先が見つかりません: {ORTHO_NAME}")
+    move_to_expected(source, expected)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="公式ZIPを変換ツール用に展開する")
+    parser.add_argument(
+        "--tiles-zip",
+        type=Path,
+        default=DATA_ORIGINAL / "27999_osaka-shi_city_2025_3dtiles_mvt_1_op.zip",
+    )
+    parser.add_argument(
+        "--ortho-zip",
+        type=Path,
+        default=DATA_ORIGINAL / "27999_osaka-shi_city_2025_ortho_1_op.zip",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    for archive in (args.tiles_zip, args.ortho_zip):
+        if not archive.is_file():
+            print(f"ZIPがありません: {archive}", file=sys.stderr)
+            return 2
+
+    if not (THREE_D_TILES_DIR / "27999_osaka-shi_city_2025_citygml_1_op_bldg_lod3").is_dir():
+        print(f"展開: {args.tiles_zip}")
+        safe_extract(args.tiles_zip, THREE_D_TILES_DIR)
+    normalize_tiles()
+
+    if not (ORTHO_DIR / ORTHO_NAME).is_dir():
+        print(f"展開: {args.ortho_zip}")
+        safe_extract(args.ortho_zip, ORTHO_DIR)
+    normalize_ortho()
+    print("公式3D Tiles / オルソの展開が完了しました")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

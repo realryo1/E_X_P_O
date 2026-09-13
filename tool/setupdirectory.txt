@@ -1,0 +1,9 @@
+/
+/framework
+/shader
+/app
+/SCENE_TITLE
+/SCENE_GAME
+/SCENE_DEBUG
+/SCENE_RESULT
+/template

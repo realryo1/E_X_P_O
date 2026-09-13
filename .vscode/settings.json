@@ -1,0 +1,10 @@
+{
+    "editor.formatOnSave": false,
+    "C_Cpp.formatting": "Disabled",
+    "lldb.useNativePDBReader": true,
+    "debug.openDebug": "openOnSessionStart",
+    "debug.internalConsoleOptions": "openOnSessionStart",
+    "debug.toolBarLocation": "docked",
+    "cmake.configureOnOpen": false,
+    "cmake.showConfigureWithCmakePresets": false
+}

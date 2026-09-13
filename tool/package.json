@@ -1,0 +1,12 @@
+{
+  "name": "expogame-3dtiles-tools",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "@gltf-transform/core": "4.5.0",
+    "@gltf-transform/extensions": "4.5.0",
+    "@gltf-transform/functions": "4.5.0",
+    "draco3dgltf": "1.5.7",
+    "meshoptimizer": "0.23.0"
+  }
+}

@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="framework\camera.cpp">
+      <Filter>フレームワーク\3D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\anim_sprite3d.cpp">
+      <Filter>フレームワーク\3D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\billboard.cpp">
+      <Filter>フレームワーク\3D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\split_bilboard.cpp">
+      <Filter>フレームワーク\3D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\ClickFont.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\font.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\fade.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\glb_model.cpp">
+      <Filter>フレームワーク\3D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\main.cpp">
+      <Filter>フレームワーク\etc</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\model.cpp">
+      <Filter>フレームワーク\3D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\movie.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\sound.cpp">
+      <Filter>フレームワーク\etc</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\sprite2d.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\texture.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="shader\renderer.cpp">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debug_toon_scene.cpp">
+      <Filter>デバッグ</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debug_lighting_scene.cpp">
+      <Filter>デバッグ</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debug_model_scene.cpp">
+      <Filter>デバッグ</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debugcamera.cpp">
+      <Filter>デバッグ</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\debug_ostream.cpp">
+      <Filter>フレームワーク\etc</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\MultiLineClickFont.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\MultiLineDrawFont.cpp">
+      <Filter>フレームワーク\2D</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\imgui\imgui.cpp">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\imgui\imgui_draw.cpp">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\imgui\imgui_impl_dx11.cpp">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\imgui\imgui_impl_win32.cpp">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\imgui\imgui_tables.cpp">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\imgui\imgui_widgets.cpp">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_TITLE\title.cpp">
+      <Filter>SCENE_TITLE</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_RESULT\result.cpp">
+      <Filter>SCENE_RESULT</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\game.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\ui.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\field.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\player.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\playercamera.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\collision.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\sunlight.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_GAME\course.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
+    <ClCompile Include="app\scene.cpp">
+      <Filter>フレームワーク\etc</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\mouse.cpp">
+      <Filter>フレームワーク\input</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\input_manager.cpp">
+      <Filter>フレームワーク\input</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\input_monitor_console.cpp">
+      <Filter>フレームワーク\input</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\gamepad.cpp">
+      <Filter>フレームワーク\input</Filter>
+    </ClCompile>
+    <ClCompile Include="framework\keyboard.cpp">
+      <Filter>フレームワーク\input</Filter>
+    </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debugscene.cpp">
+      <Filter>デバッグ</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="framework\camera.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\anim_sprite3d.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\billboard.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\split_bilboard.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\ClickFont.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\component.h">
+      <Filter>フレームワーク\etc</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\DirectXTex.h">
+      <Filter>フレームワーク\directx</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\fade.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\font.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\glb_model.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\HoleSprite.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\main.h">
+      <Filter>フレームワーク\etc</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\model.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\movie.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\sound.h">
+      <Filter>フレームワーク\etc</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\sprite2d.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\sprite3d.h">
+      <Filter>フレームワーク\3D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\stb_truetype.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\texture.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="app\define.h">
+      <Filter>フレームワーク\etc</Filter>
+    </ClInclude>
+    <ClInclude Include="shader\renderer.h">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </ClInclude>
+    <ClInclude Include="shader\shadermanager.h">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debug_toon_scene.h">
+      <Filter>デバッグ</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debug_lighting_scene.h">
+      <Filter>デバッグ</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debug_model_scene.h">
+      <Filter>デバッグ</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debugcamera.h">
+      <Filter>デバッグ</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\debug_ostream.h">
+      <Filter>フレームワーク\etc</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\MultiLineClickFont.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\MultiLineDrawFont.h">
+      <Filter>フレームワーク\2D</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imconfig.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imgui_impl_dx11.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imgui_impl_win32.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imgui_internal.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imstb_rectpack.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imstb_textedit.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imstb_truetype.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\imgui\imgui.h">
+      <Filter>フレームワーク\imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_TITLE\title.h">
+      <Filter>SCENE_TITLE</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_RESULT\result.h">
+      <Filter>SCENE_RESULT</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\game.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\ui.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\field.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\player.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\playercamera.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\collision.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\sunlight.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\course.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="app\scene.h">
+      <Filter>フレームワーク\etc</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\mouse.h">
+      <Filter>フレームワーク\input</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\input_monitor_console.h">
+      <Filter>フレームワーク\input</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\input_manager.h">
+      <Filter>フレームワーク\input</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\keyboard.h">
+      <Filter>フレームワーク\input</Filter>
+    </ClInclude>
+    <ClInclude Include="framework\gamepad.h">
+      <Filter>フレームワーク\input</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debugscene.h">
+      <Filter>デバッグ</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="フレームワーク">
+      <UniqueIdentifier>{fbb70d38-84fd-4c58-a0b9-defcb8e46549}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\3D">
+      <UniqueIdentifier>{696070f9-df10-40dd-8875-6859c8103852}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\2D">
+      <UniqueIdentifier>{6281010b-b1dd-4e91-b845-59a2d3d17971}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\etc">
+      <UniqueIdentifier>{afb7a01d-cb38-4c26-868e-c32b3d330e91}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\directx">
+      <UniqueIdentifier>{7603caef-937e-4836-8423-b59f1d0ba38f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="マークダウン">
+      <UniqueIdentifier>{2314d523-0fe6-483a-99df-52aebb2863eb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\シェーダー">
+      <UniqueIdentifier>{41661671-cd8b-4d62-8f5f-b4d337dc2e31}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="デバッグ">
+      <UniqueIdentifier>{7e4fabbe-3c88-465b-b068-446e0f159815}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\imgui">
+      <UniqueIdentifier>{9e8ef134-560e-4672-8c40-84b3777876a5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SCENE_TITLE">
+      <UniqueIdentifier>{4e94fb04-9662-4340-99f9-1c1fea704fab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SCENE_RESULT">
+      <UniqueIdentifier>{9a4b5d72-02c1-4f45-9065-7cf4a6712929}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="フレームワーク\input">
+      <UniqueIdentifier>{bac4b262-1b15-4645-bb16-9d1f3322cd89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SCENE_GAME">
+      <UniqueIdentifier>{a332fe49-7ef9-4e75-93cd-14f40959dd2f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="リソース ファイル">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="shader\Common.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\UnlitTexturePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\UnlitTextureVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\ChromaKeyPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\ChromaKeyVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\VertexDirectionalLightingPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\VertexDirectionalLightingVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\GrayscalePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\GrayscaleVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PixelDirectionalLightingVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PixelDirectionalLightingPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\RimLightPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\RimLightVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\OutlinePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\OutlineVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\ShadowMapPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\ShadowMapVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\ShadowReceivePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\ShadowReceiveVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\NormalMapShadowReceivePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\NormalMapShadowReceiveVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PhongShadowPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PhongShadowVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\shader_vertex_skinning.hlsl">
+      <Filter>フレームワーク\3D</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PBRShaderVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PBRShaderPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\BillboardShadowMapPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\BillboardShadowMapVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\CookTorranceVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\CookTorrancePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\CookTorranceSub.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\DisneyPBRVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\DisneyPBRPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\HemiSphereLightingVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\HemiSphereLightingPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\NormalMapVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\NormalMapPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PointPixelLightingVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\PointPixelLightingPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SpotLightingVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SpotLightingPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\Toon1VS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\Toon1PS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\Toon2VS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\Toon2PS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SkyboxTextureVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SkyboxTexturePS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="framework\DirectXTex.inl">
+      <Filter>フレームワーク\directx</Filter>
+    </None>
+    <None Include="markdown\nonexistent_apis.md">
+      <Filter>マークダウン</Filter>
+    </None>
+    <None Include="markdown\direct3d_viewport_resize_spec.md">
+      <Filter>マークダウン</Filter>
+    </None>
+    <None Include="markdown\shader_vertex_skinning_spec.md">
+      <Filter>マークダウン</Filter>
+    </None>
+    <None Include="markdown\anim_sprite3d_usage.md">
+      <Filter>マークダウン</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="expogame.rc">
+      <Filter>リソース ファイル</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="asset\texture\icon.ico">
+      <Filter>リソース ファイル</Filter>
+    </Image>
+  </ItemGroup>
+</Project>
