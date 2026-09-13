@@ -387,3 +387,4 @@ data_converted/
 asset/expomodel
 asset/collision/expo_*.bin
 tool/EXPOGAME_BUILD*/
+imgui.ini
