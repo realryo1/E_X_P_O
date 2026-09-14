@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import struct
 import subprocess
 import sys
@@ -36,6 +37,18 @@ LOD3_TILESET = (
     / "tileset.json"
 )
 DEFAULT_NAMES = ["null2", "チェコパビリオン"]
+OUTER_LANDMARK_NAMES = [
+    "電力館 可能性のタマゴたち",
+    "迎賓館",
+    "ウーマンズパビリオン",
+    "パナソニックグループパビリオン「ノモの国」",
+    "日本館",
+    "JAPANマルシェ",
+    "住友館",
+    "三菱未来館",
+]
+OUTER_LANDMARK_FILE = "expo_pavilion_west_outer.glb"
+RUNTIME_MODEL_SCALE = 0.2
 OUTPUT_STEM = {
     "BLUE OCEAN DOME （ブルーオーシャン・ドーム）": "blue_ocean_dome",
     "Better Co Being": "better_co_being",
@@ -289,6 +302,24 @@ def min_max_float_rows(rows: list[tuple[Any, ...]]) -> tuple[list[float], list[f
 def read_indices(gltf: dict[str, Any], bin_blob: bytes, accessor_index: int) -> list[int]:
     rows = read_accessor_values(gltf, bin_blob, accessor_index)
     return [int(row[0]) for row in rows]
+
+
+def glb_position_bounds(glb: bytes) -> tuple[list[float], list[float]]:
+    gltf, bin_blob = split_glb(glb)
+    mins = [float("inf")] * 3
+    maxs = [float("-inf")] * 3
+    for mesh in gltf.get("meshes") or []:
+        for primitive in mesh.get("primitives") or []:
+            position_accessor = (primitive.get("attributes") or {}).get("POSITION")
+            if position_accessor is None:
+                continue
+            for row in read_accessor_values(gltf, bin_blob, int(position_accessor)):
+                for axis, value in enumerate(row[:3]):
+                    mins[axis] = min(mins[axis], float(value))
+                    maxs[axis] = max(maxs[axis], float(value))
+    if not all(math.isfinite(value) for value in mins + maxs):
+        raise RuntimeError("切り出しGLBのPOSITION境界を取得できません")
+    return mins, maxs
 
 
 def batch_id_attr(attributes: dict[str, Any]) -> str | None:
@@ -742,14 +773,28 @@ def main() -> int:
         return 1
 
     notes: list[dict[str, Any]] = []
-    written: list[tuple[str, list[float], str, str, str]] = []
+    written: list[
+        tuple[str, list[float], str, str, str, list[float] | None, float]
+    ] = []
     args.output_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir = args.runtime_dir
     runtime_dir.mkdir(parents=True, exist_ok=True)
     decoded_cache: dict[Path, tuple[bytes, list[float]]] = {}
     lod2_stripped = strip_names_from_lod2(names, args.node_command)
 
+    cluster_names = [name for name in OUTER_LANDMARK_NAMES if name in found]
+    cluster_candidate = found[cluster_names[0]][0] if cluster_names else None
+    cluster_ids: list[int] = []
+    if cluster_candidate:
+        for name in cluster_names:
+            for candidate, _metadata, ids in found[name]:
+                if candidate.path == cluster_candidate[0].path:
+                    cluster_ids.extend(ids)
+        cluster_ids = unique_keep_order(cluster_ids)
+
     for name in names:
+        if name in cluster_names:
+            continue
         for match_index, (candidate, metadata, ids) in enumerate(found[name]):
             if candidate.path not in decoded_cache:
                 glb, _content_metadata = expo_model.convert_tile(
@@ -802,9 +847,78 @@ def main() -> int:
             runtime_path = runtime_dir / file_name
             runtime_path.write_bytes(output_path.read_bytes())
             runtime_rel = str(runtime_path.relative_to(PROJECT_ROOT)).replace("/", "\\")
-            written.append((runtime_rel, rtc, filter_mode, file_name, name))
+            written.append((runtime_rel, rtc, filter_mode, file_name, name, None, 0.0))
             print(f"wrote {output_path}")
             print(f"runtime {runtime_path}")
+
+    if cluster_candidate and cluster_ids:
+        candidate, metadata, _ids = cluster_candidate
+        if candidate.path not in decoded_cache:
+            glb, _content_metadata = expo_model.convert_tile(
+                candidate, args.node_command, args.keep_draco
+            )
+            rtc = expo_model.parse_rtc_center(metadata.get("rtc_center")) or [0.0, 0.0, 0.0]
+            decoded_cache[candidate.path] = (glb, rtc)
+        glb, rtc = decoded_cache[candidate.path]
+        output_path = args.output_dir / OUTER_LANDMARK_FILE
+        try:
+            with tempfile.TemporaryDirectory(prefix="expo_pav_cluster_") as temp_dir:
+                decoded = Path(temp_dir) / "decoded.glb"
+                decoded.write_bytes(glb)
+                run_batch_filter(
+                    decoded,
+                    output_path,
+                    args.node_command,
+                    keep=cluster_ids,
+                    drop_no_uv=True,
+                )
+        except (OSError, RuntimeError) as exc:
+            print(f"外周ランドマーク統合GLBの切り出しをスキップ: {exc}")
+        else:
+            runtime_path = runtime_dir / OUTER_LANDMARK_FILE
+            runtime_path.write_bytes(output_path.read_bytes())
+            mins, maxs = glb_position_bounds(output_path.read_bytes())
+            center_yup = [(mins[i] + maxs[i]) * 0.5 for i in range(3)]
+            stream_center = [
+                rtc[0] + center_yup[0],
+                rtc[1] - center_yup[2],
+                rtc[2] + center_yup[1],
+            ]
+            stream_radius = (
+                0.5
+                * math.sqrt(
+                    (maxs[0] - mins[0]) ** 2 + (maxs[2] - mins[2]) ** 2
+                )
+                * RUNTIME_MODEL_SCALE
+            )
+            runtime_rel = str(runtime_path.relative_to(PROJECT_ROOT)).replace("/", "\\")
+            written.append(
+                (
+                    runtime_rel,
+                    rtc,
+                    "node_keep_uv_cluster",
+                    OUTER_LANDMARK_FILE,
+                    "__outer_landmarks__",
+                    stream_center,
+                    stream_radius,
+                )
+            )
+            notes.append(
+                {
+                    "name": "__outer_landmarks__",
+                    "source": str(expo_model.project_path(candidate.path)),
+                    "batch_ids": cluster_ids,
+                    "names": cluster_names,
+                    "rtc_center": rtc,
+                    "stream_center": stream_center,
+                    "stream_radius": stream_radius,
+                    "reason": "filtered_cluster",
+                }
+            )
+            print(
+                f"外周ランドマーク {cluster_names} batches {cluster_ids} "
+                f"-> {OUTER_LANDMARK_FILE}"
+            )
 
     if not written:
         print("一致するバッチを切り出せませんでした")
@@ -817,12 +931,23 @@ def main() -> int:
         if entry.get("far_runtime")
     ]
     lod2_far_batches: list[tuple[str, str, int]] = []
-    for runtime_path, _rtc, _mode, _file_name, name in written:
+    for runtime_path, _rtc, _mode, _file_name, name, _stream_center, _stream_radius in written:
         for entry in lod2_stripped:
             for batch_id in (entry.get("dropped_by_name") or {}).get(name, []):
                 lod2_far_batches.append(
                     (runtime_path, entry["far_runtime"], int(batch_id))
                 )
+    cluster_runtime = next(
+        (item[0] for item in written if item[4] == "__outer_landmarks__"),
+        None,
+    )
+    if cluster_runtime:
+        for entry in lod2_stripped:
+            for name in cluster_names:
+                for batch_id in (entry.get("dropped_by_name") or {}).get(name, []):
+                    lod2_far_batches.append(
+                        (cluster_runtime, entry["far_runtime"], int(batch_id))
+                    )
 
     metadata_path = args.output_dir / "expo_pavilion.metadata.json"
     metadata = {
@@ -847,7 +972,10 @@ def main() -> int:
         first_rtc,
         "",
         first_rtc,
-        pavilions=[(path, rtc) for path, rtc, _mode, _name, _name_key in written],
+        pavilions=[
+            (path, rtc, stream_center, stream_radius)
+            for path, rtc, _mode, _name, _name_key, stream_center, stream_radius in written
+        ],
         lod2_far=lod2_far,
         lod2_far_batches=lod2_far_batches,
     )

@@ -28,6 +28,7 @@ void Input_Update(void);
 
 bool Input_IsActionDown(Input_Action action);
 bool Input_IsActionTrigger(Input_Action action);
+void Input_PlayDecideSe(void);
 
 Input_Vector2 Input_GetMoveVector(void);
 Input_Vector2 Input_GetLookVector(void);

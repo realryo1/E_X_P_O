@@ -179,6 +179,6 @@ void main(in PS_IN In, out float4 outDiffuse : SV_Target)
 	{
 		hdr *= 1.0f / peak;
 	}
-	outDiffuse.rgb = saturate(hdr);
+	outDiffuse.rgb = saturate(ApplyFog(saturate(hdr), In.WorldPosition.xyz));
 	outDiffuse.a = texColor.a * In.Diffuse.a;
 }

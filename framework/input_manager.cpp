@@ -73,7 +73,7 @@ bool Input_IsActionDown(Input_Action action)
     switch (action)
     {
     case INPUT_ACTION_DECIDE:
-        return Keyboard_IsKeyDown(KK_ENTER) || Keyboard_IsKeyDown(KK_SPACE) || Gamepad_IsButtonDown(player, GPB_A);
+        return Keyboard_IsKeyDown(KK_ENTER) || Gamepad_IsButtonDown(player, GPB_A);
     case INPUT_ACTION_CANCEL:
         return Keyboard_IsKeyDown(KK_BACK) || Gamepad_IsButtonDown(player, GPB_B);
     case INPUT_ACTION_MENU_UP:
@@ -97,6 +97,14 @@ bool Input_IsActionDown(Input_Action action)
     }
 }
 
+void Input_PlayDecideSe(void)
+{
+    if (g_pDecideSe)
+    {
+        PlaySound(g_pDecideSe, false);
+    }
+}
+
 bool Input_IsActionTrigger(Input_Action action)
 {
     const int player = GetActivePlayerIndex();
@@ -105,17 +113,17 @@ bool Input_IsActionTrigger(Input_Action action)
     switch (action)
     {
     case INPUT_ACTION_DECIDE:
-        triggered = Keyboard_IsKeyDownTrigger(KK_ENTER) || Keyboard_IsKeyDownTrigger(KK_SPACE) || Gamepad_IsButtonTrigger(player, GPB_A);
-        if (triggered && g_pDecideSe)
+        triggered = Keyboard_IsKeyDownTrigger(KK_ENTER) || Gamepad_IsButtonTrigger(player, GPB_A);
+        if (triggered)
         {
-            PlaySound(g_pDecideSe, false);
+            Input_PlayDecideSe();
         }
         return triggered;
     case INPUT_ACTION_CANCEL:
         triggered = Keyboard_IsKeyDownTrigger(KK_BACK) || Gamepad_IsButtonTrigger(player, GPB_B);
-        if (triggered && g_pDecideSe)
+        if (triggered)
         {
-            PlaySound(g_pDecideSe, false);//もどるボタンでも音だけなるように
+            Input_PlayDecideSe();
         }
         return triggered;
     case INPUT_ACTION_MENU_UP:

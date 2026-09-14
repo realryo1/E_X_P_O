@@ -40,9 +40,11 @@ static const float EXPO_RING_Y_OFFSET = -1.550f;
 static const char* EXPO_SKYBOX_PATH = "asset\\model\\basic_skybox_3d.fbx";
 static const float EXPO_SKYBOX_SCALE = 1000.0f;
 static const float EXPO_SKYBOX_PITCH = 0.0f;
-static const float EXPO_PAVILION_LOAD_RADIUS = 24.0f;
-static const float EXPO_PAVILION_UNLOAD_RADIUS = 36.0f;
-static const float EXPO_PAVILION_PREFETCH_DISTANCE = 24.0f;
+static const float EXPO_PAVILION_LOAD_RADIUS = 48.0f;
+static const float EXPO_PAVILION_UNLOAD_RADIUS = 72.0f;
+static const float EXPO_PAVILION_PREFETCH_DISTANCE = 48.0f;
+static const float EXPO_PAVILION_LOOK_EXTRA_RADIUS = 32.0f;
+static const float EXPO_PAVILION_LOOK_COS = 0.5f;
 static const double EXPO_LOAD_BUDGET_MILLISECONDS = 6.0;
 static const double EXPO_STREAM_AFTER_PRESENT_BUDGET_MS = 3.0;
 static const double EXPO_STREAM_SKIP_DRAW_MS = 8.0;
@@ -64,6 +66,11 @@ struct ExpoTileDesc
 	bool hasWorldBounds;
 	XMFLOAT3 worldBoundsCenter;
 	float worldBoundsRadius;
+	bool hasStreamCenter;
+	double streamRtcX;
+	double streamRtcY;
+	double streamRtcZ;
+	float streamRadius;
 };
 
 struct ExpoFarBatchMap
@@ -158,6 +165,9 @@ struct ExpoDrawJob
 	Sprite3D* placeholder = nullptr;
 	Sprite3D* result = nullptr;
 	float streamPadding = 0.0f;
+	bool hasStreamCenter = false;
+	XMFLOAT3 streamPosition = { 0.0f, 0.0f, 0.0f };
+	float streamRadius = 0.0f;
 	std::vector<std::pair<int, int>> farBatchRefs;
 };
 
@@ -172,6 +182,10 @@ static XMFLOAT3 g_PreviousCameraPos = { 0.0f, 0.0f, 0.0f };
 static bool g_HasPreviousCameraPos = false;
 static XMFLOAT3 g_PrefetchPosition = { 0.0f, 0.0f, 0.0f };
 static bool g_HasPrefetchPosition = false;
+static XMFLOAT3 g_LookPrefetchPosition = { 0.0f, 0.0f, 0.0f };
+static bool g_HasLookPrefetchPosition = false;
+static float g_LookDirX = 0.0f;
+static float g_LookDirZ = 1.0f;
 
 static void ConfigureExpoShadowModel(Sprite3D* model, bool castShadow)
 {
@@ -221,16 +235,57 @@ static bool HasLoadTime(const LONGLONG deadline)
 	return GetPerformanceCounter() < deadline;
 }
 
+static bool GetCameraLookXZ(float* outX, float* outZ)
+{
+	Camera* camera = GetCamera();
+	if (!camera || !outX || !outZ)
+	{
+		return false;
+	}
+
+	const XMFLOAT3 cameraPos = camera->GetPos();
+	const XMFLOAT3 atPos = camera->GetAtPos();
+	float lookX = atPos.x - cameraPos.x;
+	float lookZ = atPos.z - cameraPos.z;
+	const float lookLength = sqrtf(lookX * lookX + lookZ * lookZ);
+	if (lookLength > 0.001f)
+	{
+		*outX = lookX / lookLength;
+		*outZ = lookZ / lookLength;
+		return true;
+	}
+
+	const float yawRad = XMConvertToRadians(PlayerCamera_GetYaw());
+	*outX = sinf(yawRad);
+	*outZ = cosf(yawRad);
+	return true;
+}
+
 static void UpdatePrefetchPosition(void)
 {
 	Camera* camera = GetCamera();
 	if (!camera)
 	{
 		g_HasPrefetchPosition = false;
+		g_HasLookPrefetchPosition = false;
 		return;
 	}
 
 	const XMFLOAT3 cameraPos = camera->GetPos();
+	if (GetCameraLookXZ(&g_LookDirX, &g_LookDirZ))
+	{
+		g_LookPrefetchPosition = {
+			cameraPos.x + g_LookDirX * EXPO_PAVILION_PREFETCH_DISTANCE,
+			cameraPos.y,
+			cameraPos.z + g_LookDirZ * EXPO_PAVILION_PREFETCH_DISTANCE
+		};
+		g_HasLookPrefetchPosition = true;
+	}
+	else
+	{
+		g_HasLookPrefetchPosition = false;
+	}
+
 	Input_Vector2 move = Input_GetMoveVector();
 	const float yawRad = XMConvertToRadians(PlayerCamera_GetYaw());
 	const float forwardX = sinf(yawRad);
@@ -260,8 +315,7 @@ static void UpdatePrefetchPosition(void)
 	}
 	else
 	{
-		g_PrefetchPosition = cameraPos;
-		g_HasPrefetchPosition = true;
+		g_HasPrefetchPosition = false;
 	}
 
 	g_PreviousCameraPos = cameraPos;
@@ -368,35 +422,55 @@ static bool ParseRtcLine(const char* line, ExpoTileDesc* outDesc)
 	}
 	outDesc->hasRegion = false;
 	outDesc->hasWorldBounds = false;
+	outDesc->hasStreamCenter = false;
+	outDesc->streamRtcX = 0.0;
+	outDesc->streamRtcY = 0.0;
+	outDesc->streamRtcZ = 0.0;
+	outDesc->streamRadius = 0.0f;
+	double numeric[13] = {};
 	const int parsed = sscanf_s(
 		values + 1,
-		"%259s %lf %lf %lf %lf %lf %lf %lf %lf %lf",
+		"%259s %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
 		outDesc->path,
 		(unsigned)_countof(outDesc->path),
-		&outDesc->rtcX,
-		&outDesc->rtcY,
-		&outDesc->rtcZ,
-		&outDesc->region[0],
-		&outDesc->region[1],
-		&outDesc->region[2],
-		&outDesc->region[3],
-		&outDesc->region[4],
-		&outDesc->region[5]);
-	if (parsed != 4 && parsed != 10)
+		&numeric[0], &numeric[1], &numeric[2], &numeric[3], &numeric[4],
+		&numeric[5], &numeric[6], &numeric[7], &numeric[8], &numeric[9],
+		&numeric[10], &numeric[11], &numeric[12]);
+	if (parsed != 4 && parsed != 8 && parsed != 10)
 	{
 		return false;
 	}
-	if (parsed == 10 &&
-		std::isfinite(outDesc->region[0]) &&
-		std::isfinite(outDesc->region[1]) &&
-		std::isfinite(outDesc->region[2]) &&
-		std::isfinite(outDesc->region[3]) &&
-		std::isfinite(outDesc->region[4]) &&
-		std::isfinite(outDesc->region[5]) &&
-		outDesc->region[0] <= outDesc->region[2] &&
-		outDesc->region[1] <= outDesc->region[3] &&
-		outDesc->region[4] <= outDesc->region[5])
+	outDesc->rtcX = numeric[0];
+	outDesc->rtcY = numeric[1];
+	outDesc->rtcZ = numeric[2];
+	if (parsed == 8)
 	{
+		outDesc->hasStreamCenter = true;
+		outDesc->streamRtcX = numeric[3];
+		outDesc->streamRtcY = numeric[4];
+		outDesc->streamRtcZ = numeric[5];
+		outDesc->streamRadius = static_cast<float>(numeric[6]);
+		return std::isfinite(outDesc->streamRtcX) &&
+			std::isfinite(outDesc->streamRtcY) &&
+			std::isfinite(outDesc->streamRtcZ) &&
+			std::isfinite(outDesc->streamRadius) &&
+			outDesc->streamRadius >= 0.0f;
+	}
+	if (parsed == 10 &&
+		std::isfinite(numeric[3]) &&
+		std::isfinite(numeric[4]) &&
+		std::isfinite(numeric[5]) &&
+		std::isfinite(numeric[6]) &&
+		std::isfinite(numeric[7]) &&
+		std::isfinite(numeric[8]) &&
+		numeric[3] <= numeric[5] &&
+		numeric[4] <= numeric[6] &&
+		numeric[7] <= numeric[8])
+	{
+		for (int i = 0; i < 6; ++i)
+		{
+			outDesc->region[i] = numeric[i + 3];
+		}
 		outDesc->hasRegion = true;
 	}
 	return true;
@@ -659,6 +733,25 @@ static XMFLOAT3 RtcToWorldPosition(
 	const XMVECTOR world = XMVector3TransformNormal(delta, ecefToEnu);
 	XMFLOAT3 position;
 	XMStoreFloat3(&position, world);
+	return position;
+}
+
+static XMFLOAT3 EcefToWorldPosition(
+	const ExpoTileSet& tileSet,
+	double ecefX,
+	double ecefY,
+	double ecefZ,
+	const XMMATRIX& ecefToEnu)
+{
+	const double unitScale = static_cast<double>(tileSet.modelScale) *
+		static_cast<double>(tileSet.glbGlobalScale);
+	const XMVECTOR delta = XMVectorSet(
+		static_cast<float>((ecefX - tileSet.refRtcX) * unitScale),
+		static_cast<float>((ecefY - tileSet.refRtcY) * unitScale),
+		static_cast<float>((ecefZ - tileSet.refRtcZ) * unitScale),
+		0.0f);
+	XMFLOAT3 position = {};
+	XMStoreFloat3(&position, XMVector3TransformNormal(delta, ecefToEnu));
 	return position;
 }
 
@@ -951,6 +1044,7 @@ static ExpoDrawJob* AddDrawJob(
 	job->label = label ? label : "";
 	job->path = path ? path : "";
 	job->position = position;
+	job->streamPosition = position;
 	job->hasRotation = (rotation != nullptr);
 	if (rotation)
 	{
@@ -1098,10 +1192,34 @@ static float GetPavilionLoadScore(const ExpoDrawJob* job)
 		return FLT_MAX;
 	}
 	const XMFLOAT3 cameraPos = camera->GetPos();
-	float score = GetDistanceSquaredXZ(job->position, cameraPos);
+	const XMFLOAT3& streamOrigin = job->hasStreamCenter
+		? job->streamPosition
+		: job->position;
+	float score = GetDistanceSquaredXZ(streamOrigin, cameraPos);
 	if (g_HasPrefetchPosition)
 	{
-		score = (std::min)(score, GetDistanceSquaredXZ(job->position, g_PrefetchPosition));
+		score = (std::min)(
+			score,
+			GetDistanceSquaredXZ(streamOrigin, g_PrefetchPosition));
+	}
+	if (g_HasLookPrefetchPosition)
+	{
+		score = (std::min)(
+			score,
+			GetDistanceSquaredXZ(streamOrigin, g_LookPrefetchPosition));
+	}
+
+	const float dx = streamOrigin.x - cameraPos.x;
+	const float dz = streamOrigin.z - cameraPos.z;
+	const float length = sqrtf(dx * dx + dz * dz);
+	if (length > 0.001f)
+	{
+		const float lookDot =
+			(dx / length) * g_LookDirX + (dz / length) * g_LookDirZ;
+		if (lookDot > 0.0f)
+		{
+			score *= (1.0f - 0.6f * lookDot);
+		}
 	}
 	return score;
 }
@@ -1132,14 +1250,42 @@ static bool IsPavilionInLoadRange(const ExpoDrawJob* job, float radius)
 	{
 		return false;
 	}
-	const float paddedRadius = radius + job->streamPadding;
+	const XMFLOAT3 cameraPos = camera->GetPos();
+	const XMFLOAT3& streamOrigin = job->hasStreamCenter
+		? job->streamPosition
+		: job->position;
+	const float paddedRadius = radius + job->streamPadding + job->streamRadius;
 	const float radiusSquared = paddedRadius * paddedRadius;
-	if (GetDistanceSquaredXZ(job->position, camera->GetPos()) <= radiusSquared)
+	if (GetDistanceSquaredXZ(streamOrigin, cameraPos) <= radiusSquared)
 	{
 		return true;
 	}
-	return g_HasPrefetchPosition &&
-		GetDistanceSquaredXZ(job->position, g_PrefetchPosition) <= radiusSquared;
+	if (g_HasPrefetchPosition &&
+		GetDistanceSquaredXZ(streamOrigin, g_PrefetchPosition) <= radiusSquared)
+	{
+		return true;
+	}
+	if (g_HasLookPrefetchPosition &&
+		GetDistanceSquaredXZ(streamOrigin, g_LookPrefetchPosition) <= radiusSquared)
+	{
+		return true;
+	}
+
+	const float lookRadius = paddedRadius + EXPO_PAVILION_LOOK_EXTRA_RADIUS;
+	if (GetDistanceSquaredXZ(streamOrigin, cameraPos) > lookRadius * lookRadius)
+	{
+		return false;
+	}
+	const float dx = streamOrigin.x - cameraPos.x;
+	const float dz = streamOrigin.z - cameraPos.z;
+	const float length = sqrtf(dx * dx + dz * dz);
+	if (length <= 0.001f)
+	{
+		return true;
+	}
+	const float lookDot =
+		(dx / length) * g_LookDirX + (dz / length) * g_LookDirZ;
+	return lookDot >= EXPO_PAVILION_LOOK_COS;
 }
 
 static void StartDrawWorker(ExpoDrawJob* job)
@@ -1265,7 +1411,7 @@ static void StartPendingImports(void)
 		return;
 	}
 
-	// パビリオンはカメラまたは移動先予測点に近い順で開始する。
+	// パビリオンはカメラ、視線先、移動先予測点に近い順で開始する。
 	while (inFlight < maxWorkers && ready < maxReadyModels)
 	{
 		ExpoDrawJob* bestJob = nullptr;
@@ -1764,6 +1910,24 @@ static void BuildDrawJobs(void)
 				g_TileSet.pavilions[i].path,
 				position,
 				&g_MeshRotation);
+			if (g_TileSet.pavilions[i].hasStreamCenter)
+			{
+				const ExpoTileDesc& desc = g_TileSet.pavilions[i];
+				job->hasStreamCenter = true;
+				job->streamPosition = EcefToWorldPosition(
+					g_TileSet,
+					desc.streamRtcX,
+					desc.streamRtcY,
+					desc.streamRtcZ,
+					g_EcefToEnu);
+				job->streamRadius = desc.streamRadius;
+			}
+			else if (strstr(job->path.c_str(), "expo_pavilion_ntt") != nullptr)
+			{
+				job->hasStreamCenter = true;
+				job->streamPosition = position;
+				job->streamRadius = 80.0f;
+			}
 			AssignFarBatchRefs(job);
 		}
 		if (g_TileSet.hasRing)
@@ -1844,11 +2008,11 @@ void Field_GetLoadStatus(char* out, size_t outSize)
 		if (stage != COLLISION_STAGE_IDLE && total > 0)
 		{
 			const unsigned pct = static_cast<unsigned>((done * 100) / total);
-			sprintf_s(col, " COL %u%%", pct);
+			sprintf_s(col, " 衝突 %u%%", pct);
 		}
 		else if (stage != COLLISION_STAGE_IDLE)
 		{
-			strcpy_s(col, " COL");
+			strcpy_s(col, " 衝突");
 		}
 	}
 
@@ -1857,7 +2021,7 @@ void Field_GetLoadStatus(char* out, size_t outSize)
 	{
 		sprintf_s(
 			failure,
-			" FAIL %s %s",
+			" 失敗 %s %s",
 			failedJob->label,
 			failedJob->failureReason.c_str());
 	}
@@ -1865,7 +2029,7 @@ void Field_GetLoadStatus(char* out, size_t outSize)
 	sprintf_s(
 		out,
 		outSize,
-		"LOADING IMPORT %d/%d IN %d READY %d%s%s",
+		"読込中 インポート %d/%d 処理中 %d 準備 %d%s%s",
 		importDone,
 		importTotal,
 		importing,
@@ -1894,28 +2058,28 @@ void Field_GetFinishedStatus(char* out, size_t outSize)
 		sprintf_s(
 			out,
 			outSize,
-			"PLATEAU EXPO / FLOOR %s / LOD2 %d/%d / FAR %d/%d / PAV %d/%d / RING %s",
-			g_ExpoFloor ? "ON" : "OFF",
+			"PLATEAU 万博 / 床 %s / LOD2 %d/%d / 遠景 %d/%d / パビリオン %d/%d / リング %s",
+			g_ExpoFloor ? "あり" : "なし",
 			g_LoadedTiles,
 			g_ExpectedTiles,
 			g_LoadedFarTiles,
 			g_ExpectedFarTiles,
 			g_LoadedPavilions,
 			g_ExpectedPavilions,
-			g_ExpoRing ? "ON" : "OFF");
+			g_ExpoRing ? "あり" : "なし");
 		return;
 	}
 	if (g_FallbackLod == 2)
 	{
-		strcpy_s(out, outSize, "PLATEAU EXPO / LOD2 TILE");
+		strcpy_s(out, outSize, "PLATEAU 万博 / LOD2 タイル");
 		return;
 	}
 	if (g_FallbackLod == 1)
 	{
-		strcpy_s(out, outSize, "PLATEAU EXPO / LOD1 TILE");
+		strcpy_s(out, outSize, "PLATEAU 万博 / LOD1 タイル");
 		return;
 	}
-	strcpy_s(out, outSize, "EXPO MODEL LOAD FAILED");
+	strcpy_s(out, outSize, "万博モデルの読込に失敗しました");
 }
 
 void Field_GetMemoryStatus(char* out, size_t outSize)
@@ -1953,7 +2117,7 @@ void Field_GetMemoryStatus(char* out, size_t outSize)
 	sprintf_s(
 		out,
 		outSize,
-		"Expo Memory WS %llu MB Private %llu MB Local %llu/%llu MB NonLocal %llu/%llu MB PAV %d PH %d IN %d GPUQ %d FAIL %d",
+		"メモリ WS %llu MB 専用 %llu MB ローカル %llu/%llu MB 非ローカル %llu/%llu MB パビリオン %d 仮 %d 処理中 %d GPU待ち %d 失敗 %d",
 		static_cast<unsigned long long>(workingSetMb),
 		static_cast<unsigned long long>(privateMb),
 		localUsage,
@@ -2074,6 +2238,7 @@ void Field_Initialize(void)
 	g_HasMeshRotation = false;
 	g_HasPreviousCameraPos = false;
 	g_HasPrefetchPosition = false;
+	g_HasLookPrefetchPosition = false;
 	g_MeshRotation = XMMatrixIdentity();
 	g_EcefToEnu = XMMatrixIdentity();
 	InitTileSetDefaults(&g_TileSet);

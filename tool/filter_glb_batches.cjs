@@ -173,7 +173,9 @@ async function main() {
       if (dropUntexturedOnly && prim.getAttribute("TEXCOORD_0")) {
         continue;
       }
-      if (dropNoUv && !prim.getAttribute("TEXCOORD_0")) {
+      // --keep では、名前付き建物の天井やモニュメントなど、
+      // UVを持たないが残すべき面がある。keep対象外だけを後段で除外する。
+      if (dropNoUv && keepIds.size === 0 && !prim.getAttribute("TEXCOORD_0")) {
         prim.dispose();
         continue;
       }

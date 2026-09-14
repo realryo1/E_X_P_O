@@ -18,7 +18,7 @@ void GameAudio_PlaySaveOk(void);
 void GameAudio_PlaySaveNg(void);
 void GameAudio_PlayWarp(void);
 void GameAudio_PlayCountdown(void);
-void GameAudio_PlayGo(void);
+void GameAudio_StopCountdown(void);
 void GameAudio_PlayBoost(void);
 void GameAudio_PlayGoal(void);
 void GameAudio_PlayRaceAbort(void);

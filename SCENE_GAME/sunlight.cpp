@@ -16,13 +16,14 @@
 using namespace DirectX;
 
 static const float SUN_FALLBACK_AZIMUTH = -111.5f;
-static const float SUN_FALLBACK_ELEVATION = 63.4f;
+static const float SUN_FALLBACK_ELEVATION = 53.1f;
 static const float SUN_AZIMUTH_DEFAULT = -170.0f;
 static const XMFLOAT3 SUN_FALLBACK_COLOR = {
 	255.0f / 255.0f,
-	232.0f / 255.0f,
-	230.0f / 255.0f
+	255.0f / 255.0f,
+	226.0f / 255.0f
 };
+static const float SUN_ELEVATION_DEFAULT = 53.1f;
 static const float SUN_DEFAULT_INTENSITY = 2.0f;
 static const float SUN_AMBIENT_SCALE_DEFAULT = 0.8f;
 static const float SUN_AMBIENT_MIN = 0.20f;
@@ -31,10 +32,20 @@ static const float SUN_METALLIC_DEFAULT = 0.0f;
 static const float SUN_SKY_YAW_OFFSET_DEFAULT = 0.0f;
 static const float SUN_SPECULAR_STRENGTH = 1.0f;
 static const float SUN_SHADOW_RADIUS_DEFAULT = 160.0f;
-static const float SUN_SHADOW_CASCADE_1_DEFAULT = 10.0f;
+static const float SUN_SHADOW_CASCADE_1_DEFAULT = 20.0f;
 static const float SUN_SHADOW_CASCADE_2_DEFAULT = 70.0f;
 static const float SUN_SHADOW_BIAS_DEFAULT = 0.0005f;
 static const float SUN_SHADOW_BRIGHTNESS_DEFAULT = 0.25f;
+static const XMFLOAT3 FOG_COLOR_DEFAULT = {
+	179.0f / 255.0f,
+	199.0f / 255.0f,
+	230.0f / 255.0f
+};
+static const float FOG_START_DEFAULT = 52.6f;
+static const float FOG_END_DEFAULT = 500.0f;
+static const float FOG_HEIGHT_MIN_DEFAULT = 0.0f;
+static const float FOG_HEIGHT_RANGE_DEFAULT = 60.0f;
+static const float FOG_DENSITY_DEFAULT = 2.01f;
 // renderer.cppのShadowMap実体と同じ解像度に合わせる。
 static const float SUN_SHADOW_MAP_SIZE = 2048.0f;
 static const float SUN_SHADOW_NEAR_PROJECTION_PADDING = 8.0f;
@@ -58,7 +69,7 @@ struct SunlightExtractedData
 static SunlightExtractedData g_ExtractedSunlight;
 static bool g_HasExtractedSunlight = false;
 static float g_Azimuth = SUN_AZIMUTH_DEFAULT;
-static float g_Elevation = SUN_FALLBACK_ELEVATION;
+static float g_Elevation = SUN_ELEVATION_DEFAULT;
 static XMFLOAT3 g_Color = SUN_FALLBACK_COLOR;
 static float g_Intensity = SUN_DEFAULT_INTENSITY;
 static float g_AmbientScale = SUN_AMBIENT_SCALE_DEFAULT;
@@ -73,6 +84,12 @@ static float g_ShadowCascadeDistances[NUM_SHADOW_CASCADES] = {
 };
 static float g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
 static float g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+static XMFLOAT3 g_FogColor = FOG_COLOR_DEFAULT;
+static float g_FogStart = FOG_START_DEFAULT;
+static float g_FogEnd = FOG_END_DEFAULT;
+static float g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
+static float g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
+static float g_FogDensity = FOG_DENSITY_DEFAULT;
 
 static float Saturate(float value)
 {
@@ -383,6 +400,10 @@ static void ApplySunlightState(void)
 	light.PointLightParam = XMFLOAT4(0.0f, g_Intensity, SUN_SPECULAR_STRENGTH, 0.0f);
 	SetLight(light);
 	SetParameter(XMFLOAT4(g_Roughness, g_Metallic, 0.0f, 0.0f));
+	SetFog(FOG_CONSTANT{
+		XMFLOAT4(g_FogColor.x, g_FogColor.y, g_FogColor.z, g_FogDensity),
+		XMFLOAT4(g_FogStart, g_FogEnd, g_FogHeightMin, g_FogHeightRange)
+	});
 
 	const float skyYaw =
 		(g_Azimuth - g_ExtractedSunlight.azimuth) +
@@ -395,7 +416,7 @@ void Sunlight_Initialize(void)
 	g_ExtractedSunlight = SunlightExtractedData();
 	g_HasExtractedSunlight = false;
 	g_Azimuth = SUN_AZIMUTH_DEFAULT;
-	g_Elevation = SUN_FALLBACK_ELEVATION;
+	g_Elevation = SUN_ELEVATION_DEFAULT;
 	g_Color = SUN_FALLBACK_COLOR;
 	g_Intensity = SUN_DEFAULT_INTENSITY;
 	g_AmbientScale = SUN_AMBIENT_SCALE_DEFAULT;
@@ -408,6 +429,12 @@ void Sunlight_Initialize(void)
 	g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
 	g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
 	g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+	g_FogColor = FOG_COLOR_DEFAULT;
+	g_FogStart = FOG_START_DEFAULT;
+	g_FogEnd = FOG_END_DEFAULT;
+	g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
+	g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
+	g_FogDensity = FOG_DENSITY_DEFAULT;
 
 	HDRImageData hdrImage;
 	ID3D11ShaderResourceView* skyTexture = nullptr;
@@ -436,8 +463,6 @@ void Sunlight_Initialize(void)
 		{
 			g_HasExtractedSunlight = true;
 			g_Azimuth = SUN_AZIMUTH_DEFAULT;
-			g_Elevation = g_ExtractedSunlight.elevation;
-			g_Color = g_ExtractedSunlight.color;
 		}
 	}
 	ApplySunlightState();
@@ -727,6 +752,17 @@ void Sunlight_DrawDebug(void)
 	changed |= ImGui::SliderFloat("Sky Yaw Offset", &g_SkyYawOffset, -180.0f, 180.0f, "%.1f");
 	changed |= ImGui::SliderFloat("Roughness", &g_Roughness, 0.04f, 1.0f, "%.2f");
 	changed |= ImGui::SliderFloat("Metallic", &g_Metallic, 0.0f, 1.0f, "%.2f");
+	changed |= ImGui::ColorEdit3("Fog Color", &g_FogColor.x);
+	changed |= ImGui::SliderFloat("Fog Start", &g_FogStart, 0.0f, 1000.0f, "%.1f m");
+	changed |= ImGui::SliderFloat("Fog End", &g_FogEnd, 1.0f, 2000.0f, "%.1f m");
+	changed |= ImGui::SliderFloat("Fog Height Min", &g_FogHeightMin, -100.0f, 200.0f, "%.1f m");
+	changed |= ImGui::SliderFloat("Fog Height Range", &g_FogHeightRange, 1.0f, 300.0f, "%.1f m");
+	changed |= ImGui::SliderFloat("Fog Density", &g_FogDensity, 0.0f, 4.0f, "%.2f");
+	if (g_FogEnd <= g_FogStart)
+	{
+		g_FogEnd = g_FogStart + 0.1f;
+		changed = true;
+	}
 	changed |= ImGui::SliderFloat(
 		"Shadow Cascade 1 End",
 		&g_ShadowCascadeDistances[0],
@@ -777,8 +813,8 @@ void Sunlight_DrawDebug(void)
 	if (ImGui::Button("Reset"))
 	{
 		g_Azimuth = SUN_AZIMUTH_DEFAULT;
-		g_Elevation = g_ExtractedSunlight.elevation;
-		g_Color = g_ExtractedSunlight.color;
+		g_Elevation = SUN_ELEVATION_DEFAULT;
+		g_Color = SUN_FALLBACK_COLOR;
 		g_Intensity = SUN_DEFAULT_INTENSITY;
 		g_AmbientScale = SUN_AMBIENT_SCALE_DEFAULT;
 		g_SkyYawOffset = SUN_SKY_YAW_OFFSET_DEFAULT;
@@ -790,6 +826,12 @@ void Sunlight_DrawDebug(void)
 		g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
 		g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
 		g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+		g_FogColor = FOG_COLOR_DEFAULT;
+		g_FogStart = FOG_START_DEFAULT;
+		g_FogEnd = FOG_END_DEFAULT;
+		g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
+		g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
+		g_FogDensity = FOG_DENSITY_DEFAULT;
 		changed = true;
 	}
 	ImGui::End();

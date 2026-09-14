@@ -52,7 +52,7 @@ flowchart TD
    - `Field_DrawLocalShadow` と `Player_DrawLocalShadow`: 床、パンチ済みLOD2、大屋根リング、空飛ぶタクシーをカスケードごとに `S_SHADOW_MAP` で深度バッファへ描画する。遠景LOD2は画面上の影への寄与が小さく、プリミティブ分割による `DrawIndexed` が増えるため影パスでは省略する。LOD3パビリオンとプレースホルダーは影を受けるが投影しない。会場GLBは近傍XZセルでカリングし、タクシーはメッシュ全体を投影する。
    - `Sunlight_EndLocalShadow`: 通常の画面レンダーターゲットへ復帰し、カリングを `CULLSTATE_NONE` に戻す。3スライスの深度テクスチャ配列をピクセルシェーダーの `t1`、サンプラーを `s1` にバインド。
 5. **メイン描画パス**:
-   - `Field_Draw`: スカイドーム、床、LOD2タイル、遠景LOD2、LOD3パビリオン、プレースホルダー、リングの順で描画する。各モデルは `S_PBR` でglTF PBRマテリアルを処理する。
+   - `Field_Draw`: スカイドーム、床、LOD2タイル、遠景LOD2、LOD3パビリオン、プレースホルダー、リングの順で描画する。各モデルは `S_PBR` でglTF PBRマテリアルを処理し、最終色へ距離＋高度フォグを適用する。
    - `Player_Draw`: 空飛ぶタクシー（`flytaxi.glb`）を描画。
 6. **2D・UI・デバッグパス**:
    - `Ui_ResetMaterial`: マテリアル色を白（ディフューズ 1.0）へ戻す。
@@ -71,10 +71,10 @@ flowchart TD
 | **大屋根リング** | `asset/expomodel/expo_ring.glb` | `S_PBR` | **○** (近傍セル) | **○** | 公式 appearance JPEG 22枚 + 単色 4枚 | Y: `-1.550` (`EXPO_RING_Y_OFFSET`) | 約90.6万ポリゴン。XZセル分割で影パスをカリング |
 | **LOD2タイル** | `asset/expomodel/expo_tile_lod2.glb` | `S_PBR` | **○** (近傍セル) | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | パンチ済みタイル4枚 |
 | **未パンチLOD2遠景** | `asset/expomodel/expo_tile_far.glb` | `S_PBR` | ×（影パス省略） | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | LOD3常駐時にバッチ単位で排他非表示。メインパスはマテリアル結合＋バッチ範囲の `DrawIndexed` 結合 |
-| **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 24、破棄 36）。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理 |
+| **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 48、破棄 72、視線方向は+32）。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理 |
 | **プレースホルダー** | `asset/model/cube.fbx` | `S_PBR` | × | **○** | 単色マテリアル | 各建物の配置座標 | LOD3 の GPU 化進行中に表示。影はLOD2を投影元とする |
 | **プレイヤー機体** | `asset/model/flytaxi.glb` | `S_PBR` | **○** | **○** | 組み込みテクスチャ | ホバー移動座標 | 表示長辺約 0.8 にスケール |
-| **スカイドーム** | `asset/model/basic_skybox_3d.fbx` | `S_SKYBOX` | × | × | `asset/texture/pizzo_pernice_puresky_4k.hdr` をReinhard変換した `R8G8B8A8_UNORM` | スケール 1000、Pitch 0°、カメラ位置追従 | ワールド方向から正距円筒UVを計算し、太陽方位に追従して Yaw 回転 |
+| **スカイドーム** | `asset/model/basic_skybox_3d.fbx` | `S_SKYBOX` | × | × | `asset/texture/pizzo_pernice_puresky_4k.hdr` をReinhard変換した `R8G8B8A8_UNORM` | スケール 1000、Pitch 0°、カメラ位置追従 | ワールド方向から正距円筒UVを計算し、太陽方位に追従して Yaw 回転。フォグ対象外 |
 
 ---
 
@@ -328,14 +328,20 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 | 項目名 | 変数 | 調整範囲 | 起動既定値 | 説明 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Azimuth** | `g_Azimuth` | -180.0° ～ 180.0° | `-170.0°` | 太陽の方位角。スカイドームのヨーと連動。HDR抽出方位はスカイドーム回転の基準として保持 |
-| **Elevation** | `g_Elevation` | -10.0° ～ 90.0° | HDR抽出値 | 太陽の仰角。連動環境光の明るさに反映 |
-| **Color** | `g_Color` | RGB (0～1) | HDR抽出値 | 太陽の直接光色（HDR太陽成分の平均色） |
+| **Elevation** | `g_Elevation` | -10.0° ～ 90.0° | `53.1°` | 太陽の仰角。連動環境光の明るさに反映 |
+| **Color** | `g_Color` | RGB (0～1) | `{1.000, 1.000, 0.886}` | 太陽の直接光色 |
 | **Intensity** | `g_Intensity` | 0.00 ～ 20.00 | `2.000` | 直接光の照射強度 |
 | **Ambient Scale** | `g_AmbientScale` | 0.000 ～ 4.000 | `0.800` | 連動環境光の全体乗数。PSは 1 でクリップしない |
 | **Sky Yaw Offset** | `g_SkyYawOffset` | -180.0° ～ 180.0° | `0.0°` | スカイドームと太陽光の位相ズレ微調整 |
 | **Roughness** | `g_Roughness` | 0.04 ～ 1.00 | `0.81` | PBR マテリアルの基本粗さ |
 | **Metallic** | `g_Metallic` | 0.00 ～ 1.00 | `0.00` | PBR マテリアルの基本金属度（非金属ベース） |
-| **Shadow Cascade 1 End** | `g_ShadowCascadeDistances[0]` | 2.0 ～ 40.0 | `10.0` | 第1カスケードの終端距離。近距離ほど高精度 |
+| **Fog Color** | `g_FogColor` | RGB (0～1) | `{0.702, 0.780, 0.902}` | 距離フォグの色 |
+| **Fog Start** | `g_FogStart` | 0.0 ～ 1000.0 m | `52.6 m` | フォグが始まる距離 |
+| **Fog End** | `g_FogEnd` | 1.0 ～ 2000.0 m | `500.0 m` | フォグが最大になる距離 |
+| **Fog Height Min** | `g_FogHeightMin` | -100.0 ～ 200.0 m | `0.0 m` | 高度フォグの基準高度 |
+| **Fog Height Range** | `g_FogHeightRange` | 1.0 ～ 300.0 m | `60.0 m` | 高度によるフォグ減衰範囲 |
+| **Fog Density** | `g_FogDensity` | 0.00 ～ 4.00 | `2.01` | フォグの濃さ |
+| **Shadow Cascade 1 End** | `g_ShadowCascadeDistances[0]` | 2.0 ～ 40.0 | `20.0` | 第1カスケードの終端距離。近距離ほど高精度 |
 | **Shadow Cascade 2 End** | `g_ShadowCascadeDistances[1]` | 10.0 ～ 240.0 | `70.0` | 第2カスケードの終端距離 |
 | **Shadow Cascade 3 End (Draw Distance)** | `g_ShadowRadius` | 16.0 ～ 320.0 | `160.0` | 第3カスケードの終端距離。これより遠い場所は影なし |
 | **Shadow Bias** | `g_ShadowBias` | 0.0005 ～ 0.0200 | `0.0005` | シャドウアクネ防止用深度バイアス |
@@ -358,10 +364,10 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 | [`framework/main.cpp`](../framework/main.cpp) | `Present` 後の `PumpAfterPresent`、Debug のフレーム計測ログ |
 | [`framework/sprite3d.h`](../framework/sprite3d.h) | `SetCastShadow` / `SetReceiveShadow` フラグ管理、シャドウパス分岐 |
 | [`shader/PBRShaderVS.hlsl`](../shader/PBRShaderVS.hlsl) | `Parameter.w` に応じたライト空間座標計算 |
-| [`shader/PBRShaderPS.hlsl`](../shader/PBRShaderPS.hlsl) | GGX 反射計算、直接光への影乗算、環境光との加算合成。床とリングで式は共通 |
+| [`shader/PBRShaderPS.hlsl`](../shader/PBRShaderPS.hlsl) | GGX 反射計算、直接光への影乗算、環境光との加算合成、距離＋高度フォグ。床とリングで式は共通 |
 | [`shader/SkyboxTextureVS.hlsl`](../shader/SkyboxTextureVS.hlsl) / [`shader/SkyboxTexturePS.hlsl`](../shader/SkyboxTexturePS.hlsl) | スカイドーム専用。ワールド方向から正距円筒UVを計算してHDR表示テクスチャをサンプル |
-| [`shader/Common.hlsl`](../shader/Common.hlsl) | `CalcShadow`（3×3 PCF、深度バイアス、ボーダー処理） |
-| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | `BeginShadowMap`, `EndShadowMap`, `SetShadowMatrix`, `SetParameterW`, 定数バッファ管理 |
+| [`shader/Common.hlsl`](../shader/Common.hlsl) | `CalcShadow`（3×3 PCF、深度バイアス、ボーダー処理）、`ApplyFog`（距離＋高度フォグ） |
+| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | `BeginShadowMap`, `EndShadowMap`, `SetShadowMatrix`, `SetParameterW`, `SetFog`、定数バッファ管理 |
 | [`framework/texture.h`](../framework/texture.h) / [`.cpp`](../framework/texture.cpp) | DirectXTexのHDR読み込み、解析用float画素の提供、Reinhard表示用SRV生成 |
 | [`tool/prepare_expo_floor.py`](../tool/prepare_expo_floor.py) | オルソ床 GLB 生成。法線は ECEF 三角形 |
 | [`tool/expo_glb_util.py`](../tool/expo_glb_util.py) | `bake_ecef_triangle_normals_gltf` / `rewrite_glb_normals_from_triangles` |
@@ -372,7 +378,5 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 
 1. **IBL（Image-Based Lighting）環境マップ反射**:
    スカイドームテクスチャまたはキューブマップから拡散反射（ディフューズ放射照度）と鏡面反射（スペキュララフネス）をサンプリングし、金属表面やガラス面への周囲映り込みを表現する。
-2. **大気フォグ（Distance Fog / Height Fog）**:
-   遠景パビリオンや地平線境界の唐突な消失感を和らげるため、カメラ距離および高度に応じたフォグを導入する。
-3. **昼夜サイクル**:
+2. **昼夜サイクル**:
    太陽の方位・仰角を時間経過で自動更新し、朝焼け・昼・夕焼け・夜間のライト遷移を実装する。

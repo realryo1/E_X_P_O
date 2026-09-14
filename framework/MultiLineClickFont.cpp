@@ -34,6 +34,9 @@ void MultiLineClickFont::Draw()
 	RebuildLayout();
 
 const XMFLOAT2 originalPos = GetPos();
+const float lineHeight = m_FontSize * m_LineSpacing;
+const float startY = originalPos.y -
+	(m_Lines.empty() ? 0.0f : static_cast<float>(m_Lines.size() - 1) * lineHeight * 0.5f);
 
 for (size_t i = 0; i < m_Lines.size(); ++i)
 {
@@ -46,7 +49,7 @@ continue;
 SetColor(static_cast<int>(i) == m_HoverLineIndex
 	? m_HoverColorEx
 	: m_NormalColorEx);
-SetPos({ originalPos.x, originalPos.y + static_cast<float>(i) * m_FontSize * m_LineSpacing });
+SetPos({ originalPos.x, startY + static_cast<float>(i) * lineHeight });
 DrawFont::SetText(line);
 DrawFont::Draw();
 }
@@ -75,6 +78,15 @@ m_IsClickEx = (pressedThisFrame && m_IsHoverEx);
 m_ClickedLineIndex = m_IsClickEx ? hoverLineIndex : -1;
 }
 
+void MultiLineClickFont::ClearClick()
+{
+	Mouse_State ms{};
+	Mouse_GetState(&ms);
+	m_WasLeftDownEx = ms.leftButton;
+	m_IsClickEx = false;
+	m_ClickedLineIndex = -1;
+}
+
 void MultiLineClickFont::SetText(const std::string& text)
 {
 m_SourceText = text;
@@ -96,12 +108,14 @@ m_LineRects.reserve(m_Lines.size());
 
 const XMFLOAT2 basePos = GetPos();
 const float lineHeight = m_FontSize * m_LineSpacing;
+const float startY = basePos.y -
+	(m_Lines.empty() ? 0.0f : static_cast<float>(m_Lines.size() - 1) * lineHeight * 0.5f);
 
 for (size_t i = 0; i < m_Lines.size(); ++i)
 {
 const int codePointCount = CountUtf8CodePoints(m_Lines[i]);
 const float width = static_cast<float>(codePointCount) * m_FontSize * kFontHitWidthScale;
-const float centerY = basePos.y + static_cast<float>(i) * lineHeight;
+const float centerY = startY + static_cast<float>(i) * lineHeight;
 
 FontLineRect rect{};
 if (GetAlignment() == TA_MIDDLE) {

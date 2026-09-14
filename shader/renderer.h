@@ -70,6 +70,14 @@ struct LIGHT
 	XMFLOAT4	GroundNormal; // 地面法線
 };
 
+// 距離・高度フォグの定数。
+// Color.w はフォグ密度、Param は start/end/heightMin/heightRange。
+struct FOG_CONSTANT
+{
+	XMFLOAT4 Color;
+	XMFLOAT4 Param;
+};
+
 // 近距離ほど高密度にサンプリングするカスケード数。
 #define NUM_SHADOW_CASCADES 3
 
@@ -142,6 +150,7 @@ void SetViewMatrix(XMMATRIX ViewMatrix );
 void SetProjectionMatrix(XMMATRIX ProjectionMatrix );
 
 void SetCameraPosition(XMFLOAT3 CameraPosition);
+void SetFog(FOG_CONSTANT Fog);
 
 void SetParameter(XMFLOAT4 Parameter);
 XMFLOAT4 GetParameter(void);

@@ -45,7 +45,7 @@ void Font_InitializeGlobalData()
 	}
 
 	FILE* f = nullptr;
-	fopen_s(&f, "asset/font/KaiseiDecol-Medium.ttf", "rb");
+	fopen_s(&f, "asset/font/ZenKakuGothicNew-Medium.ttf", "rb");
 	if (!f) {
 		return;
 	}

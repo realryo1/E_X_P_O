@@ -58,16 +58,16 @@ void Ui_Initialize(void)
 		{ SCREEN_X / 2.0f, SCREEN_Y - 90.0f },
 		22.0f,
 		0.0f,
-		{ 0.8f, 0.9f, 0.6f, 1.0f },
-		"LOADING 0/0"
+		{ 0.9f, 0.5f, 0.6f, 1.0f },
+		"読込中 0/0"
 	);
 
 	g_pMemoryStatusText = new DrawFont(
 		{ SCREEN_X / 2.0f, SCREEN_Y - 50.0f },
 		16.0f,
 		0.0f,
-		{ 0.7f, 0.8f, 0.9f, 1.0f },
-		"Expo Memory"
+		{ 0.1f, 0.6f, 0.9f, 1.0f },
+		"メモリ"
 	);
 
 	ApplyLoadStatus();

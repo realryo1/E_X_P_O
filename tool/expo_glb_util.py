@@ -60,7 +60,10 @@ def write_field_manifest(
     floor_rtc: list[float],
     ring_path: str,
     ring_rtc: list[float],
-    pavilions: list[tuple[str, list[float]]] | None = None,
+    pavilions: list[
+        tuple[str, list[float]]
+        | tuple[str, list[float], list[float] | None, float]
+    ] | None = None,
     lod2_far: list[tuple[str, list[float]]] | None = None,
     lod2_far_batches: list[tuple[str, str, int]] | None = None,
 ) -> None:
@@ -94,7 +97,21 @@ def write_field_manifest(
     if ring_path:
         existing_ring = _rtc_parts("ring", ring_path, ring_rtc)
     if pavilions is not None:
-        existing_pavilions = [_rtc_parts("pavilion", path, rtc) for path, rtc in pavilions]
+        existing_pavilions = []
+        for item in pavilions:
+            path, rtc = item[0], item[1]
+            parts = _rtc_parts("pavilion", path, rtc)
+            if len(item) >= 4 and item[2] is not None and item[3] > 0.0:
+                stream_rtc = item[2]
+                parts.extend(
+                    [
+                        f"{stream_rtc[0]:.15f}",
+                        f"{stream_rtc[1]:.15f}",
+                        f"{stream_rtc[2]:.15f}",
+                        f"{item[3]:.6f}",
+                    ]
+                )
+            existing_pavilions.append(parts)
     if lod2_far is not None:
         existing_lod2_far = [_rtc_parts("lod2far", path, rtc) for path, rtc in lod2_far]
     if lod2_far_batches is not None:

@@ -17,30 +17,25 @@
 モード切替の本体は `SCENE_GAME/course.cpp` の `CourseMode`（`FreeFlight` / `CourseCreate` / `RaceCountdown` / `RaceRunning` / `RaceGoal`）である。
 `sunlight.cpp` / `field.cpp` / `ui.cpp` は描画・ロード表示専用で、BGM の切替点にはならない。
 
-会場散策（フリー飛行） — `asset/sound/bgm/explore.mp3`。元: `軽井沢の野鳥たち2.mp3`。`GameAudio_Initialize` で開始し、レース開始やシーン終了で止める。ループ。カウントダウン中は音を鳴らさない。コース作成と同じ音源。
+会場散策／コース作成 — `asset/sound/bgm/explore.mp3`。元: `軽井沢の野鳥たち2.mp3`。`GameAudio_Initialize` で開始し、レース開始やシーン終了で止める。ループ。コース作成へ入っても同じ曲を継続する。
 レース本編 — `asset/sound/bgm/race.mp3`。元: `Thrilling_Race.mp3`。`RaceCountdown` から `RaceRunning` へ変わったとき（3秒経過）に開始し、ゴール・中断・フリー飛行復帰で止める。
 ゴール／リザルト — `asset/sound/bgm/goal.mp3`。元: `リザルト.mp3`。`EnterGoal` で開始し、`ReturnToFreeFlight` または `ABORT RACE` で止める。
 ゲーム内メニュー — `asset/sound/bgm/menu.mp3`。元音源なし。`SetMenuOpen(true)` で開始し、閉じるとモードに応じた曲へ戻す。
-コース作成 — `asset/sound/bgm/course_create.mp3`。元: `軽井沢の野鳥たち2.mp3`。会場散策と同じ音源。`StartCourseCreate` で開始し、保存成功または破棄の `ReturnToFreeFlight` で止める。
 
 ## SE（操作・UI）
 
-メニュー開く — `asset/sound/se/menu_open.mp3`。元: `決定ボタンを押す33.mp3`。メニュー閉じると同じ音源。`SetMenuOpen(true)`。
-メニュー閉じる — `asset/sound/se/menu_close.mp3`。元: `決定ボタンを押す33.mp3`。メニュー開くと同じ音源。`SetMenuOpen(false)`。
-カーソル移動 — `asset/sound/se/cursor.mp3`。元: `決定ボタンを押す38.mp3`。コース切替と同じ音源。`MoveMenuCursor`、およびクリック行変更。
-コース切替 — `asset/sound/se/course_switch.mp3`。元: `決定ボタンを押す38.mp3`。カーソル移動と同じ音源。`SelectCourse`。コースが空のときは鳴らない。
-決定（メニュー項目実行） — `asset/sound/se/kettei.mp3`。元: 場面展開05。既存ファイル。`InputManager` の `INPUT_ACTION_DECIDE`。ゲーム側では重ねない。
-無効操作 — `asset/sound/se/invalid.mp3`。元: `キャンセル9.mp3`。コース点の取消と同じ音源。レース開始なのに点数 2 未満、または編集なのに選択コースがないとき。
+メニュー開閉 — `asset/sound/se/menu_open.mp3`。元: `決定ボタンを押す33.mp3`。`SetMenuOpen(true)` / `SetMenuOpen(false)`。
+カーソル移動 — `asset/sound/se/cursor.mp3`。元: `決定ボタンを押す38.mp3`。`MoveMenuCursor`。クリック決定は `kettei.mp3`。
+決定（メニュー項目実行） — `asset/sound/se/kettei.mp3`。元: 場面展開05。既存ファイル。`InputManager` の `INPUT_ACTION_DECIDE`（Enter / パッドA）と、メニュー行のクリック決定（`Input_PlayDecideSe`）。ゲーム側では重ねない。
+無効操作／点の取消 — `asset/sound/se/invalid.mp3`。元: `キャンセル9.mp3`。レース開始なのに点数 2 未満のとき、作成中 `KK_U`、およびメニューの点の取消。
 コース点の追加 — `asset/sound/se/point_add.mp3`。元: `カーソル移動3.mp3`。`AddCoursePoint`（作成中 `KK_P`）。
-コース点の取消 — `asset/sound/se/point_undo.mp3`。元: `キャンセル9.mp3`。無効操作と同じ音源。作成中 `KK_U`、およびメニュー `UNDO LAST POINT`。
 コース保存成功 — `asset/sound/se/save_ok.mp3`。元: `メニューを開く1.mp3`。`SaveWorkingCourse` 成功後。
 コース保存失敗 — `asset/sound/se/save_ng.mp3`。元: `キャンセル3.mp3`。`SaveWorkingCourse` 失敗時。
 
 ## SE（レース）
 
 レース開始ワープ — `asset/sound/se/warp.mp3`。元音源なし。`StartRace` の `Player_WarpTo`。
-カウントダウン数字 — `asset/sound/se/countdown.mp3`。元: `カウントダウン電子音.mp3`。スタート（GO）と同じ音源。`3` / `2` / `1` が切り替わる瞬間。`Course_Update` の `RaceCountdown` で一度だけ。
-スタート（GO） — `asset/sound/se/go.mp3`。元: `カウントダウン電子音.mp3`。カウントダウン数字と同じ音源。`g_Mode = RaceRunning` になった瞬間。
+カウントダウン（3 / 2 / 1 / GO） — `asset/sound/se/countdown.mp3`。元: `カウントダウン電子音.mp3`。4カウントが1ファイルに入っている。`StartRace` で一度だけ再生する。レース中断時は止める。
 リング通過（ブースト） — `asset/sound/se/boost.mp3`。元: `決定ボタンを押す20.mp3`。`CrossedGate` 成功後の `Player_ActivateDash`。
 ゴール — `asset/sound/se/goal.mp3`。元: `ラッパのファンファーレ.mp3`（元seではゴール確定）。`EnterGoal`。
 ゴール確定（フリー飛行へ） — `asset/sound/se/kettei.mp3`。元: 場面展開05。既存決定 SE。`RaceGoal` 中の `INPUT_ACTION_DECIDE`。
@@ -55,8 +50,8 @@
 
 ## 実装時の置き場所
 
-散策／レース／ゴール／メニュー／作成 BGM の切替は `course.cpp` と `gameaudio.cpp`。
-メニュー開閉・カーソルは `SetMenuOpen`、`MoveMenuCursor`、`SelectCourse`。
+散策／レース／ゴール／メニュー BGM の切替は `course.cpp` と `gameaudio.cpp`。コース作成は散策と同じ `explore.mp3` を継続する。
+メニュー開閉・カーソルは `SetMenuOpen`、`MoveMenuCursor`、コース一覧ページ。
 作成の P / U は `Course_Update` の `CourseCreate` 分岐と `AddCoursePoint`。
 エンジンループと衝突は `Player_Update`。
 

@@ -59,4 +59,4 @@ void Sample_Finalize()
 - 改行は想定していません。複数行は MultiLineDrawFont を使用してください。
 - 座標は SCREEN_X/SCREEN_Y 基準で指定してください。
 - SetColor はアトラステクスチャ更新を伴うため、毎フレーム連打は避けてください。
-- フォント実体は `asset/font/KaiseiDecol-Medium.ttf`。`Font_InitializeGlobalData()` が事前に必要です。
+- フォント実体は `asset/font/ZenKakuGothicNew-Medium.ttf`。`Font_InitializeGlobalData()` が事前に必要です。

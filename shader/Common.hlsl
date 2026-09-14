@@ -104,6 +104,31 @@ cbuffer ShadowBuffer : register(b8)
 	float4 CascadeTexelSize;
 };
 
+// 距離・高度フォグ。
+// FogColor.a は密度、FogParam は start/end/heightMin/heightRange。
+cbuffer FogBuffer : register(b11)
+{
+	float4 FogColor;
+	float4 FogParam;
+};
+
+float3 ApplyFog(float3 sceneColor, float3 worldPosition)
+{
+	const float HEIGHT_WEIGHT = 0.65f;
+	float distanceToCamera = distance(worldPosition, CameraPosition.xyz);
+	float distanceRange = max(FogParam.y - FogParam.x, 0.001f);
+	float distanceFactor = saturate(
+		(distanceToCamera - FogParam.x) / distanceRange);
+	float heightRange = max(FogParam.w, 0.001f);
+	float heightFactor = saturate(
+		1.0f - (worldPosition.y - FogParam.z) / heightRange);
+	float fogAmount = saturate(
+		distanceFactor *
+		lerp(1.0f, heightFactor, HEIGHT_WEIGHT) *
+		max(FogColor.a, 0.0f));
+	return lerp(sceneColor, FogColor.rgb, fogAmount);
+}
+
 // t1には、先にライト視点で描いた深度テクスチャ(ShadowMap)を入れる。
 Texture2DArray g_ShadowMap : register(t1);
 SamplerState g_ShadowSampler : register(s1);

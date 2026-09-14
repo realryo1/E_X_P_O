@@ -18,6 +18,7 @@ float lineSpacing = 1.5f, TextAlignment align = TA_MIDDLE);
 
 void Draw() override;
 void Update();
+void ClearClick();
 void SetText(const std::string& text) override;
 
 void SetLineSpacing(float lineSpacing);

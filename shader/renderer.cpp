@@ -83,6 +83,7 @@ static MATERIAL g_LastMaterial = {};
 static LIGHT g_LastLight = {};
 static XMFLOAT4 g_LastCameraPosition = {};
 static XMFLOAT4 g_LastParameter = {};
+static FOG_CONSTANT g_Fog = {};
 static bool g_HasLastWorldMatrix = false;
 static bool g_HasLastViewMatrix = false;
 static bool g_HasLastProjectionMatrix = false;
@@ -90,6 +91,7 @@ static bool g_HasLastMaterial = false;
 static bool g_HasLastLight = false;
 static bool g_HasLastCameraPosition = false;
 static bool g_HasLastParameter = false;
+static bool g_HasLastFog = false;
 
 // ShadowMapは、ライトから見た「深度だけの画像」。
 // Texture本体、深度書き込み用View、シェーダーで読む用View、読み取り用Samplerを分けて持つ。
@@ -107,6 +109,7 @@ static ID3D11Texture2D* g_FaceShadowTexture = NULL;
 static ID3D11DepthStencilView* g_FaceShadowDSV[NUM_SHADOW_SLICES] = {};
 static ID3D11ShaderResourceView* g_FaceShadowSRV = NULL;
 static ID3D11Buffer* g_FaceShadowBuffer = NULL; // b9: 4面分の行列＋濃さ
+static ID3D11Buffer* g_FogBuffer = NULL; // b11: 距離・高度フォグ
 
 // ウィンドウクライアントサイズ（ビューポート計算用）
 static float g_ClientWidth  = DRAW_SCREEN_X;
@@ -681,6 +684,18 @@ void SetCameraPosition(XMFLOAT3 CameraPosition)
 	UpdateDynamicConstantBuffer(g_CameraBuffer, &temp, sizeof(temp));
 	g_LastCameraPosition = temp;
 	g_HasLastCameraPosition = true;
+}
+
+void SetFog(FOG_CONSTANT Fog)
+{
+	if (g_HasLastFog &&
+		std::memcmp(&g_Fog, &Fog, sizeof(Fog)) == 0)
+	{
+		return;
+	}
+	g_Fog = Fog;
+	UpdateDynamicConstantBuffer(g_FogBuffer, &g_Fog, sizeof(g_Fog));
+	g_HasLastFog = true;
 }
 
 void SetParameter(XMFLOAT4 Parameter)
@@ -1276,7 +1291,6 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		g_ImmediateContext->PSSetConstantBuffers(9, 1, &g_FaceShadowBuffer);
 	}
 
-
 	//定数バッファ生成
 
 	//================================================
@@ -1339,6 +1353,16 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	g_ImmediateContext->PSSetConstantBuffers(8, 1, &g_ShadowBuffer);
 	SetShadowMatrix(XMMatrixIdentity(), XMFLOAT4(0.003f, 0.55f, 0.0f, 0.0f));
 
+	// 距離・高度フォグ用定数バッファ b11
+	hBufferDesc.ByteWidth = sizeof(FOG_CONSTANT);
+	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_FogBuffer);
+	g_ImmediateContext->VSSetConstantBuffers(11, 1, &g_FogBuffer);
+	g_ImmediateContext->PSSetConstantBuffers(11, 1, &g_FogBuffer);
+	SetFog(FOG_CONSTANT{
+		XMFLOAT4(0.70f, 0.78f, 0.90f, 1.0f),
+		XMFLOAT4(80.0f, 500.0f, 0.0f, 60.0f)
+	});
+
 	MATERIAL material;
 	ZeroMemory(&material, sizeof(material));
 	material.Diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -1364,6 +1388,7 @@ void FinalizeRenderer(void)
 	SAFE_RELEASE(g_ShadowBuffer);
 	SAFE_RELEASE(g_PlayerLightBuffer);
 	SAFE_RELEASE(g_FaceShadowBuffer);
+	SAFE_RELEASE(g_FogBuffer);
 	SAFE_RELEASE(g_FaceShadowSRV);
 	for (int i = 0; i < NUM_SHADOW_SLICES; i++) SAFE_RELEASE(g_FaceShadowDSV[i]);
 	SAFE_RELEASE(g_FaceShadowTexture);
@@ -1402,7 +1427,7 @@ void Clear(void)
 	BeginGpuFrameTiming();
 #endif
 	// バックバッファクリア色
-	float ClearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f };//純黒は避ける
+	float ClearColor[4] = { 181.0f / 255.0f, 200.0f / 255.0f, 211.0f / 255.0f, 1.0f }; // #B5C8D3
 	//バックバッファをクリア
 	g_ImmediateContext->ClearRenderTargetView( g_RenderTargetView, ClearColor );
 	//デプスステンシルバッファをクリア
@@ -1429,6 +1454,8 @@ void Clear(void)
 	g_ImmediateContext->PSSetConstantBuffers(8, 1, &g_ShadowBuffer);
 	g_ImmediateContext->VSSetConstantBuffers(9, 1, &g_FaceShadowBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(9, 1, &g_FaceShadowBuffer);
+	g_ImmediateContext->VSSetConstantBuffers(11, 1, &g_FogBuffer);
+	g_ImmediateContext->PSSetConstantBuffers(11, 1, &g_FogBuffer);
 	SetDefaultSampler();
 }
 
@@ -1697,8 +1724,8 @@ void TakeScreenshot(void)
 	vp.MaxDepth = 1.0f;
 	g_ImmediateContext->RSSetViewports(1, &vp);
 
-	// レンダーターゲットと深度バッファをクリア (背景色をゲーム本来の灰色に統一)
-	float clearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f };
+	// レンダーターゲットと深度バッファをクリア (背景色をゲーム本来の色に統一)
+	float clearColor[4] = { 181.0f / 255.0f, 200.0f / 255.0f, 211.0f / 255.0f, 1.0f }; // #B5C8D3
 	g_ImmediateContext->ClearRenderTargetView(pSSRTView, clearColor);
 	g_ImmediateContext->ClearDepthStencilView(pSSDSView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 

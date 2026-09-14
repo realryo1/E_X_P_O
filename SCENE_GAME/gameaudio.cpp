@@ -11,26 +11,20 @@ namespace
 		Race,
 		Goal,
 		Menu,
-		CourseCreate,
 	};
 
 	SoundData* g_BgmExplore = nullptr;
 	SoundData* g_BgmRace = nullptr;
 	SoundData* g_BgmGoal = nullptr;
 	SoundData* g_BgmMenu = nullptr;
-	SoundData* g_BgmCourseCreate = nullptr;
-	SoundData* g_SeMenuOpen = nullptr;
-	SoundData* g_SeMenuClose = nullptr;
+	SoundData* g_SeMenu = nullptr;
 	SoundData* g_SeCursor = nullptr;
-	SoundData* g_SeCourseSwitch = nullptr;
 	SoundData* g_SeInvalid = nullptr;
 	SoundData* g_SePointAdd = nullptr;
-	SoundData* g_SePointUndo = nullptr;
 	SoundData* g_SeSaveOk = nullptr;
 	SoundData* g_SeSaveNg = nullptr;
 	SoundData* g_SeWarp = nullptr;
 	SoundData* g_SeCountdown = nullptr;
-	SoundData* g_SeGo = nullptr;
 	SoundData* g_SeBoost = nullptr;
 	SoundData* g_SeGoal = nullptr;
 	SoundData* g_SeRaceAbort = nullptr;
@@ -59,7 +53,6 @@ namespace
 		StopSound(g_BgmRace);
 		StopSound(g_BgmGoal);
 		StopSound(g_BgmMenu);
-		StopSound(g_BgmCourseCreate);
 		g_CurrentBgm = kind;
 		if (kind != BgmKind::None)
 		{
@@ -78,19 +71,14 @@ void GameAudio_Initialize(void)
 	g_BgmRace = LoadMP3("asset/sound/bgm/race.mp3");
 	g_BgmGoal = LoadMP3("asset/sound/bgm/goal.mp3");
 	g_BgmMenu = LoadMP3("asset/sound/bgm/menu.mp3");
-	g_BgmCourseCreate = LoadMP3("asset/sound/bgm/course_create.mp3");
-	g_SeMenuOpen = LoadMP3("asset/sound/se/menu_open.mp3");
-	g_SeMenuClose = LoadMP3("asset/sound/se/menu_close.mp3");
+	g_SeMenu = LoadMP3("asset/sound/se/menu_open.mp3");
 	g_SeCursor = LoadMP3("asset/sound/se/cursor.mp3");
-	g_SeCourseSwitch = LoadMP3("asset/sound/se/course_switch.mp3");
 	g_SeInvalid = LoadMP3("asset/sound/se/invalid.mp3");
 	g_SePointAdd = LoadMP3("asset/sound/se/point_add.mp3");
-	g_SePointUndo = LoadMP3("asset/sound/se/point_undo.mp3");
 	g_SeSaveOk = LoadMP3("asset/sound/se/save_ok.mp3");
 	g_SeSaveNg = LoadMP3("asset/sound/se/save_ng.mp3");
 	g_SeWarp = LoadMP3("asset/sound/se/warp.mp3");
 	g_SeCountdown = LoadMP3("asset/sound/se/countdown.mp3");
-	g_SeGo = LoadMP3("asset/sound/se/go.mp3");
 	g_SeBoost = LoadMP3("asset/sound/se/boost.mp3");
 	g_SeGoal = LoadMP3("asset/sound/se/goal.mp3");
 	g_SeRaceAbort = LoadMP3("asset/sound/se/race_abort.mp3");
@@ -110,19 +98,14 @@ void GameAudio_Finalize(void)
 	UnloadSound(g_BgmRace);
 	UnloadSound(g_BgmGoal);
 	UnloadSound(g_BgmMenu);
-	UnloadSound(g_BgmCourseCreate);
-	UnloadSound(g_SeMenuOpen);
-	UnloadSound(g_SeMenuClose);
+	UnloadSound(g_SeMenu);
 	UnloadSound(g_SeCursor);
-	UnloadSound(g_SeCourseSwitch);
 	UnloadSound(g_SeInvalid);
 	UnloadSound(g_SePointAdd);
-	UnloadSound(g_SePointUndo);
 	UnloadSound(g_SeSaveOk);
 	UnloadSound(g_SeSaveNg);
 	UnloadSound(g_SeWarp);
 	UnloadSound(g_SeCountdown);
-	UnloadSound(g_SeGo);
 	UnloadSound(g_SeBoost);
 	UnloadSound(g_SeGoal);
 	UnloadSound(g_SeRaceAbort);
@@ -134,19 +117,14 @@ void GameAudio_Finalize(void)
 	g_BgmRace = nullptr;
 	g_BgmGoal = nullptr;
 	g_BgmMenu = nullptr;
-	g_BgmCourseCreate = nullptr;
-	g_SeMenuOpen = nullptr;
-	g_SeMenuClose = nullptr;
+	g_SeMenu = nullptr;
 	g_SeCursor = nullptr;
-	g_SeCourseSwitch = nullptr;
 	g_SeInvalid = nullptr;
 	g_SePointAdd = nullptr;
-	g_SePointUndo = nullptr;
 	g_SeSaveOk = nullptr;
 	g_SeSaveNg = nullptr;
 	g_SeWarp = nullptr;
 	g_SeCountdown = nullptr;
-	g_SeGo = nullptr;
 	g_SeBoost = nullptr;
 	g_SeGoal = nullptr;
 	g_SeRaceAbort = nullptr;
@@ -178,21 +156,21 @@ void GameAudio_SetBgmMenu(void)
 
 void GameAudio_SetBgmCourseCreate(void)
 {
-	SetBgm(BgmKind::CourseCreate, g_BgmCourseCreate);
+	GameAudio_SetBgmExplore();
 }
 
-void GameAudio_PlayMenuOpen(void) { PlaySe(g_SeMenuOpen); }
-void GameAudio_PlayMenuClose(void) { PlaySe(g_SeMenuClose); }
+void GameAudio_PlayMenuOpen(void) { PlaySe(g_SeMenu); }
+void GameAudio_PlayMenuClose(void) { PlaySe(g_SeMenu); }
 void GameAudio_PlayCursor(void) { PlaySe(g_SeCursor); }
-void GameAudio_PlayCourseSwitch(void) { PlaySe(g_SeCourseSwitch); }
+void GameAudio_PlayCourseSwitch(void) { PlaySe(g_SeCursor); }
 void GameAudio_PlayInvalid(void) { PlaySe(g_SeInvalid); }
 void GameAudio_PlayPointAdd(void) { PlaySe(g_SePointAdd); }
-void GameAudio_PlayPointUndo(void) { PlaySe(g_SePointUndo); }
+void GameAudio_PlayPointUndo(void) { PlaySe(g_SeInvalid); }
 void GameAudio_PlaySaveOk(void) { PlaySe(g_SeSaveOk); }
 void GameAudio_PlaySaveNg(void) { PlaySe(g_SeSaveNg); }
 void GameAudio_PlayWarp(void) { PlaySe(g_SeWarp); }
 void GameAudio_PlayCountdown(void) { PlaySe(g_SeCountdown); }
-void GameAudio_PlayGo(void) { PlaySe(g_SeGo); }
+void GameAudio_StopCountdown(void) { StopSound(g_SeCountdown); }
 void GameAudio_PlayBoost(void) { PlaySe(g_SeBoost); }
 void GameAudio_PlayGoal(void) { PlaySe(g_SeGoal); }
 void GameAudio_PlayRaceAbort(void) { PlaySe(g_SeRaceAbort); }

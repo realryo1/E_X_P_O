@@ -18,7 +18,7 @@ void Result_Initialize(void)
 		48.0f,
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
-		"RESULT"
+		"リザルト"
 	);
 
 	g_pHintText = new DrawFont(
@@ -26,7 +26,7 @@ void Result_Initialize(void)
 		28.0f,
 		0.0f,
 		{ 0.8f, 0.8f, 0.8f, 1.0f },
-		"Press Decide"
+		"決定でタイトルへ"
 	);
 }
 

@@ -66,8 +66,17 @@ namespace
 	std::chrono::steady_clock::time_point g_CountdownStarted;
 	std::chrono::steady_clock::time_point g_RaceStarted;
 	double g_RaceElapsed = 0.0;
+	enum class MenuPage
+	{
+		Root,
+		RaceSelect,
+		EditSelect,
+	};
+
 	bool g_MenuOpen = false;
+	bool g_MenuWaitRelease = false;
 	int g_MenuCursor = 0;
+	MenuPage g_MenuPage = MenuPage::Root;
 	int g_LastCountdownNumber = 0;
 
 	DrawFont* g_pTimerText = nullptr;
@@ -434,6 +443,7 @@ namespace
 		g_RaceElapsed = 0.0;
 		ClearRings();
 		SAFE_DELETE(g_StartMarker);
+		GameAudio_StopCountdown();
 		GameAudio_SetBgmExplore();
 	}
 
@@ -628,15 +638,83 @@ namespace
 		g_Mode = CourseMode::RaceCountdown;
 		g_LastCountdownNumber = 0;
 		GameAudio_SetBgmExplore();
+		GameAudio_PlayCountdown();
+	}
+
+	std::string MakeCourseLabel(int index)
+	{
+		return "コース" + std::to_string(index + 1);
+	}
+
+	void AppendCourseLabels(std::vector<std::string>& lines)
+	{
+		for (int i = 0; i < static_cast<int>(g_Courses.size()); ++i)
+		{
+			lines.push_back(MakeCourseLabel(i));
+		}
 	}
 
 	int GetMenuItemCount(void)
 	{
-		return g_Mode == CourseMode::RaceCountdown ||
+		if (g_Mode == CourseMode::RaceCountdown ||
 			g_Mode == CourseMode::RaceRunning ||
-			g_Mode == CourseMode::RaceGoal
-			? 1
-			: 4;
+			g_Mode == CourseMode::RaceGoal)
+		{
+			return 1;
+		}
+		if (g_Mode == CourseMode::CourseCreate)
+		{
+			return 4;
+		}
+		if (g_MenuPage == MenuPage::RaceSelect)
+		{
+			return static_cast<int>(g_Courses.size()) + 1;
+		}
+		if (g_MenuPage == MenuPage::EditSelect)
+		{
+			return static_cast<int>(g_Courses.size()) + 2;
+		}
+		return 3;
+	}
+
+	bool MenuHasBackGap(void)
+	{
+		return g_Mode == CourseMode::FreeFlight &&
+			(g_MenuPage == MenuPage::Root ||
+				g_MenuPage == MenuPage::RaceSelect ||
+				g_MenuPage == MenuPage::EditSelect);
+	}
+
+	int MenuItemToLine(int item)
+	{
+		if (MenuHasBackGap() && item == GetMenuItemCount() - 1)
+		{
+			return item + 1;
+		}
+		return item;
+	}
+
+	int MenuLineToItem(int line)
+	{
+		if (!MenuHasBackGap())
+		{
+			return line;
+		}
+
+		const int backItem = GetMenuItemCount() - 1;
+		if (line == backItem)
+		{
+			return -1;
+		}
+		if (line == backItem + 1)
+		{
+			return backItem;
+		}
+		if (line >= 0 && line < backItem)
+		{
+			return line;
+		}
+		return -1;
 	}
 
 	std::vector<std::string> BuildMenuLines(void)
@@ -645,41 +723,91 @@ namespace
 		if (g_Mode == CourseMode::CourseCreate)
 		{
 			lines = {
-				"SAVE & EXIT",
-				"UNDO LAST POINT",
-				"DISCARD & EXIT",
-				"RESUME EDIT",
+				"保存して終了",
+				"直前の点を取り消す",
+				"破棄して終了",
+				"編集に戻る",
 			};
 		}
 		else if (g_Mode == CourseMode::RaceCountdown ||
 			g_Mode == CourseMode::RaceRunning ||
 			g_Mode == CourseMode::RaceGoal)
 		{
-			lines = { "ABORT RACE" };
+			lines = { "レースを中止" };
+		}
+		else if (g_MenuPage == MenuPage::RaceSelect)
+		{
+			AppendCourseLabels(lines);
+			lines.push_back("");
+			lines.push_back("戻る");
+		}
+		else if (g_MenuPage == MenuPage::EditSelect)
+		{
+			lines.push_back("コース追加");
+			AppendCourseLabels(lines);
+			lines.push_back("");
+			lines.push_back("戻る");
 		}
 		else
 		{
-			const bool hasCourse =
-				g_SelectedCourse >= 0 &&
-				g_SelectedCourse < static_cast<int>(g_Courses.size());
-			const std::string courseName =
-				hasCourse ? g_Courses[g_SelectedCourse].name : "NONE";
 			lines = {
-				"RESUME",
-				"RACE START: " + courseName,
-				"EDIT COURSE: " + courseName,
-				"NEW COURSE",
+				"レース開始",
+				"コース編集・追加",
+				"",
+				"戻る",
 			};
 		}
 
+		const int cursorLine = MenuItemToLine(g_MenuCursor);
 		for (int i = 0; i < static_cast<int>(lines.size()); ++i)
 		{
-			if (i == g_MenuCursor)
+			if (i == cursorLine && !lines[i].empty())
 			{
 				lines[i] = "> " + lines[i];
 			}
 		}
 		return lines;
+	}
+
+	void RefreshMenuChrome(void)
+	{
+		if (g_pMenuTitleText)
+		{
+			const char* title = "ゲームメニュー";
+			if (g_Mode == CourseMode::CourseCreate)
+			{
+				title = "コース作成";
+			}
+			else if (g_Mode == CourseMode::RaceCountdown ||
+				g_Mode == CourseMode::RaceRunning ||
+				g_Mode == CourseMode::RaceGoal)
+			{
+				title = "レース";
+			}
+			else if (g_MenuPage == MenuPage::RaceSelect)
+			{
+				title = "レース開始";
+			}
+			else if (g_MenuPage == MenuPage::EditSelect)
+			{
+				title = "コース編集・追加";
+			}
+			g_pMenuTitleText->SetText(title);
+		}
+
+		if (g_pMenuHintText)
+		{
+			const char* hint =
+				"クリック / 上下: 選択   Enter / A: 決定   ESC / START: 閉じる";
+			if (g_Mode == CourseMode::FreeFlight &&
+				(g_MenuPage == MenuPage::RaceSelect ||
+					g_MenuPage == MenuPage::EditSelect))
+			{
+				hint =
+					"クリック / 上下: 選択   Enter / A: 決定   ESC: 戻る";
+			}
+			g_pMenuHintText->SetText(hint);
+		}
 	}
 
 	void RefreshMenuText(void)
@@ -700,6 +828,19 @@ namespace
 			text += line;
 		}
 		g_pMenuText->SetText(text);
+		RefreshMenuChrome();
+	}
+
+	void SetMenuPage(MenuPage page)
+	{
+		g_MenuPage = page;
+		g_MenuCursor = 0;
+		g_MenuWaitRelease = true;
+		if (g_pMenuText)
+		{
+			g_pMenuText->ClearClick();
+		}
+		RefreshMenuText();
 	}
 
 	void ApplyModeBgm(void)
@@ -733,7 +874,13 @@ namespace
 		if (g_MenuOpen)
 		{
 			g_MenuCursor = 0;
+			g_MenuPage = MenuPage::Root;
+			g_MenuWaitRelease = true;
 			UnLockMouse();
+			if (g_pMenuText)
+			{
+				g_pMenuText->ClearClick();
+			}
 			Player_SetControlEnabled(false);
 			RefreshMenuText();
 			GameAudio_PlayMenuOpen();
@@ -741,6 +888,7 @@ namespace
 		}
 		else
 		{
+			g_MenuWaitRelease = false;
 			LockMouse();
 			Player_SetControlEnabled(g_Mode != CourseMode::RaceCountdown);
 			GameAudio_PlayMenuClose();
@@ -758,19 +906,6 @@ namespace
 		g_MenuCursor = (g_MenuCursor + direction + itemCount) % itemCount;
 		RefreshMenuText();
 		GameAudio_PlayCursor();
-	}
-
-	void SelectCourse(int direction)
-	{
-		if (g_Courses.empty())
-		{
-			return;
-		}
-		g_SelectedCourse = (g_SelectedCourse + direction +
-			static_cast<int>(g_Courses.size())) %
-			static_cast<int>(g_Courses.size());
-		RefreshMenuText();
-		GameAudio_PlayCourseSwitch();
 	}
 
 	void ExecuteMenuItem(int item)
@@ -819,16 +954,18 @@ namespace
 			return;
 		}
 
-		switch (item)
+		if (g_MenuPage == MenuPage::RaceSelect)
 		{
-		case 0:
-			SetMenuOpen(false);
-			break;
-		case 1:
-			if (g_SelectedCourse >= 0 &&
-				g_SelectedCourse < static_cast<int>(g_Courses.size()) &&
-				g_Courses[g_SelectedCourse].points.size() >= 2)
+			const int backIndex = static_cast<int>(g_Courses.size());
+			if (item == backIndex)
 			{
+				SetMenuPage(MenuPage::Root);
+				return;
+			}
+			if (item >= 0 && item < static_cast<int>(g_Courses.size()) &&
+				g_Courses[item].points.size() >= 2)
+			{
+				g_SelectedCourse = item;
 				SetMenuOpen(false);
 				StartRace();
 			}
@@ -836,26 +973,82 @@ namespace
 			{
 				GameAudio_PlayInvalid();
 			}
-			break;
-		case 2:
-			if (g_SelectedCourse >= 0 &&
-				g_SelectedCourse < static_cast<int>(g_Courses.size()))
+			return;
+		}
+
+		if (g_MenuPage == MenuPage::EditSelect)
+		{
+			const int backIndex = static_cast<int>(g_Courses.size()) + 1;
+			if (item == 0)
 			{
 				SetMenuOpen(false);
-				StartCourseCreate(g_SelectedCourse);
+				StartCourseCreate(-1);
+				return;
+			}
+			if (item == backIndex)
+			{
+				SetMenuPage(MenuPage::Root);
+				return;
+			}
+			const int courseIndex = item - 1;
+			if (courseIndex >= 0 &&
+				courseIndex < static_cast<int>(g_Courses.size()))
+			{
+				g_SelectedCourse = courseIndex;
+				SetMenuOpen(false);
+				StartCourseCreate(courseIndex);
 			}
 			else
 			{
 				GameAudio_PlayInvalid();
 			}
+			return;
+		}
+
+		switch (item)
+		{
+		case 0:
+			SetMenuPage(MenuPage::RaceSelect);
 			break;
-		case 3:
+		case 1:
+			SetMenuPage(MenuPage::EditSelect);
+			break;
+		case 2:
 			SetMenuOpen(false);
-			StartCourseCreate(-1);
 			break;
 		default:
 			break;
 		}
+	}
+
+	int GetMenuPadPlayer(void)
+	{
+		return Gamepad_FindConnectedPlayer();
+	}
+
+	bool IsMenuHoldBlocking(void)
+	{
+		Mouse_State mouseState = {};
+		Mouse_GetState(&mouseState);
+		const int player = GetMenuPadPlayer();
+		return mouseState.leftButton ||
+			Keyboard_IsKeyDown(KK_ENTER) ||
+			Keyboard_IsKeyDown(KK_SPACE) ||
+			Keyboard_IsKeyDown(KK_UP) ||
+			Keyboard_IsKeyDown(KK_DOWN) ||
+			Keyboard_IsKeyDown(KK_LEFT) ||
+			Keyboard_IsKeyDown(KK_RIGHT) ||
+			Keyboard_IsKeyDown(KK_W) ||
+			Keyboard_IsKeyDown(KK_S) ||
+			Keyboard_IsKeyDown(KK_A) ||
+			Keyboard_IsKeyDown(KK_D) ||
+			Gamepad_IsButtonDown(player, GPB_A) ||
+			Gamepad_IsButtonDown(player, GPB_DPAD_UP) ||
+			Gamepad_IsButtonDown(player, GPB_DPAD_DOWN) ||
+			Gamepad_IsButtonDown(player, GPB_DPAD_LEFT) ||
+			Gamepad_IsButtonDown(player, GPB_DPAD_RIGHT) ||
+			std::fabs(Input_GetMoveVector().y) > 0.5f ||
+			std::fabs(Input_GetMoveVector().x) > 0.5f;
 	}
 
 	void UpdateMenu(void)
@@ -866,40 +1059,52 @@ namespace
 		}
 
 		g_pMenuText->Update();
+		if (g_MenuWaitRelease)
+		{
+			if (IsMenuHoldBlocking())
+			{
+				g_pMenuText->ClearClick();
+				return;
+			}
+			g_MenuWaitRelease = false;
+		}
+
 		if (g_pMenuText->IsClick())
 		{
 			const int clickedLine = g_pMenuText->GetClickedLineIndex();
-			if (clickedLine >= 0 && clickedLine < GetMenuItemCount())
+			const int clickedItem = MenuLineToItem(clickedLine);
+			if (clickedItem >= 0 && clickedItem < GetMenuItemCount())
 			{
-				g_MenuCursor = clickedLine;
+				g_MenuCursor = clickedItem;
 				RefreshMenuText();
-				GameAudio_PlayCursor();
-				ExecuteMenuItem(clickedLine);
+				Input_PlayDecideSe();
+				ExecuteMenuItem(clickedItem);
 				return;
 			}
 		}
 
-		if (Input_IsActionTrigger(INPUT_ACTION_MENU_UP))
+		const int player = GetMenuPadPlayer();
+		if (Keyboard_IsKeyDownTrigger(KK_UP) ||
+			Gamepad_IsButtonTrigger(player, GPB_DPAD_UP))
 		{
 			MoveMenuCursor(-1);
 		}
-		else if (Input_IsActionTrigger(INPUT_ACTION_MENU_DOWN))
+		else if (Keyboard_IsKeyDownTrigger(KK_DOWN) ||
+			Gamepad_IsButtonTrigger(player, GPB_DPAD_DOWN))
 		{
 			MoveMenuCursor(1);
 		}
-		else if (g_Mode == CourseMode::FreeFlight &&
-			Input_IsActionTrigger(INPUT_ACTION_MENU_LEFT))
-		{
-			SelectCourse(-1);
-		}
-		else if (g_Mode == CourseMode::FreeFlight &&
-			Input_IsActionTrigger(INPUT_ACTION_MENU_RIGHT))
-		{
-			SelectCourse(1);
-		}
 		else if (Input_IsActionTrigger(INPUT_ACTION_CANCEL))
 		{
-			SetMenuOpen(false);
+			if (g_Mode == CourseMode::FreeFlight &&
+				g_MenuPage != MenuPage::Root)
+			{
+				SetMenuPage(MenuPage::Root);
+			}
+			else
+			{
+				SetMenuOpen(false);
+			}
 		}
 		else if (Input_IsActionTrigger(INPUT_ACTION_DECIDE))
 		{
@@ -913,7 +1118,9 @@ void Course_Initialize(void)
 	g_Mode = CourseMode::FreeFlight;
 	g_SelectedCourse = -1;
 	g_MenuOpen = false;
+	g_MenuWaitRelease = false;
 	g_MenuCursor = 0;
+	g_MenuPage = MenuPage::Root;
 	LoadCourseList();
 
 	g_pTimerText = new DrawFont(
@@ -935,35 +1142,35 @@ void Course_Initialize(void)
 		72.0f,
 		0.0f,
 		{ 1.0f, 0.9f, 0.3f, 1.0f },
-		"GOAL",
+		"ゴール",
 		TA_MIDDLE);
 	g_pGoalHintText = new DrawFont(
 		{ SCREEN_X * 0.5f, SCREEN_Y * 0.48f },
 		28.0f,
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
-		"PRESS ENTER / A",
+		"決定で散策に戻る",
 		TA_MIDDLE);
 	g_pCourseHintText = new DrawFont(
-		{ SCREEN_X * 0.5f, SCREEN_Y - 125.0f },
+		{ SCREEN_X * 0.5f, 25.0f },
 		22.0f,
 		0.0f,
-		{ 0.9f, 0.9f, 0.9f, 1.0f },
-		"P: PLACE POINT   U: UNDO   ESC / START: MENU",
+		{ 0.1f, 0.1f, 0.1f, 1.0f },
+		"P: 配置   U: 取り消し   ESC / START: メニュー",
 		TA_MIDDLE);
 	g_pMenuTitleText = new DrawFont(
 		{ SCREEN_X * 0.5f, 120.0f },
 		42.0f,
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
-		"GAME MENU",
+		"ゲームメニュー",
 		TA_MIDDLE);
 	g_pMenuHintText = new DrawFont(
-		{ SCREEN_X * 0.5f, SCREEN_Y - 80.0f },
+		{ SCREEN_X * 0.5f, SCREEN_Y - 100.0f },
 		22.0f,
 		0.0f,
-		{ 0.8f, 0.8f, 0.8f, 1.0f },
-		"UP / DOWN: SELECT   ENTER / A: DECIDE   ESC / START: CLOSE",
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		"クリック / 上下: 選択   Enter / A: 決定   ESC / START: 閉じる",
 		TA_MIDDLE);
 	g_pMenuText = new MultiLineClickFont(
 		{ SCREEN_X * 0.5f, SCREEN_Y * 0.5f },
@@ -971,7 +1178,7 @@ void Course_Initialize(void)
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
 		{ 1.0f, 0.85f, 0.25f, 1.0f },
-		"RESUME\nRACE START: NONE\nEDIT COURSE: NONE\nNEW COURSE",
+		"レース開始\nコース編集・追加\n\n戻る",
 		1.5f,
 		TA_MIDDLE);
 	g_pMenuBackground = new Sprite2D(
@@ -1007,7 +1214,16 @@ void Course_Update(void)
 {
 	if (Input_IsActionTrigger(INPUT_ACTION_PAUSE))
 	{
-		SetMenuOpen(!g_MenuOpen);
+		if (g_MenuOpen &&
+			g_Mode == CourseMode::FreeFlight &&
+			g_MenuPage != MenuPage::Root)
+		{
+			SetMenuPage(MenuPage::Root);
+		}
+		else
+		{
+			SetMenuOpen(!g_MenuOpen);
+		}
 	}
 
 	if (g_MenuOpen)
@@ -1040,7 +1256,6 @@ void Course_Update(void)
 		if (number > 0 && number != g_LastCountdownNumber)
 		{
 			g_LastCountdownNumber = number;
-			GameAudio_PlayCountdown();
 		}
 		if (elapsed >= 3.0)
 		{
@@ -1048,7 +1263,6 @@ void Course_Update(void)
 			g_RaceStarted = std::chrono::steady_clock::now();
 			g_LastPlayerPos = Player_GetPos();
 			Player_SetControlEnabled(true);
-			GameAudio_PlayGo();
 			GameAudio_SetBgmRace();
 		}
 		return;

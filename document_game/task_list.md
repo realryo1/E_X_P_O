@@ -13,7 +13,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA dGPU 向けの `DrawIndexed` 削減と Present 後ストリーミングまで実装完了。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
-現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・霧・昼夜サイクルである。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
+現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・昼夜サイクルである。距離＋高度フォグは実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
 ---
 
@@ -22,7 +22,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - 衝突メッシュの間引きは未着手（必要に応じて検討）。
 - `null2` の全面グレー問題は原因リサーチ復帰まで触らない。
 - 機体アニメーション（`flytaxi.glb` のアニメーション接続）は未着手。
-- IBL、霧、昼夜サイクル、プレイヤーへの環境マッピングは未着手。
+- IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手。距離＋高度フォグは実装済み。
 - `SCENE_TITLE` と `SCENE_RESULT` はプレースホルダーのまま。
 
 ---
@@ -44,6 +44,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `height-tune`: 建物Y `-9.010`、リングY `-1.550` で床に合わせた
 - [x] `near-pavilions`: LOD2から対象建物を面ごと除き、LOD3の全`gml:name`を英単語名の近景GLBとして重ねる。`null2` の見た目は未解決
 - [x] `near-pavilions-all-names`: LOD3葉タイル63枚から124種、タイル単位で約162件を切り出し、ゲームのマニフェストへ追加した
+- [x] `near-pavilions-missing-structures`: 名前付き建物のUV無し面を保持し、ルクセンブルクの天井とオーストリアの木製モニュメントを復元した
 - [x] `near-pavilions-far-lod2`: 未パンチLOD2原本からタイル4枚の遠景補完を生成し、LOD3とバッチ単位で排他表示する
 - [x] `near-ring-texture`: CityGML `frn` の公式appearance画像とUVを大屋根リングへ結合し、複数マテリアルの埋め込みテクスチャGLBを生成した
 - [x] `hdr-sunlight`: `pizzo_pernice_puresky_4k.hdr` を輝度しきい値・4連結セグメンテーションで前処理し、抽出した太陽を平行光へ接続。`basic_skybox_3d.fbx` へ表示用HDRテクスチャを適用した
@@ -69,12 +70,13 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `pbr-sun-directional`: HDR輝度抽出による平行太陽と連動環境光。場のモデル・プレースホルダ・タクシーを `S_PBR` 化。スカイドームはHDRを表示用変換した `S_SKYBOX`。方位既定値は `-170.0°` で、HDR抽出方位との差分により見た目の太陽位置を維持する。DebugビルドのみImGui `Expo Sunlight`
 - [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–10m / 10–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーはメッシュ全体を使う
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
-- [ ] `pbr-ibl-fog-day-night`: IBL、霧、昼夜サイクル、プレイヤーへの環境マッピングは未着手
+- [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手
+- [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能
 - [x] `billboard-course-race`: `SCENE_GAME` 内にフリー飛行・コース作成・レースを追加。`P`配置、`asset/course/*.yml`保存、`asset/texture/makulogo.png`のビルボード輪、カウントダウン、タイマー、通過判定、ゴールログに対応
 - [x] `game-menu-input`: `SCENE_GAME` のコース操作をImGuiからゲーム内メニューへ移行。`Esc` / パッドSTARTで開閉し、ClickFont・矢印キー・決定入力でフリー飛行、レース、コース作成を操作。新規コース名は自動生成し、ReleaseビルドではPlayer/SunlightのDebug ImGuiを表示しない
 - [x] `game-audio`: `gameaudio.cpp` で BGM / SE を再生。パスは [audio_needs.md](audio_needs.md)。`menu.mp3` / `warp.mp3` / `race_abort.mp3` / `land.mp3` / `spawn.mp3` は未配置
 - [x] `separate-expo-assets`: 万博モデルを`asset/expomodel`へ分離し、規約同意付き`tool/download_expo_assets.bat`でローカル生成する
-- [ ] 大屋根リング外側の日本館や企業館のモデルがしょぼい問題の修正
+- [x] 大屋根リング外側の日本館や企業館のモデルがしょぼい問題の修正（外周8棟のLOD3統合、重心基準ストリーミング、NTTランドマーク半径。DrawIndexed増加を抑制）
 - [ ] GLB直接読み込み失敗の謎に迫る
 - [ ] タイトル、リザルトをまともに
 - [ ] アプリアイコン差し替え（手動）

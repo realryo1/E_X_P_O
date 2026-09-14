@@ -363,18 +363,19 @@ Near / Far 外にある大きなモデルの描画コストを抑える。`AnimS
 GPU化と破棄はゲーム更新中（初期ロード）または Present 後（ストリーミング継続）の
 時間予算に分割するため、移動先の建物がロードされても更新と描画を長時間占有しない。
 
-LOD3パビリオンの距離判定はカメラと移動先予測点のXZ距離に、既知のモデルXZ半径を足す。
-開始はロード半径 24、破棄は半径 36（ワールド単位）。CPUインポートはロード半径内だけ始め、
-GPU化は破棄半径内まで進める。ヒステリシス帯に残った READY はインポート枠を塞がず、
-近い棟の新規開始を優先する。範囲外で無効化した未完了ジョブは、再び範囲内へ戻ったら
-同じジョブを再開する。ファイル無し以外の失敗も、再接近でやり直す。
+LOD3パビリオンの距離判定はカメラ、視線先予測点、移動先予測点のXZ距離に、既知のモデルXZ半径を足す。
+開始はロード半径 48、破棄は半径 72（ワールド単位）。視線方向（半頂角60°）は半径をさらに32足して
+先行開始する。CPUインポートはロード半径内だけ始め、GPU化は破棄半径内まで進める。
+ヒステリシス帯に残った READY はインポート枠を塞がず、視線先と近い棟の新規開始を優先する。
+範囲外で無効化した未完了ジョブは、再び範囲内へ戻ったら同じジョブを再開する。
+ファイル無し以外の失敗も、再接近でやり直す。
 
 特に多数の高ポリゴンGLBを `Sprite3D` として常駐させる構成では、次を分けて考える。
 
 - **描画カリング**: 既存の `Sprite3D::IsVisibleFromCamera()`。描画負荷を下げる。
 - **タイル単位カリング**: 3D Tiles の `boundingVolume` で描画対象をまとめて選ぶ。
 - **実行時LOD**: 距離や `geometricError` に応じて表示モデルを切り替える。
-- **ストリーミング／キャッシュ**: 範囲外モデルのCPUデータ、GPUバッファ、テクスチャを解放する。距離選択、移動方向の先読み、GPUアップロードと破棄のフレーム予算を実装している。
+- **ストリーミング／キャッシュ**: 範囲外モデルのCPUデータ、GPUバッファ、テクスチャを解放する。距離選択、視線方向と移動方向の先読み、GPUアップロードと破棄のフレーム予算を実装している。
 
 RAMやVRAMが逼迫する場合は、モデル単位カリングを追加するだけでは不十分である。
 ロード済み件数、メッシュ数、頂点数、インデックス数、テクスチャ総容量を記録し、
@@ -535,7 +536,7 @@ label->PreCacheGlyphs();
 delete label;
 ```
 
-フォント: `asset/font/KaiseiDecol-Medium.ttf`。アトラス 2048×2048、LRU キャッシュ。
+フォント: `asset/font/ZenKakuGothicNew-Medium.ttf`。アトラス 2048×2048、LRU キャッシュ。
 フォントアトラスと動的フォント頂点バッファは `D3D11_USAGE_DYNAMIC` で作成し、更新時に
 `Map(D3D11_MAP_WRITE_DISCARD)` で初期データを転送する。`D3D11_BUFFER_DESC` の初期データ指定に
 依存しないため、D3D11 ドライバー間の初期化差を避けられる。
@@ -671,8 +672,16 @@ SetProjectionMatrix(projMat);
 SetCameraPosition(XMFLOAT3(x, y, z));
 SetLight(light);
 SetPlayerLights(lights);   // PBR 用 3 点照明
+SetFog(FOG_CONSTANT{        // S_PBR 用の距離・高度フォグ
+    XMFLOAT4(r, g, b, density),
+    XMFLOAT4(start, end, heightMin, heightRange)
+});
 SetParameter(XMFLOAT4(...)); // Toon1 閾値、S_PBR の roughness/metallic（z=0 でマップ無し）
 ```
+
+`SetFog` は `b11` の定数バッファへフォグ設定を送る。`S_PBR` の最終色にだけ適用され、
+距離が `start` から `end` へ近づくほど、また `heightMin` 付近ほど `Color.rgb` へ混合する。
+`Color.a` が密度であり、スカイドーム (`S_SKYBOX`) や `S_UNLIT` には適用されない。
 
 ### ブレンドステート
 
@@ -693,7 +702,7 @@ SetBlendState(BLENDSTATE_SUB);    // 減算
 | `S_UNLIT`                     | ライティングなし                |
 | `S_LAMBERT`                   | 頂点ランバート                 |
 | `S_PHONG`                     | ピクセルフォン（汎用の既定寄り）        |
-| `S_PBR`                       | GGX PBR。`SetLight` の `Position.w==0` で平行光、それ以外は点光源。3点は `SetPlayerLights` |
+| `S_PBR`                       | GGX PBR。`SetLight` の `Position.w==0` で平行光、それ以外は点光源。3点は `SetPlayerLights`。`SetFog` の距離・高度フォグを適用 |
 | `S_RIM_LIGHT`                 | リムライト                   |
 | `S_OUTLINE`                   | アウトライン                  |
 | `S_SHADOW_MAP`                | ShadowMap 深度描画          |

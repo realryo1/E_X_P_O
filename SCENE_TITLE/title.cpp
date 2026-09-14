@@ -6,6 +6,7 @@
 #include "fade.h"
 #include "scene.h"
 #include "sprite2d.h"
+#include "sound.h"
 #include "main.h"
 #include <cmath>
 #include <Windows.h>
@@ -48,6 +49,8 @@ static DrawFont* g_pExpoText = nullptr;
 static DrawFont* g_pRaceText = nullptr;
 static DrawFont* g_pHintText = nullptr;
 static ClickFont* g_pDebugButton = nullptr;
+static SoundData* g_pTitleAppearSe = nullptr;
+static SoundData* g_pTitleBgm = nullptr;
 
 static TitleAnimPhase g_AnimPhase = TITLE_ANIM_WAIT;
 static float g_AnimT = 0.0f;
@@ -122,8 +125,8 @@ void Title_Initialize(void)
 		{ SCREEN_X / 2.0f, SCREEN_Y - 48.0f },
 		24.0f,
 		0.0f,
-		{ 0.85f, 0.85f, 0.85f, 1.0f },
-		"Press Decide"
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		"Enterでスタート"
 	);
 
 #if defined(_DEBUG)
@@ -136,6 +139,9 @@ void Title_Initialize(void)
 		"DEBUG"
 	);
 #endif
+
+	g_pTitleAppearSe = LoadMP3(L"asset\\sound\\se\\boost.mp3");
+	g_pTitleBgm = LoadMP3(L"asset\\sound\\bgm\\race.mp3");
 }
 
 void Title_Update(void)
@@ -172,6 +178,7 @@ void Title_Update(void)
 		{
 			g_AnimT = 0.0f;
 			g_AnimPhase = TITLE_ANIM_TAXI;
+			PlaySound(g_pTitleAppearSe, false);
 		}
 	}
 	else if (g_AnimPhase != TITLE_ANIM_IDLE)
@@ -208,6 +215,14 @@ void Title_Update(void)
 				g_pRaceText->SetPos(kRaceRest);
 			}
 			g_AnimPhase = static_cast<TitleAnimPhase>(g_AnimPhase + 1);
+			if (g_AnimPhase == TITLE_ANIM_EXPO || g_AnimPhase == TITLE_ANIM_RACE)
+			{
+				PlaySound(g_pTitleAppearSe, false);
+			}
+			else if (g_AnimPhase == TITLE_ANIM_IDLE)
+			{
+				PlaySound(g_pTitleBgm, true);
+			}
 		}
 	}
 
@@ -239,4 +254,9 @@ void Title_Finalize(void)
 	SAFE_DELETE(g_pRaceText);
 	SAFE_DELETE(g_pHintText);
 	SAFE_DELETE(g_pDebugButton);
+	StopSound(g_pTitleBgm);
+	UnloadSound(g_pTitleAppearSe);
+	UnloadSound(g_pTitleBgm);
+	g_pTitleAppearSe = nullptr;
+	g_pTitleBgm = nullptr;
 }

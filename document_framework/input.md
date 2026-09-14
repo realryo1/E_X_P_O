@@ -10,7 +10,7 @@
 
 * **任天堂配列 (ABXY) 強制**: `Input_Initialize` 時に `GAMEPAD_LAYOUT_SWITCH_ABXY` を設定。右ボタンが A、下ボタンが B。
 * **シーンからの直接インクルード排除**: シーン実装は `keyboard.h` / `gamepad.h` ではなく `input_manager.h` を使う（デバッグシーンの特殊キー操作は例外あり）。
-* **決定 SE**: `INPUT_ACTION_DECIDE` のトリガー成功時に `asset/sound/se/kettei.mp3` を再生する。ゲーム内のその他の BGM / SE は `SCENE_GAME/gameaudio.cpp` が再生し、決定音は重ねない。
+* **決定 SE**: `INPUT_ACTION_DECIDE` のトリガー成功時、およびメニュー項目のクリック決定時に `asset/sound/se/kettei.mp3` を再生する（`Input_PlayDecideSe`）。ゲーム内のその他の BGM / SE は `SCENE_GAME/gameaudio.cpp` が再生し、決定音は重ねない。
 
 追加 API:
 
@@ -18,6 +18,7 @@
 Input_Vector2 Input_GetMoveVector(void);  // WASD / DPad / LStick
 Input_Vector2 Input_GetLookVector(void);  // RStick
 float Input_GetZoomDelta(void);           // RT - LT（正で接近）
+void Input_PlayDecideSe(void);             // kettei.mp3
 void Input_SetRumble(float leftMotor, float rightMotor);
 void Input_SetGamepadLayout(Gamepad_Layout layout);
 ```
@@ -68,7 +69,7 @@ bool Input_IsActionTrigger(Input_Action action);  // 押した瞬間
 * プレースホルダ
 
 ### SCENE_GAME（ホバー移動は `player.cpp`、視点と旋回入力は `playercamera.cpp`）
-* `game.cpp` が `Esc`（`Keyboard_IsKeyDownTrigger(KK_ESCAPE)`）で `UnLockMouse`、ImGui 以外のウィンドウ左クリックで `LockMouse`
+* `Course_Update` が `Esc` / パッドSTARTでゲーム内メニューを開閉する。ルート以外では同じキーで一覧から戻る。メニュー中の選択はクリック、矢印キー、十字キー。決定は `Enter` / パッドA / 行クリックで、いずれも `kettei.mp3` を鳴らす。`W` / `Space` / 左スティックと左右キーはコース切替に使わない。開いた直後とページ遷移直後は押しっぱなし入力を無視する
 * ロック中は `game.cpp` が `Mouse_GetState` しない。相対 `dx`/`dy` は `playercamera.cpp` が1回だけ読む
 * Debugビルドの `Expo Debug Camera` でフリーカメラを有効にすると、機体操作と三人称追従を止め、WASD / Space / Shift と右クリック視点、ImGui の位置・姿勢編集でカメラを動かす。メニュー中はフリーカメラ入力を止める
 * 解除中はマウス相対移動を視点に使わない。右スティックは従来どおり
