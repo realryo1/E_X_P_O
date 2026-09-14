@@ -1,10 +1,11 @@
-﻿// =========================================================
+// =========================================================
 // fade.h フェード制御
 // =========================================================
 #pragma once
 
 #include "sprite2d.h"
 #include "scene.h"
+#include "font.h"
 
 // =========================================================
 // 列挙体宣言
@@ -28,6 +29,11 @@ private:
 	FADESTAT m_State;
 	SCENE m_NextScene;
 	int m_WarmupFrames; // 空回しフレーム数カウンタ
+	bool m_HoldUntilReady;
+	float m_LoadProgress;
+	Sprite2D* m_pLoadProgressTrack;
+	Sprite2D* m_pLoadProgressFill;
+	DrawFont* m_pLoadProgressText;
 
 public:
 	// コンストラクタ・デストラクタ
@@ -43,6 +49,12 @@ public:
 	// フェードイン開始
 	void StartFadeIn();
 
+	// シーン側の初期ロード完了まで明転を保留
+	void HoldUntilReady();
+	void NotifyReady();
+	void SetLoadProgress(float fraction01);
+	void DrawLoadProgress();
+
 	// ゲッター
 	FADESTAT GetState() const;
 };
@@ -57,4 +69,7 @@ void Fade_Finalize(void);
 
 void SetSceneFade(SCENE ns = SCENE_NONE);
 void Fade_StartIn(void);
+void Fade_HoldUntilReady(void);
+void Fade_NotifyReady(void);
+void Fade_SetLoadProgress(float fraction01);
 FADESTAT GetFadeState(void);

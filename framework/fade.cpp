@@ -1,4 +1,4 @@
-﻿// =========================================================
+// =========================================================
 // fade.cpp フェード制御
 // =========================================================
 #include "fade.h"
@@ -12,6 +12,9 @@
 #include "debug_ostream.h"
 #include <Windows.h>
 #include <psapi.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 using namespace DirectX;
 
 
@@ -34,14 +37,41 @@ Fade::Fade()
 	),
 	m_State(FADE_NONE),
 	m_NextScene(SCENE_NONE),
-	m_WarmupFrames(6)
+	m_WarmupFrames(6),
+	m_HoldUntilReady(false),
+	m_LoadProgress(0.0f),
+	m_pLoadProgressTrack(nullptr),
+	m_pLoadProgressFill(nullptr),
+	m_pLoadProgressText(nullptr)
 {
+	m_pLoadProgressTrack = new Sprite2D(
+		{ SCREEN_X / 2.0f, SCREEN_Y / 2.0f + 34.0f },
+		{ 640.0f, 24.0f },
+		0.0f,
+		{ 0.08f, 0.08f, 0.08f, 0.75f },
+		BLENDSTATE_ALFA,
+		L"asset\\texture\\fade.png");
+	m_pLoadProgressFill = new Sprite2D(
+		{ SCREEN_X / 2.0f - 320.0f, SCREEN_Y / 2.0f + 34.0f },
+		{ 0.0f, 16.0f },
+		0.0f,
+		{ 0.12f, 0.35f, 0.75f, 1.0f },
+		BLENDSTATE_ALFA,
+		L"asset\\texture\\fade.png");
+	m_pLoadProgressText = new DrawFont(
+		{ SCREEN_X / 2.0f, SCREEN_Y / 2.0f - 24.0f },
+		36.0f,
+		0.0f,
+		{ 0.05f, 0.05f, 0.05f, 1.0f },
+		"残り 100%");
 }
 
 // デストラクタ
 Fade::~Fade()
 {
-	// Spriteのデストラクタが自動的にテクスチャを解放
+	SAFE_DELETE(m_pLoadProgressTrack);
+	SAFE_DELETE(m_pLoadProgressFill);
+	SAFE_DELETE(m_pLoadProgressText);
 }
 
 // 更新処理
@@ -86,6 +116,10 @@ void Fade::Update()
 	case FADE_WARMUP:
 		// 真っ暗な状態をキープ
 		m_Color.w = 1.0f;
+		if (m_HoldUntilReady)
+		{
+			break;
+		}
 		if (m_WarmupFrames > 0)
 		{
 			m_WarmupFrames--;
@@ -159,6 +193,63 @@ void Fade::StartFadeIn()
 	}
 }
 
+void Fade::HoldUntilReady()
+{
+	m_HoldUntilReady = true;
+	m_LoadProgress = 0.0f;
+	SetLoadProgress(0.0f);
+}
+
+void Fade::NotifyReady()
+{
+	m_LoadProgress = 1.0f;
+	m_HoldUntilReady = false;
+	SetLoadProgress(1.0f);
+}
+
+void Fade::SetLoadProgress(float fraction01)
+{
+	m_LoadProgress = (std::max)(0.0f, (std::min)(1.0f, fraction01));
+	if (m_pLoadProgressFill)
+	{
+		const float width = 640.0f * m_LoadProgress;
+		m_pLoadProgressFill->SetPos({
+			SCREEN_X / 2.0f - 320.0f + width / 2.0f,
+			SCREEN_Y / 2.0f + 34.0f });
+		m_pLoadProgressFill->SetSize({ width, 16.0f });
+	}
+	if (m_pLoadProgressText)
+	{
+		const int remaining =
+			m_LoadProgress >= 1.0f
+			? 0
+			: static_cast<int>(std::ceil((1.0f - m_LoadProgress) * 100.0f));
+		char text[64] = {};
+		sprintf_s(text, "残り %d%%", remaining);
+		m_pLoadProgressText->SetText(text);
+	}
+}
+
+void Fade::DrawLoadProgress()
+{
+	if (!m_HoldUntilReady)
+	{
+		return;
+	}
+	if (m_pLoadProgressTrack)
+	{
+		m_pLoadProgressTrack->Draw();
+	}
+	if (m_pLoadProgressFill && m_LoadProgress > 0.0f)
+	{
+		m_pLoadProgressFill->Draw();
+	}
+	if (m_pLoadProgressText)
+	{
+		m_pLoadProgressText->Draw();
+	}
+}
+
 // 状態取得
 FADESTAT Fade::GetState() const
 {
@@ -194,6 +285,7 @@ void Fade_Draw(void)
 		return;
 	}
 	g_pFade->Draw();
+	g_pFade->DrawLoadProgress();
 }
 
 void Fade_Finalize(void)
@@ -215,6 +307,27 @@ void Fade_StartIn(void)
 {
 	if (g_pFade) {
 		g_pFade->StartFadeIn();
+	}
+}
+
+void Fade_HoldUntilReady(void)
+{
+	if (g_pFade) {
+		g_pFade->HoldUntilReady();
+	}
+}
+
+void Fade_NotifyReady(void)
+{
+	if (g_pFade) {
+		g_pFade->NotifyReady();
+	}
+}
+
+void Fade_SetLoadProgress(float fraction01)
+{
+	if (g_pFade) {
+		g_pFade->SetLoadProgress(fraction01);
 	}
 }
 

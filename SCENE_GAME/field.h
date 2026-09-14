@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <d3d11.h>
 #include <DirectXMath.h>
@@ -8,6 +8,7 @@ void Field_Initialize(void);
 void Field_Finalize(void);
 void Field_PumpLoad(void);
 bool Field_IsLoadComplete(void);
+float Field_GetInitialLoadProgress(void);
 void Field_Draw(void);
 void Field_DrawLocalShadow(
 	const DirectX::XMMATRIX& lightView,

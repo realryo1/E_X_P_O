@@ -1,4 +1,4 @@
-﻿#include "field.h"
+#include "field.h"
 #include "define.h"
 #include "main.h"
 #include "sprite3d.h"
@@ -111,6 +111,7 @@ static XMMATRIX g_EcefToEnu = XMMatrixIdentity();
 static bool g_HasEcefToEnu = false;
 static bool g_LoadComplete = false;
 static bool g_PumpedThisFrame = false;
+static bool g_HasPresentedInitialLoadFrame = false;
 static int g_LoadedTiles = 0;
 static int g_LoadedFarTiles = 0;
 static int g_LoadedPavilions = 0;
@@ -192,7 +193,7 @@ static LONGLONG GetPerformanceCounter(void)
 	return counter.QuadPart;
 }
 
-static LONGLONG GetLoadDeadline(void)
+static LONGLONG GetLoadDeadline(double budgetMilliseconds = EXPO_LOAD_BUDGET_MILLISECONDS)
 {
 	static LONGLONG frequency = 0;
 	if (frequency == 0)
@@ -207,7 +208,7 @@ static LONGLONG GetLoadDeadline(void)
 	}
 
 	const double budgetTicks =
-		static_cast<double>(frequency) * EXPO_LOAD_BUDGET_MILLISECONDS / 1000.0;
+		static_cast<double>(frequency) * budgetMilliseconds / 1000.0;
 	return GetPerformanceCounter() + static_cast<LONGLONG>((std::max)(1.0, budgetTicks));
 }
 
@@ -1953,25 +1954,24 @@ void Field_GetMemoryStatus(char* out, size_t outSize)
 		failed);
 }
 
-static bool FadeHidesInitialLoad(void)
-{
-	const FADESTAT state = GetFadeState();
-	return state == FADE_WAIT_LOAD || state == FADE_WARMUP || state == FADE_OUT || state == FADE_MAX;
-}
-
 void Field_PumpLoad(void)
 {
 	if (g_PumpedThisFrame)
 	{
 		return;
 	}
-	if (!g_LoadComplete && FadeHidesInitialLoad())
+	if (!g_HasPresentedInitialLoadFrame)
 	{
+		// 先に進捗バーを1フレーム表示し、ロード開始を次の描画後へ送る。
 		return;
 	}
 	g_PumpedThisFrame = true;
 
-	const LONGLONG deadline = GetLoadDeadline();
+	const FADESTAT fadeState = GetFadeState();
+	const bool loadingDuringFade =
+		!g_LoadComplete && fadeState != FADE_NONE && fadeState != FADE_IN;
+	const LONGLONG deadline = GetLoadDeadline(
+		loadingDuringFade ? 40.0 : EXPO_LOAD_BUDGET_MILLISECONDS);
 	UpdatePrefetchPosition();
 	if (g_LoadComplete)
 	{
@@ -2023,6 +2023,7 @@ void Field_Initialize(void)
 {
 	g_LoadComplete = false;
 	g_PumpedThisFrame = false;
+	g_HasPresentedInitialLoadFrame = false;
 	g_LoadStarted = false;
 	g_TriedFallbackLod1 = false;
 	g_CollisionFinished = false;
@@ -2089,6 +2090,74 @@ void Field_Finalize(void)
 bool Field_IsLoadComplete(void)
 {
 	return g_LoadComplete;
+}
+
+float Field_GetInitialLoadProgress(void)
+{
+	if (g_LoadComplete)
+	{
+		return 1.0f;
+	}
+
+	float progressSum = 0.0f;
+	int progressCount = 0;
+	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+	{
+		const ExpoDrawJob* job = holder.get();
+		if (!IsCoreDrawJob(job))
+		{
+			continue;
+		}
+
+		float progress = 0.0f;
+		if (job->finished || job->failed || job->workerFailed)
+		{
+			progress = 1.0f;
+		}
+		else if (job->workerDone && job->gpuModel)
+		{
+			unsigned int gpuDone = 0;
+			unsigned int gpuTotal = 0;
+			job->gpuModel->GetGpuProgress(&gpuDone, &gpuTotal);
+			const float gpuProgress =
+				gpuTotal > 0
+				? (std::min)(1.0f, static_cast<float>(gpuDone) /
+					static_cast<float>(gpuTotal))
+				: 0.0f;
+			progress = 0.35f + gpuProgress * 0.65f;
+		}
+		else if (job->started)
+		{
+			progress = 0.35f;
+		}
+		progressSum += progress;
+		progressCount += 1;
+	}
+
+	float collisionProgress = 0.0f;
+	if (g_CollisionFinished)
+	{
+		collisionProgress = 1.0f;
+	}
+	else
+	{
+		size_t done = 0;
+		size_t total = 0;
+		int stage = COLLISION_STAGE_IDLE;
+		Collision_GetPumpProgress(&done, &total, &stage);
+		if (total > 0)
+		{
+			collisionProgress = (std::min)(
+				1.0f,
+				static_cast<float>(done) / static_cast<float>(total));
+		}
+	}
+
+	progressSum += collisionProgress;
+	progressCount += 1;
+	return progressCount > 0
+		? (std::max)(0.0f, (std::min)(1.0f, progressSum / progressCount))
+		: 0.0f;
 }
 
 void Field_SetSkyboxYaw(float yawDegrees)
@@ -2175,6 +2244,14 @@ void Field_DrawLocalShadow(
 
 void Field_Draw(void)
 {
+	if (!g_LoadComplete)
+	{
+		// 初期ロード中はシーン描画を省略する。
+		// Game_Draw が短絡した場合でも、次フレームのロードを止めない。
+		g_HasPresentedInitialLoadFrame = true;
+		g_PumpedThisFrame = false;
+		return;
+	}
 	if (g_ExpoFloor)
 	{
 		g_ExpoFloor->Draw();

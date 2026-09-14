@@ -16,7 +16,7 @@
 
 ```cpp
 Input_Vector2 Input_GetMoveVector(void);  // WASD / DPad / LStick
-Input_Vector2 Input_GetLookVector(void);  // 矢印 / RStick
+Input_Vector2 Input_GetLookVector(void);  // RStick
 float Input_GetZoomDelta(void);           // RT - LT（正で接近）
 void Input_SetRumble(float leftMotor, float rightMotor);
 void Input_SetGamepadLayout(Gamepad_Layout layout);
@@ -70,6 +70,7 @@ bool Input_IsActionTrigger(Input_Action action);  // 押した瞬間
 ### SCENE_GAME（ホバー移動は `player.cpp`、視点と旋回入力は `playercamera.cpp`）
 * `game.cpp` が `Esc`（`Keyboard_IsKeyDownTrigger(KK_ESCAPE)`）で `UnLockMouse`、ImGui 以外のウィンドウ左クリックで `LockMouse`
 * ロック中は `game.cpp` が `Mouse_GetState` しない。相対 `dx`/`dy` は `playercamera.cpp` が1回だけ読む
+* Debugビルドの `Expo Debug Camera` でフリーカメラを有効にすると、機体操作と三人称追従を止め、WASD / Space / Shift と右クリック視点、ImGui の位置・姿勢編集でカメラを動かす。メニュー中はフリーカメラ入力を止める
 * 解除中はマウス相対移動を視点に使わない。右スティックは従来どおり
 * `Input_GetMoveVector` の前方向（W / DPad-UP / 左スティック上）でカメラヨー基準に前進する。A/Dの横移動とSの後退は使わない
 * マウスの左右入力でカメラを旋回し、機体がカメラヨーへゆっくり追従する

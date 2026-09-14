@@ -1,4 +1,4 @@
-﻿#include "game.h"
+#include "game.h"
 #include "field.h"
 #include "course.h"
 #include "gameaudio.h"
@@ -8,13 +8,15 @@
 #include "sunlight.h"
 #include "ui.h"
 #include "mouse.h"
+#include "fade.h"
 #include "imgui/imgui.h"
 
 static bool g_PrevLeftButton = false;
+static bool g_InitialLoadNotified = false;
 
 static void Game_UpdateMouseLock(void)
 {
-	if (Course_IsMenuOpen())
+	if (Course_IsMenuOpen() || PlayerCamera_IsDebugActive())
 	{
 		return;
 	}
@@ -41,6 +43,7 @@ static void Game_UpdateMouseLock(void)
 
 void Game_Initialize(void)
 {
+	Fade_HoldUntilReady();
 	PlayerCamera_Initialize();
 	Field_Initialize();
 	GameAudio_Initialize();
@@ -48,16 +51,37 @@ void Game_Initialize(void)
 	Sunlight_Initialize();
 	Ui_Initialize();
 	g_PrevLeftButton = false;
+	g_InitialLoadNotified = false;
 }
 
 void Game_Update(void)
 {
 	Field_PumpLoad();
+	const bool fieldReady = Field_IsLoadComplete();
+	if (fieldReady)
+	{
+		if (!g_InitialLoadNotified)
+		{
+			Fade_NotifyReady();
+			g_InitialLoadNotified = true;
+		}
+	}
+	else
+	{
+		Fade_SetLoadProgress(Field_GetInitialLoadProgress());
+		UnLockMouse();
+	}
 
-	Game_UpdateMouseLock();
+	if (fieldReady)
+	{
+		Game_UpdateMouseLock();
+	}
 	PlayerCamera_UpdateInput();
 	Player_Update();
-	Course_Update();
+	if (fieldReady)
+	{
+		Course_Update();
+	}
 	PlayerCamera_Update();
 	Ui_Update();
 	Sunlight_Update();
@@ -65,6 +89,12 @@ void Game_Update(void)
 
 void Game_Draw(void)
 {
+	if (!Field_IsLoadComplete())
+	{
+		Field_Draw();
+		return;
+	}
+
 	PlayerCamera_Draw();
 
 	SetDepthEnable(true);
@@ -116,6 +146,7 @@ void Game_Draw(void)
 	Player_DrawDebug();
 	Course_DrawMenu();
 	Sunlight_DrawDebug();
+	PlayerCamera_DrawDebug();
 }
 
 void Game_Finalize(void)

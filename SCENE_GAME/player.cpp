@@ -187,6 +187,14 @@ void Player_Update(void)
 		PlayerCamera_LockMouse();
 	}
 
+	if (PlayerCamera_IsDebugActive())
+	{
+		g_ForwardSpeed = 0.0f;
+		g_VerticalSpeed = 0.0f;
+		GameAudio_UpdateHover(false, 0.0f);
+		return;
+	}
+
 	if (!g_ControlEnabled)
 	{
 		g_ForwardSpeed = 0.0f;

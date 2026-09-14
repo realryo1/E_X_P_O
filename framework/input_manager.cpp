@@ -163,12 +163,6 @@ Input_Vector2 Input_GetLookVector(void)
     Input_Vector2 out = {};
     out.x = rightStick.x;
     out.y = rightStick.y;
-
-    if (Keyboard_IsKeyDown(KK_LEFT)) out.x = MinFloat(out.x, -1.0f);
-    if (Keyboard_IsKeyDown(KK_RIGHT)) out.x = MaxFloat(out.x, 1.0f);
-    if (Keyboard_IsKeyDown(KK_UP)) out.y = MaxFloat(out.y, 1.0f);
-    if (Keyboard_IsKeyDown(KK_DOWN)) out.y = MinFloat(out.y, -1.0f);
-
     return out;
 }
 

@@ -165,7 +165,7 @@ if (Input_IsActionDown(INPUT_ACTION_DECIDE)) { /* ... */ }
 if (Input_IsActionTrigger(INPUT_ACTION_DECIDE)) { /* ... */ }
 
 Input_Vector2 move = Input_GetMoveVector();  // WASD / DPad / LStick
-Input_Vector2 look = Input_GetLookVector();  // 矢印 / RStick
+Input_Vector2 look = Input_GetLookVector();  // RStick
 float zoom = Input_GetZoomDelta();           // RT - LT
 ```
 
@@ -552,6 +552,9 @@ Fade_Draw();     // 2D の最後（main が Present 直前に呼ぶ）
 
 SetSceneFade(SCENE_GAME);   // フェードアウト → シーン切替 → ウォームアップ → フェードイン
 Fade_StartIn();             // SCENE_NONE 暗転後のフェードイン
+Fade_HoldUntilReady();      // シーン側の初期ロード完了まで明転を保留
+Fade_NotifyReady();         // 初期ロード完了を通知
+Fade_SetLoadProgress(0.5f); // フェード前面のロード進捗を更新
 FADESTAT state = GetFadeState();
 ```
 
@@ -567,6 +570,12 @@ FADESTAT state = GetFadeState();
 
 速度: α ±0.05f/フレーム（約 20 フレーム ≈ 1/3 秒）。
 シーン初期化後は 6 論理フレームのウォームアップ（`FADE_WARMUP`）。フェード中は Present 間引きが無効。
+
+シーン初期化中に初期ロードを行う場合は `Fade_HoldUntilReady()` を呼ぶ。
+`FADE_WARMUP` はロード完了通知の `Fade_NotifyReady()` まで暗転を維持し、
+通知後に通常のウォームアップを経て `FADE_IN` へ進む。
+保留中に `Fade_SetLoadProgress()` を更新すると、`Fade_Draw()` が全画面フェードの
+前面へプログレスバーと残り割合を描画する。ロード完了後は表示を終了する。
 
 シーン列挙は [`app/scene.h`](../app/scene.h):
 
@@ -731,7 +740,7 @@ float yaw = Camera_GetYaw();
 - 下: `PITCH_LIMIT_LOOK_DOWN = -60.0f`
 
 デバッグ用フリーカメラは `SCENE_DEBUG/debugcamera.h`（WASD + マウス）。
-`SCENE_GAME` の三人称追従は `SCENE_GAME/playercamera.cpp`。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定し、`PlayerCamera_Update` / `PlayerCamera_Draw` が `SetCameraPosition` する。フレームワーク既定の `Camera_Update` オービットは使わない。操作は [input.md](input.md)。
+`SCENE_GAME` の三人称追従は `SCENE_GAME/playercamera.cpp`。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定し、`PlayerCamera_Update` / `PlayerCamera_Draw` が `SetCameraPosition` する。フレームワーク既定の `Camera_Update` オービットは使わない。Debugビルドでは ImGui 窓 `Expo Debug Camera` でフリーカメラに切り替えられる。操作は [input.md](input.md)。
 
 ---
 
