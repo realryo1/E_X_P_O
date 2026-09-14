@@ -12,6 +12,8 @@
 [task_list.md](task_list.md)を参照する。
 描画・ライティング・シャドウの詳細は
 [rendering_and_lighting.md](rendering_and_lighting.md)。
+BGM / SE の候補地点は
+[audio_needs.md](audio_needs.md)。
 フレームワークの使い方は
 [framework_usage.md](../document_framework/framework_usage.md)。
 当たり判定と衝突バイナリは

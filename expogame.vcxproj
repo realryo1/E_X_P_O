@@ -203,6 +203,7 @@
     <ClCompile Include="framework\texture.cpp" />
     <ClCompile Include="framework\mouse.cpp" />
     <ClCompile Include="SCENE_GAME\game.cpp" />
+    <ClCompile Include="SCENE_GAME\gameaudio.cpp" />
     <ClCompile Include="SCENE_GAME\ui.cpp" />
     <ClCompile Include="SCENE_GAME\field.cpp" />
     <ClCompile Include="SCENE_GAME\player.cpp" />
@@ -269,6 +270,7 @@
     <ClInclude Include="framework\texture.h" />
     <ClInclude Include="framework\mouse.h" />
     <ClInclude Include="SCENE_GAME\game.h" />
+    <ClInclude Include="SCENE_GAME\gameaudio.h" />
     <ClInclude Include="SCENE_GAME\ui.h" />
     <ClInclude Include="SCENE_GAME\field.h" />
     <ClInclude Include="SCENE_GAME\player.h" />

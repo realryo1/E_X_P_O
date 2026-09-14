@@ -94,6 +94,9 @@
     <ClCompile Include="SCENE_GAME\game.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
+    <ClCompile Include="SCENE_GAME\gameaudio.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
     <ClCompile Include="SCENE_GAME\ui.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
@@ -256,6 +259,9 @@
       <Filter>SCENE_RESULT</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\game.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\gameaudio.h">
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\ui.h">

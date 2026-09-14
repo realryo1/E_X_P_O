@@ -12,6 +12,10 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 
+#ifdef PlaySound
+#undef PlaySound
+#endif
+
 // サウンドデータ構造体
 struct SoundData {
     IXAudio2SourceVoice* pSourceVoice = nullptr;

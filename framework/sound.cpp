@@ -1,6 +1,6 @@
 ﻿// sound.cpp
-#include "sound.h"
 #include "define.h"
+#include "sound.h"
 #include <vector>
 #include <Windows.h>
 #include <algorithm>

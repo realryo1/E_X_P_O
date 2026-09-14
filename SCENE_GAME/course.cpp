@@ -1,4 +1,5 @@
 ﻿#include "course.h"
+#include "gameaudio.h"
 #include "player.h"
 #include "billboard.h"
 #include "sprite2d.h"
@@ -67,6 +68,7 @@ namespace
 	double g_RaceElapsed = 0.0;
 	bool g_MenuOpen = false;
 	int g_MenuCursor = 0;
+	int g_LastCountdownNumber = 0;
 
 	DrawFont* g_pTimerText = nullptr;
 	DrawFont* g_pCountdownText = nullptr;
@@ -393,6 +395,7 @@ namespace
 		}
 		g_Mode = CourseMode::CourseCreate;
 		RebuildRings(g_WorkingCourse.points);
+		GameAudio_SetBgmCourseCreate();
 	}
 
 	void ReturnToFreeFlight(void)
@@ -403,6 +406,7 @@ namespace
 		g_RaceElapsed = 0.0;
 		ClearRings();
 		SAFE_DELETE(g_StartMarker);
+		GameAudio_SetBgmExplore();
 	}
 
 	std::string CreateAutomaticCourseName(void)
@@ -441,6 +445,7 @@ namespace
 
 		if (!SaveCourseFile(g_WorkingCourse))
 		{
+			GameAudio_PlaySaveNg();
 			return false;
 		}
 
@@ -454,6 +459,7 @@ namespace
 			}
 		}
 		ReturnToFreeFlight();
+		GameAudio_PlaySaveOk();
 		return true;
 	}
 
@@ -465,6 +471,7 @@ namespace
 		}
 		g_WorkingCourse.points.push_back(Player_GetPos());
 		RebuildRings(g_WorkingCourse.points);
+		GameAudio_PlayPointAdd();
 	}
 
 	std::string FormatRaceTime(double seconds)
@@ -557,6 +564,8 @@ namespace
 
 		Player_SetControlEnabled(true);
 		g_Mode = CourseMode::RaceGoal;
+		GameAudio_PlayGoal();
+		GameAudio_SetBgmGoal();
 	}
 
 	void StartRace(void)
@@ -579,6 +588,9 @@ namespace
 		g_LastPlayerPos = startPosition;
 		g_CountdownStarted = std::chrono::steady_clock::now();
 		g_Mode = CourseMode::RaceCountdown;
+		g_LastCountdownNumber = 0;
+		GameAudio_PlayWarp();
+		GameAudio_SetBgmExplore();
 	}
 
 	int GetMenuItemCount(void)
@@ -653,6 +665,26 @@ namespace
 		g_pMenuText->SetText(text);
 	}
 
+	void ApplyModeBgm(void)
+	{
+		if (g_Mode == CourseMode::CourseCreate)
+		{
+			GameAudio_SetBgmCourseCreate();
+		}
+		else if (g_Mode == CourseMode::RaceRunning)
+		{
+			GameAudio_SetBgmRace();
+		}
+		else if (g_Mode == CourseMode::RaceGoal)
+		{
+			GameAudio_SetBgmGoal();
+		}
+		else
+		{
+			GameAudio_SetBgmExplore();
+		}
+	}
+
 	void SetMenuOpen(bool open)
 	{
 		if (g_MenuOpen == open)
@@ -667,11 +699,15 @@ namespace
 			UnLockMouse();
 			Player_SetControlEnabled(false);
 			RefreshMenuText();
+			GameAudio_PlayMenuOpen();
+			GameAudio_SetBgmMenu();
 		}
 		else
 		{
 			LockMouse();
 			Player_SetControlEnabled(g_Mode != CourseMode::RaceCountdown);
+			GameAudio_PlayMenuClose();
+			ApplyModeBgm();
 		}
 	}
 
@@ -684,6 +720,7 @@ namespace
 		}
 		g_MenuCursor = (g_MenuCursor + direction + itemCount) % itemCount;
 		RefreshMenuText();
+		GameAudio_PlayCursor();
 	}
 
 	void SelectCourse(int direction)
@@ -696,6 +733,7 @@ namespace
 			static_cast<int>(g_Courses.size())) %
 			static_cast<int>(g_Courses.size());
 		RefreshMenuText();
+		GameAudio_PlayCourseSwitch();
 	}
 
 	void ExecuteMenuItem(int item)
@@ -715,6 +753,7 @@ namespace
 				{
 					g_WorkingCourse.points.pop_back();
 					RebuildRings(g_WorkingCourse.points);
+					GameAudio_PlayPointUndo();
 				}
 				break;
 			case 2:
@@ -736,6 +775,7 @@ namespace
 		{
 			if (item == 0)
 			{
+				GameAudio_PlayRaceAbort();
 				ReturnToFreeFlight();
 				SetMenuOpen(false);
 			}
@@ -755,6 +795,10 @@ namespace
 				SetMenuOpen(false);
 				StartRace();
 			}
+			else
+			{
+				GameAudio_PlayInvalid();
+			}
 			break;
 		case 2:
 			if (g_SelectedCourse >= 0 &&
@@ -762,6 +806,10 @@ namespace
 			{
 				SetMenuOpen(false);
 				StartCourseCreate(g_SelectedCourse);
+			}
+			else
+			{
+				GameAudio_PlayInvalid();
 			}
 			break;
 		case 3:
@@ -788,6 +836,7 @@ namespace
 			{
 				g_MenuCursor = clickedLine;
 				RefreshMenuText();
+				GameAudio_PlayCursor();
 				ExecuteMenuItem(clickedLine);
 				return;
 			}
@@ -941,6 +990,7 @@ void Course_Update(void)
 		{
 			g_WorkingCourse.points.pop_back();
 			RebuildRings(g_WorkingCourse.points);
+			GameAudio_PlayPointUndo();
 		}
 		return;
 	}
@@ -949,12 +999,20 @@ void Course_Update(void)
 	{
 		const double elapsed = std::chrono::duration<double>(
 			std::chrono::steady_clock::now() - g_CountdownStarted).count();
+		const int number = 3 - static_cast<int>(elapsed);
+		if (number > 0 && number != g_LastCountdownNumber)
+		{
+			g_LastCountdownNumber = number;
+			GameAudio_PlayCountdown();
+		}
 		if (elapsed >= 3.0)
 		{
 			g_Mode = CourseMode::RaceRunning;
 			g_RaceStarted = std::chrono::steady_clock::now();
 			g_LastPlayerPos = Player_GetPos();
 			Player_SetControlEnabled(true);
+			GameAudio_PlayGo();
+			GameAudio_SetBgmRace();
 		}
 		return;
 	}
@@ -989,6 +1047,7 @@ void Course_Update(void)
 			else
 			{
 				Player_ActivateDash();
+				GameAudio_PlayBoost();
 			}
 		}
 	}

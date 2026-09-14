@@ -1,6 +1,7 @@
 ﻿#include "game.h"
 #include "field.h"
 #include "course.h"
+#include "gameaudio.h"
 #include "player.h"
 #include "playercamera.h"
 #include "renderer.h"
@@ -42,6 +43,7 @@ void Game_Initialize(void)
 {
 	PlayerCamera_Initialize();
 	Field_Initialize();
+	GameAudio_Initialize();
 	Course_Initialize();
 	Sunlight_Initialize();
 	Ui_Initialize();
@@ -120,6 +122,7 @@ void Game_Finalize(void)
 {
 	Course_Finalize();
 	Player_Finalize();
+	GameAudio_Finalize();
 	PlayerCamera_Finalize();
 	Sunlight_Finalize();
 	Field_Finalize();

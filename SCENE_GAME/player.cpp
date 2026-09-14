@@ -2,6 +2,7 @@
 #include "playercamera.h"
 #include "collision.h"
 #include "field.h"
+#include "gameaudio.h"
 #include "input_manager.h"
 #include "sprite3d.h"
 #include "main.h"
@@ -44,6 +45,7 @@ static float g_VerticalSpeed = 0.0f;
 static bool g_ControlEnabled = true;
 static float g_DashTimer = 0.0f;
 static float g_DashVelocity = 0.0f;
+static bool g_WasGrounded = false;
 
 static float Approach(float current, float target, float amount)
 {
@@ -74,6 +76,7 @@ void Player_Initialize(XMFLOAT3 startPos)
 	g_ControlEnabled = true;
 	g_DashTimer = 0.0f;
 	g_DashVelocity = 0.0f;
+	g_WasGrounded = false;
 	g_PlayerModel = new Sprite3D(
 		startPos,
 		{ 1.0f, 1.0f, 1.0f },
@@ -98,6 +101,7 @@ void Player_Initialize(XMFLOAT3 startPos)
 	if (g_HalfExtents.x < PLAYER_MIN_HALF_EXTENT) g_HalfExtents.x = PLAYER_MIN_HALF_EXTENT;
 	if (g_HalfExtents.y < PLAYER_MIN_HALF_EXTENT) g_HalfExtents.y = PLAYER_MIN_HALF_EXTENT;
 	if (g_HalfExtents.z < PLAYER_MIN_HALF_EXTENT) g_HalfExtents.z = PLAYER_MIN_HALF_EXTENT;
+	GameAudio_PlaySpawn();
 }
 
 void Player_Finalize(void)
@@ -167,6 +171,7 @@ void Player_SetControlEnabled(bool enabled)
 		g_VerticalSpeed = 0.0f;
 		g_DashTimer = 0.0f;
 		g_DashVelocity = 0.0f;
+		GameAudio_UpdateHover(false, 0.0f);
 	}
 }
 
@@ -186,6 +191,7 @@ void Player_Update(void)
 	{
 		g_ForwardSpeed = 0.0f;
 		g_VerticalSpeed = 0.0f;
+		GameAudio_UpdateHover(false, 0.0f);
 		return;
 	}
 
@@ -260,8 +266,26 @@ void Player_Update(void)
 	g_Roll = Approach(g_Roll, targetRoll, PLAYER_ROLL_FOLLOW_RATE);
 
 	XMFLOAT3 nextPos = g_Pos;
-	Collision_MoveAABB(g_Pos, g_HalfExtents, delta, &nextPos, nullptr);
+	bool grounded = false;
+	Collision_MoveAABB(g_Pos, g_HalfExtents, delta, &nextPos, &grounded);
+	const float blockedXz =
+		fabsf((g_Pos.x + delta.x) - nextPos.x) +
+		fabsf((g_Pos.z + delta.z) - nextPos.z);
+	if (blockedXz > 0.0005f)
+	{
+		GameAudio_PlayHit();
+	}
+	if (grounded && !g_WasGrounded)
+	{
+		GameAudio_PlayLand();
+	}
+	g_WasGrounded = grounded;
 	g_Pos = nextPos;
+
+	const float speedAbs =
+		fabsf(g_ForwardSpeed) + fabsf(g_VerticalSpeed) + fabsf(g_DashVelocity);
+	const float speedMax = g_MoveSpeed + PLAYER_DASH_VELOCITY;
+	GameAudio_UpdateHover(true, speedMax > 0.0f ? speedAbs / speedMax : 0.0f);
 
 	if (g_PlayerModel)
 	{

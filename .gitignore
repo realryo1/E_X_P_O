@@ -388,3 +388,5 @@ asset/expomodel
 asset/collision/expo_*.bin
 tool/EXPOGAME_BUILD*/
 imgui.ini
+元bgm/
+元se/
