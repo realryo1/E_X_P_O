@@ -491,8 +491,13 @@ double sec = GetPlaybackPositionSec(bgm);
 - SE: `SOUND_SE_VOLUME = 0.4f`
 
 `INPUT_ACTION_DECIDE` のトリガー時、`Input_Initialize` で読み込んだ `kettei.mp3` が自動再生される。
+ゲーム側の BGM / SE は `SCENE_GAME/gameaudio.cpp`。一覧は [audio_needs.md](../document_game/audio_needs.md)。
 パスに `bgm`、`music`、`score` を含むファイルは BGM として扱い、それ以外は効果音として扱う。
 音声キャッシュも通常シーンとグローバルBGMを分けて管理する。
+
+Windows の `mmsystem.h` が `PlaySound` を `PlaySoundA` / `PlaySoundW` に置き換える。
+`sound.h` は宣言の前にこのマクロを `#undef` する。`sound.cpp` は先に `define.h`（`WIN32_LEAN_AND_MEAN`）を読む。
+呼び出し側も `define.h` を `sound.h` より先にインクルードする。
 
 ---
 

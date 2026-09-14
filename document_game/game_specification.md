@@ -12,7 +12,7 @@
 [task_list.md](task_list.md)を参照する。
 描画・ライティング・シャドウの詳細は
 [rendering_and_lighting.md](rendering_and_lighting.md)。
-BGM / SE の候補地点は
+BGM / SE のパスと発火地点は
 [audio_needs.md](audio_needs.md)。
 フレームワークの使い方は
 [framework_usage.md](../document_framework/framework_usage.md)。
@@ -46,6 +46,7 @@ BGM / SE の候補地点は
 - Debugビルド用ImGui（`Expo Player` / `Expo Sunlight`）：速度・ワープ操作および太陽・シャドウ調整を行う。Releaseビルドでは表示しない。スカイドーム以外のモデルは `S_PBR` とglTF PBRマテリアルを使用し、全対象モデルが影を受ける。影の投影元は床、LOD2、遠景LOD2、リング、タクシーで、LOD3表示時も建物影はLOD2ベースとする。スカイドームは `S_SKYBOX`。起動既定は方位 `-170.0°`、仰角・色はHDR抽出値、強度 `2.0`、環境光倍率 `0.8`、ヨーオフセット `0`、粗さ `0.81`、金属度 `0`、シャドウ範囲 `0–10m / 10–70m / 70–160m`、バイアス `0.0005`、影の明るさ `0.25`。
 - 建物の固定Y `-9.010`、リングの固定Y `-1.550`、床の沈み込み `-0.080`。カメラ Far は 2000。
 - ポインタ操作：`Esc` / パッドSTARTでゲーム内メニューを開き、メニュー中はポインタを表示する。メニューを閉じるとポインタを再ロックする。メニュー中は機体操作を停止する。
+- 音声：`gameaudio.cpp` が散策／レース／ゴール／メニュー／コース作成の BGM と、メニュー・レース・ホバー・衝突の SE を再生する。決定は `InputManager` の `kettei.mp3` のみ。パスと元ファイル名は [audio_needs.md](audio_needs.md)。
 
 ### 操作
 
@@ -62,10 +63,11 @@ BGM / SE の候補地点は
 
 | ファイル | 役割 |
 | :--- | :--- |
-| [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | シーン入口。Field / Player / PlayerCamera / Sunlight / Ui の呼び出し。ゲーム内メニュー開閉中のマウスロックを制御 |
+| [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | シーン入口。Field / Player / PlayerCamera / Sunlight / Ui / GameAudio の呼び出し。ゲーム内メニュー開閉中のマウスロックを制御 |
+| [`SCENE_GAME/gameaudio.cpp`](../SCENE_GAME/gameaudio.cpp) | BGM 切替と SE 再生。`LoadMP3` / `PlaySound`。欠損ファイルは無音 |
 | [`SCENE_GAME/field.cpp`](../SCENE_GAME/field.cpp) | マニフェスト、ENU、`ExpoDrawJob`、フェード中スキップ付き `Field_PumpLoad`、固定Yオフセット、スカイドームヨー |
-| [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | 空飛ぶタクシーの出現、ホバー移動、描画、`Player_DrawDebug`（速度・ワープ・`スロープへ`） |
-| [`SCENE_GAME/course.cpp`](../SCENE_GAME/course.cpp) | ゲーム内メニュー、コース一覧、YAML入出力、作成・レースモード、ビルボード輪、タイマー、ゴールログ |
+| [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | 空飛ぶタクシーの出現、ホバー移動、描画、ホバー／ヒット／着地 SE、`Player_DrawDebug`（速度・ワープ・`スロープへ`） |
+| [`SCENE_GAME/course.cpp`](../SCENE_GAME/course.cpp) | ゲーム内メニュー、コース一覧、YAML入出力、作成・レースモード、ビルボード輪、タイマー、ゴールログ、BGM 切替とメニュー／レース SE |
 | [`SCENE_GAME/playercamera.cpp`](../SCENE_GAME/playercamera.cpp) | 三人称、Far 2000、`Camera_Initialize`、`SetCameraPosition` |
 | [`SCENE_GAME/sunlight.cpp`](../SCENE_GAME/sunlight.cpp) | 平行太陽、連動環境光、スカイドームヨー連動、`Sunlight_DrawDebug`（窓名 `Expo Sunlight`） |
 | [`SCENE_GAME/ui.cpp`](../SCENE_GAME/ui.cpp) | DrawFont HUD。タイトル、操作案内、ロード状況、メモリ |
@@ -127,12 +129,12 @@ BGM / SE の候補地点は
 3D Tiles の `boundingVolume.region` によるタイル単位カリングを描画時に行う。LOD3はカメラ距離でロード・破棄し、各 `Sprite3D` の描画時にはモデル単位の視錐台カリングも働く。タイル境界カリングはストリーミング判定とは分離する。
 `null2` の見た目修正はリサーチ復帰後。モデルと座標は [plateau.md](plateau.md)。
 
-- `Game_Initialize`: `PlayerCamera_Initialize`、`Field_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
+- `Game_Initialize`: `PlayerCamera_Initialize`、`Field_Initialize`、`GameAudio_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。`GameAudio_Initialize` で散策 BGM を開始する。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
 - `Game_Update`: `Field_PumpLoad`、マウスロック切替、`PlayerCamera_UpdateInput`、`Player_Update`、`Course_Update`、`PlayerCamera_Update`、`Ui_Update`、`Sunlight_Update` の順。カメラ入力を先に更新し、プレイヤーが最新のヨーを使用する。メニュー開閉とコース操作は`Course_Update`で処理し、メニュー中は操作を停止する。ロック中は `game.cpp` が `Mouse_GetState` しない（相対移動量は視点側が一度だけ読む）。
 - `Game_Draw`: `PlayerCamera_Draw` のあと、深度ありで `Sunlight_Apply`、注視点周辺の局所 ShadowMap（床・LOD2・遠景LOD2・リング・タクシーを投影）、場とプレイヤーの描画、マテリアルを白へ戻してから `Ui_Draw`、HUD、ゲーム内メニュー、Debugビルド用の`Player_DrawDebug` / `Sunlight_DrawDebug`。
 - 初期ロード制御: フェードが不透明なあいだ、`Field_PumpLoad` は GLB を読まない。描画が終わるまで同じフレームでは再ポンプしない。
 - プレイヤー出現: `asset/model/flytaxi.glb`。読み込み後に表示長辺約0.8へ一様スケールし、`Field_GetSpawnPos()` の高度でホバーを開始する。出現時にマウスロックする。
-- レース処理: `Course_Draw` は1つ目の座標へ`cube.fbx`のスタートマーカーを置き、2つ目以降のコース座標へカメラ方向を向く両面ビルボードを描画する。レースではプレイヤーの前フレーム位置から現フレーム位置への線分が、次の輪の平面を半径内で通過した場合だけ次の輪へ進む。コースの点は1つ目をスタート位置、2つ目以降を配列順の輪として使用する。レースのカウントダウン中は`Player_SetControlEnabled(false)`で移動を停止する。
+- レース処理: `Course_Draw` は1つ目の座標へ`cube.fbx`のスタートマーカーを置き、2つ目以降のコース座標へカメラ方向を向く両面ビルボードを描画する。レースではプレイヤーの前フレーム位置から現フレーム位置への線分が、次の輪の平面を半径内で通過した場合だけ次の輪へ進む。コースの点は1つ目をスタート位置、2つ目以降を配列順の輪として使用する。レースのカウントダウン中は`Player_SetControlEnabled(false)`で移動を停止する。BGM はモードに合わせて `gameaudio.cpp` が切り替える。 SE の一覧は [audio_needs.md](audio_needs.md)。
 - コースYAML入出力: `Course` のYAMLは`name`、`points`、`logs`で構成する。保存時に`asset/course`を作成し、新規コース名とファイル名を自動生成する。
 - 画面再描画: `PlayerCamera_Update` が毎フレーム `RequestRedraw` する。通常シーンのPresent間引きと両立させるためである。
 
@@ -198,6 +200,5 @@ asset/
 2. 衝突メッシュの間引き（必要に応じて検討。詳細は [collision.md](../document_framework/collision.md)）
 3. 機体アニメーション接続（`flytaxi.glb` の旋回・加速・プロペラ等）
 4. 残りのPBR・環境拡張（IBL、霧、昼夜サイクル、プレイヤー環境マッピング）
-5. 音響演出の追加（BGM、SE）
-6. タイトル画面・リザルト画面の本実装
-7. 会場全体の調整・配布準備
+5. タイトル画面・リザルト画面の本実装
+6. 会場全体の調整・配布準備

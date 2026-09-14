@@ -70,7 +70,7 @@ GitHub ActionsのリリースZIPにも万博モデル本体は含まれません
 
 ### ゲーム仕様・データ
 - [ゲーム仕様書](document_game/game_specification.md) - 詳細なゲームルール、操作仕様、コース作成、ファイル構成
-- [BGM / SE 候補一覧](document_game/audio_needs.md) - SCENE_GAME で音が必要そうな地点
+- [BGM / SE](document_game/audio_needs.md) - SCENE_GAME の音のパス、元ファイル名、発火地点
 - [レンダリング・ライティング仕様](document_game/rendering_and_lighting.md) - PBR、太陽光、シャドウマップ、スカイドーム
 - [開発タスク一覧](document_game/task_list.md) - 現在の開発ロードマップ・進捗管理
 - [PLATEAUデータ仕様](document_game/plateau.md) - 3D都市モデルの出典・座標系・変換パイプライン

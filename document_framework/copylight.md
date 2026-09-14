@@ -1,5 +1,5 @@
 # 権利表記
-2026年9月13日時点（expogame）
+2026年9月15日時点（expogame）
 
 ## 楽曲
 explore.mp3 / course_create.mp3：会場散策・コース作成 /
@@ -47,6 +47,8 @@ hover.mp3：ホバー /
 
 hit.mp3：壁ヒット /
 机をドンと叩く.mp3
+
+未配置（コードからは再生するが無音）: `bgm/menu.mp3`、`se/warp.mp3`、`se/race_abort.mp3`、`se/land.mp3`、`se/spawn.mp3`
 
 
 ## テクスチャ

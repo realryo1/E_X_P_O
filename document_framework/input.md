@@ -10,7 +10,7 @@
 
 * **任天堂配列 (ABXY) 強制**: `Input_Initialize` 時に `GAMEPAD_LAYOUT_SWITCH_ABXY` を設定。右ボタンが A、下ボタンが B。
 * **シーンからの直接インクルード排除**: シーン実装は `keyboard.h` / `gamepad.h` ではなく `input_manager.h` を使う（デバッグシーンの特殊キー操作は例外あり）。
-* **決定 SE**: `INPUT_ACTION_DECIDE` のトリガー成功時に `asset/sound/se/kettei.mp3` を再生する。
+* **決定 SE**: `INPUT_ACTION_DECIDE` のトリガー成功時に `asset/sound/se/kettei.mp3` を再生する。ゲーム内のその他の BGM / SE は `SCENE_GAME/gameaudio.cpp` が再生し、決定音は重ねない。
 
 追加 API:
 

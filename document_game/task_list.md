@@ -6,13 +6,14 @@
 [game_specification.md](game_specification.md) に書く。
 この資料は進捗と、次に何をするかだけを持つ。
 描画・ライティング仕様は [rendering_and_lighting.md](rendering_and_lighting.md)、
+BGM / SE は [audio_needs.md](audio_needs.md)、
 フレームワークの使い方は [framework_usage.md](../document_framework/framework_usage.md)。
 
 ## いまここ
 
-会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測まで実装完了。確定仕様は [game_specification.md](game_specification.md) を参照。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE まで実装完了。確定仕様は [game_specification.md](game_specification.md) を参照。
 
-現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・霧・昼夜サイクルである。
+現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・霧・昼夜サイクルである。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
 ---
 
@@ -70,10 +71,10 @@
 - [ ] `pbr-ibl-fog-day-night`: IBL、霧、昼夜サイクル、プレイヤーへの環境マッピングは未着手
 - [x] `billboard-course-race`: `SCENE_GAME` 内にフリー飛行・コース作成・レースを追加。`P`配置、`asset/course/*.yml`保存、`asset/texture/makulogo.png`のビルボード輪、カウントダウン、タイマー、通過判定、ゴールログに対応
 - [x] `game-menu-input`: `SCENE_GAME` のコース操作をImGuiからゲーム内メニューへ移行。`Esc` / パッドSTARTで開閉し、ClickFont・矢印キー・決定入力でフリー飛行、レース、コース作成を操作。新規コース名は自動生成し、ReleaseビルドではPlayer/SunlightのDebug ImGuiを表示しない
+- [x] `game-audio`: `gameaudio.cpp` で BGM / SE を再生。パスは [audio_needs.md](audio_needs.md)。`menu.mp3` / `warp.mp3` / `race_abort.mp3` / `land.mp3` / `spawn.mp3` は未配置
 - [x] `separate-expo-assets`: 万博モデルを`asset/expomodel`へ分離し、規約同意付き`tool/download_expo_assets.bat`でローカル生成する
 - [ ] 大屋根リング外側の日本館や企業館のモデルがしょぼい問題の修正
 - [ ] GLB直接読み込み失敗の謎に迫る
-- [ ] BGM・SE追加
 - [ ] タイトル、リザルトをまともに
 - [ ] アプリアイコン差し替え（手動）
 - [ ] 諸々整備してgithubへ上げる（手動）
@@ -85,8 +86,10 @@
 | 資料 | 内容 |
 | :--- | :--- |
 | [game_specification.md](game_specification.md) | できること、操作、触るファイル、実装済み仕様 |
+| [audio_needs.md](audio_needs.md) | BGM / SE のパス、元ファイル名、発火地点 |
 | [rendering_and_lighting.md](rendering_and_lighting.md) | レンダリング、太陽光、PBR、シャドウマップ、スカイドーム仕様 |
 | [plateau.md](plateau.md) | PLATEAU 出典、変換、実行時配置 |
 | [collision.md](../document_framework/collision.md) | 当たり判定と衝突バイナリ |
 | [framework_usage.md](../document_framework/framework_usage.md) | フレームワーク API、起動、ループ |
 | [input.md](../document_framework/input.md) | 入力アクション |
+| [copylight.md](../document_framework/copylight.md) | 素材の権利表記 |

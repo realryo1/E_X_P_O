@@ -1,15 +1,16 @@
-# SCENE_GAME 音声（BGM / SE）候補一覧
+# SCENE_GAME 音声（BGM / SE）
 
-`SCENE_GAME` の現行コードから、ゲームとして音が欲しくなる地点を洗い出した資料である。
 再生は `SCENE_GAME/gameaudio.cpp` が行い、決定入力の SE だけはフレームワーク側でも鳴る。
-ファイルが無い場合は `LoadMP3` が失敗して無音になる。
-音源ファイルの権利は [copylight.md](../document_framework/copylight.md)、再生 API は [framework_usage.md](../document_framework/framework_usage.md) の Sound 節を参照する。
+`LoadMP3` が失敗したパスは無音のまま進む。
+権利は [copylight.md](../document_framework/copylight.md)、再生 API は [framework_usage.md](../document_framework/framework_usage.md) の Sound 節。
 パスに `bgm` を含むファイルは BGM 扱いになる。
 
-## 現状
+## 役割分担
 
 `INPUT_ACTION_DECIDE` 成功時は `framework` が `asset/sound/se/kettei.mp3` を再生する。メニュー決定と、ゴール後の `Enter` / A でも鳴る。ゲーム側では同じ決定に重ねて鳴らさない。
 メニュー決定と機体上昇はどちらも `Space` を使うが、メニュー中は `Player_SetControlEnabled(false)` のため上昇入力は止まる。
+
+元音源なしのスロット（`menu.mp3`、`warp.mp3`、`race_abort.mp3`、`land.mp3`、`spawn.mp3`）はコードから再生するが、ファイルが無いので無音である。
 
 ## BGM
 
