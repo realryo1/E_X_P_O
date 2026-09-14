@@ -1,4 +1,4 @@
-#include "game.h"
+﻿#include "game.h"
 #include "field.h"
 #include "course.h"
 #include "gameaudio.h"
@@ -9,10 +9,37 @@
 #include "ui.h"
 #include "mouse.h"
 #include "fade.h"
+#include "keyboard.h"
+#include "../framework/debug_ostream.h"
 #include "imgui/imgui.h"
 
 static bool g_PrevLeftButton = false;
 static bool g_InitialLoadNotified = false;
+#if defined(_DEBUG)
+static bool g_EnableLocalShadowPass = true;
+static bool g_EnableSkybox = true;
+#endif
+
+#if defined(_DEBUG)
+static void Game_UpdateDebugRenderToggles(void)
+{
+	if (Keyboard_IsKeyDownTrigger(KK_F5))
+	{
+		g_EnableLocalShadowPass = !g_EnableLocalShadowPass;
+		hal::dout << "[Debug Render] Local shadow pass: "
+			<< (g_EnableLocalShadowPass ? "ON" : "OFF") << std::endl;
+		RequestRedraw();
+	}
+	if (Keyboard_IsKeyDownTrigger(KK_F6))
+	{
+		g_EnableSkybox = !g_EnableSkybox;
+		Field_SetSkyboxEnabled(g_EnableSkybox);
+		hal::dout << "[Debug Render] Skybox: "
+			<< (g_EnableSkybox ? "ON" : "OFF") << std::endl;
+		RequestRedraw();
+	}
+}
+#endif
 
 static void Game_UpdateMouseLock(void)
 {
@@ -52,11 +79,25 @@ void Game_Initialize(void)
 	Ui_Initialize();
 	g_PrevLeftButton = false;
 	g_InitialLoadNotified = false;
+#if defined(_DEBUG)
+	g_EnableLocalShadowPass = true;
+	g_EnableSkybox = true;
+	Field_SetSkyboxEnabled(true);
+#endif
 }
 
 void Game_Update(void)
 {
+#if defined(_DEBUG)
+	Game_UpdateDebugRenderToggles();
+#endif
+#if defined(_DEBUG)
+	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_PUMP);
+#endif
 	Field_PumpLoad();
+#if defined(_DEBUG)
+	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_PUMP);
+#endif
 	const bool fieldReady = Field_IsLoadComplete();
 	if (fieldReady)
 	{
@@ -87,6 +128,17 @@ void Game_Update(void)
 	Sunlight_Update();
 }
 
+void Game_PumpAfterPresent(double lastDrawMs, float lastGpuMs)
+{
+#if defined(_DEBUG)
+	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_PUMP);
+#endif
+	Field_PumpAfterPresent(lastDrawMs, lastGpuMs);
+#if defined(_DEBUG)
+	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_PUMP);
+#endif
+}
+
 void Game_Draw(void)
 {
 	if (!Field_IsLoadComplete())
@@ -99,11 +151,19 @@ void Game_Draw(void)
 
 	SetDepthEnable(true);
 	Sunlight_Apply();
+#if defined(_DEBUG)
+	const bool drawLocalShadow = g_EnableLocalShadowPass;
+#else
+	const bool drawLocalShadow = true;
+#endif
 	XMMATRIX shadowView[NUM_SHADOW_CASCADES] = {};
 	XMMATRIX shadowProjection[NUM_SHADOW_CASCADES] = {};
 	XMFLOAT3 shadowFocus[NUM_SHADOW_CASCADES] = {};
 	float shadowRadius[NUM_SHADOW_CASCADES] = {};
-	if (Sunlight_BeginLocalShadow(
+#if defined(_DEBUG)
+	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_SHADOW);
+#endif
+	if (drawLocalShadow && Sunlight_BeginLocalShadow(
 		shadowView,
 		shadowProjection,
 		shadowFocus,
@@ -135,9 +195,21 @@ void Game_Draw(void)
 		}
 		Sunlight_EndLocalShadow();
 	}
+#if defined(_DEBUG)
+	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_SHADOW);
+	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_FIELD);
+#endif
 	Field_Draw();
+#if defined(_DEBUG)
+	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_FIELD);
+	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_OBJECTS);
+#endif
 	Player_Draw();
 	Course_Draw();
+#if defined(_DEBUG)
+	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_OBJECTS);
+	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_UI);
+#endif
 
 	Ui_ResetMaterial();
 	SetDepthEnable(false);
@@ -147,6 +219,9 @@ void Game_Draw(void)
 	Course_DrawMenu();
 	Sunlight_DrawDebug();
 	PlayerCamera_DrawDebug();
+#if defined(_DEBUG)
+	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_UI);
+#endif
 }
 
 void Game_Finalize(void)

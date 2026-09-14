@@ -54,7 +54,7 @@ static float g_AnimT = 0.0f;
 static float g_BobTime = 0.0f;
 
 static const XMFLOAT2 kTaxiSize = { 500.0f, 500.0f };
-static const XMFLOAT2 kTaxiRest = { 1000.0f, 400.0f };
+static const XMFLOAT2 kTaxiRest = { 700.0f, 500.0f };
 static const XMFLOAT2 kExpoRest = { SCREEN_X / 4.0f, 160.0f };
 static const XMFLOAT2 kRaceRest = { SCREEN_X / 4.0f * 3.0f, 160.0f };
 static const float kTaxiStartX = SCREEN_X + kTaxiSize.x * 0.5f;

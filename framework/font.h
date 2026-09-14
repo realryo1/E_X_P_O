@@ -132,6 +132,7 @@ private:
 	void EvictLRUGlyph();
 	int UTF8ToCodePoint(const std::string& text, size_t& index);
 	void UpdateAtlasTexture();
+	void UpdateAtlasTextureRect(int x, int y, int width, int height);
 	bool EnsurePixelSize();
 	bool EnsureVertexCapacity(UINT vertexCount);
 	void RebuildMesh();

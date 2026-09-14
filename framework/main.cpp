@@ -11,6 +11,8 @@
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <iomanip>
 #include "main.h"
 #include "define.h"
 #include "scene.h"
@@ -58,6 +60,11 @@ int g_CountFPS;       // 描画FPS（Draw/Present の呼び出し回数/秒）
 int g_CountUpdateFPS; // 論理更新FPS（Update の呼び出し回数/秒）
 long long g_UpdateTime = 0;
 long long g_DrawTime = 0;
+static double g_PresentTimeMs = 0.0;
+#if defined(_DEBUG)
+static std::ofstream g_DebugFramePerfLog;
+static unsigned long long g_DebugFrameLogIndex = 0;
+#endif
 wchar_t g_DebugStr[2048];
 static int g_TargetFPS = FPS;  // 目標FPS（デフォルトは FPS マクロの値）
 static bool g_RequestRedraw = true; // 起動直後は必ず1回描画する
@@ -80,6 +87,59 @@ void SetFPS(int fps)
 int GetGamePad() {
 	return pad;
 }
+
+#if defined(_DEBUG)
+static void DebugFramePerfLogInitialize(void)
+{
+	g_DebugFramePerfLog.open(
+		"debug-frame-perf.log",
+		std::ios::out | std::ios::trunc);
+	g_DebugFrameLogIndex = 0;
+	if (g_DebugFramePerfLog)
+	{
+		g_DebugFramePerfLog
+			<< "frame,totalUs,updUs,drwUs,prsMs,gpuMs,mapCount,mapMs,"
+			<< "shdMs,fldMs,objMs,uiMs,pumpMs\n";
+	}
+}
+
+static void DebugFramePerfLogWrite(float gpuFrameMs)
+{
+	if (!g_DebugFramePerfLog)
+	{
+		return;
+	}
+
+	g_DebugFramePerfLog
+		<< g_DebugFrameLogIndex++ << ','
+		<< (g_UpdateTime + g_DrawTime) << ','
+		<< g_UpdateTime << ','
+		<< g_DrawTime << ','
+		<< std::fixed << std::setprecision(3) << g_PresentTimeMs << ','
+		<< gpuFrameMs << ','
+		<< Direct3D_DebugGetMapCount() << ','
+		<< Direct3D_DebugGetMapMs() << ','
+		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_SHADOW) << ','
+		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_FIELD) << ','
+		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_OBJECTS) << ','
+		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_UI) << ','
+		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_PUMP) << '\n';
+
+	if ((g_DebugFrameLogIndex % 60) == 0)
+	{
+		g_DebugFramePerfLog.flush();
+	}
+}
+
+static void DebugFramePerfLogFinalize(void)
+{
+	if (g_DebugFramePerfLog)
+	{
+		g_DebugFramePerfLog.flush();
+		g_DebugFramePerfLog.close();
+	}
+}
+#endif
 
 void RequestRedraw(void)
 {
@@ -225,6 +285,9 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 	Gamepad_Initialize();
 
 	Init();
+#if defined(_DEBUG)
+	DebugFramePerfLogInitialize();
+#endif
 
 	//メッセージループ
 	MSG msg;
@@ -265,6 +328,9 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 			// 論理更新：固定ステップを消化する（最大5ステップ）
 			accumulator += delta;
 			int steps = 0;
+#if defined(_DEBUG)
+			Direct3D_DebugResetFrameCounters();
+#endif
 			while (accumulator >= FIXED_STEP && steps < 5)
 			{
 				Gamepad_Update();
@@ -372,18 +438,30 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 				auto endDraw = std::chrono::high_resolution_clock::now();
 				g_DrawTime = std::chrono::duration_cast<std::chrono::microseconds>(endDraw - startDraw).count();
 
+				const auto startPresent = std::chrono::high_resolution_clock::now();
 				Present();//バッファの表示（VSync 待ちはここ）
+				const auto endPresent = std::chrono::high_resolution_clock::now();
+				g_PresentTimeMs =
+					std::chrono::duration<double, std::milli>(
+						endPresent - startPresent).count();
 				g_RequestRedraw = false;
 				if (g_StartupWarmupPresents > 0)
 				{
 					g_StartupWarmupPresents--;
 				}
+				PumpAfterPresent(
+					static_cast<double>(g_DrawTime) / 1000.0,
+					Direct3D_GetLastGpuFrameMs());
+#if defined(_DEBUG)
+				DebugFramePerfLogWrite(Direct3D_GetLastGpuFrameMs());
+#endif
 				frameCount++; // Present() 1回 = 描画1フレーム
 			}
 			else
 			{
 				// Present していないフレームは前回の冷えた計測値を引きずるので 0 にする
 				g_DrawTime = 0;
+				g_PresentTimeMs = 0.0;
 
 				// 論理ステップ待ち、または静止シーンで Present 不要なときの空回し防止
 				const double remaining = FIXED_STEP - accumulator;
@@ -406,15 +484,67 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 			if (std::chrono::duration_cast<Seconds>(now - titleLastTime).count() >= 0.2)
 			{
 				titleLastTime = now;
-				swprintf(g_DebugStr, sizeof(g_DebugStr) / sizeof(wchar_t),
-					L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus",
-					g_CountFPS, g_CountUpdateFPS, g_UpdateTime + g_DrawTime, g_UpdateTime, g_DrawTime);
+				const float gpuFrameMs = Direct3D_GetLastGpuFrameMs();
+				const unsigned long long mapCount =
+					Direct3D_DebugGetMapCount();
+				const double mapMs = Direct3D_DebugGetMapMs();
+				const double shadowMs = Direct3D_DebugGetStageMs(
+					DIRECT3D_DEBUG_STAGE_SHADOW);
+				const double fieldMs = Direct3D_DebugGetStageMs(
+					DIRECT3D_DEBUG_STAGE_FIELD);
+				const double objectsMs = Direct3D_DebugGetStageMs(
+					DIRECT3D_DEBUG_STAGE_OBJECTS);
+				const double uiMs = Direct3D_DebugGetStageMs(
+					DIRECT3D_DEBUG_STAGE_UI);
+				const double pumpMs = Direct3D_DebugGetStageMs(
+					DIRECT3D_DEBUG_STAGE_PUMP);
+				if (gpuFrameMs >= 0.0f)
+				{
+					swprintf(g_DebugStr, sizeof(g_DebugStr) / sizeof(wchar_t),
+						L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus | Prs: %.1fms | GPU: %.1fms | Map: %llu/%.2fms | Shd: %.1f | Fld: %.1f | Obj: %.1f | UI: %.1f | Pump: %.1f",
+						g_CountFPS,
+						g_CountUpdateFPS,
+						g_UpdateTime + g_DrawTime,
+						g_UpdateTime,
+						g_DrawTime,
+						g_PresentTimeMs,
+						gpuFrameMs,
+						mapCount,
+						mapMs,
+						shadowMs,
+						fieldMs,
+						objectsMs,
+						uiMs,
+						pumpMs);
+				}
+				else
+				{
+					swprintf(g_DebugStr, sizeof(g_DebugStr) / sizeof(wchar_t),
+						L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus | Prs: %.1fms | GPU: n/a | Map: %llu/%.2fms | Shd: %.1f | Fld: %.1f | Obj: %.1f | UI: %.1f | Pump: %.1f",
+						g_CountFPS,
+						g_CountUpdateFPS,
+						g_UpdateTime + g_DrawTime,
+						g_UpdateTime,
+						g_DrawTime,
+						g_PresentTimeMs,
+						mapCount,
+						mapMs,
+						shadowMs,
+						fieldMs,
+						objectsMs,
+						uiMs,
+						pumpMs);
+				}
 				SetWindowText(hWnd, g_DebugStr);
 			}
 #endif
 		}
 
 	} while (msg.message != WM_QUIT);//windowsから終了メッセージが来たらループ終了
+
+#if defined(_DEBUG)
+	DebugFramePerfLogFinalize();
+#endif
 
 	//ImGui のクリーンアップ
 	ImGui_ImplDX11_Shutdown();

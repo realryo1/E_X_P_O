@@ -1,4 +1,4 @@
-// =========================================================
+﻿// =========================================================
 // fade.cpp フェード制御
 // =========================================================
 #include "fade.h"
@@ -223,9 +223,9 @@ void Fade::SetLoadProgress(float fraction01)
 		const int remaining =
 			m_LoadProgress >= 1.0f
 			? 0
-			: static_cast<int>(std::ceil((1.0f - m_LoadProgress) * 100.0f));
+			: static_cast<int>(std::ceil(m_LoadProgress * 100.0f));
 		char text[64] = {};
-		sprintf_s(text, "残り %d%%", remaining);
+		sprintf_s(text, "ロード中… %d%%", remaining);
 		m_pLoadProgressText->SetText(text);
 	}
 }

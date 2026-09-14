@@ -137,9 +137,11 @@ SAFE_DELETE(g_pNaiyo);
 
 描画は論理更新が1回以上あり、かつ `NeedsPresent` が真のときだけ。要求されるのは起動ウォームアップ、`RequestRedraw`、フェード中、Debug の `SCENE_DEBUG`。静止した通常シーンは `Clear` / `Present` を間引く。
 
-描画フレームの順: ImGui開始 → `Clear` → `SetWorldViewProjection2D` → シーン `Draw` → `SetDepthEnable(false)` とフェード → ImGui → `Present(1, 0)`。
+描画フレームの順: ImGui開始 → `Clear` → `SetWorldViewProjection2D` → シーン `Draw` → `SetDepthEnable(false)` とフェード → ImGui → `Present(1, 0)` → シーンの `PumpAfterPresent`（`SCENE_GAME` のみ。初期ロード完了後の GLB GPU 化）。
 スワップチェーンは Flip モデルのため、`Present()` 成功後に `IDXGISwapChain3::GetCurrentBackBufferIndex()` で次のバックバッファを取得し、
 対応する RTV を `OMSetRenderTargets()` へ再設定する。次フレームの `Clear` と描画は、その RTV に対して行われる。
+
+`Present` は垂直同期待ち（第1引数 `1`、フラグ `0`）。`ALLOW_TEARING` 付きの即時 Present は FPS 表示だけ上がり画面が更新されないことがあるため使わない。
 
 `SetFPS` は目標値を書き換えるだけ。固定ステップは `FPS` マクロなので、呼んでも論理更新速度は変わらない。
 
@@ -317,7 +319,10 @@ Assimpの法線生成フラグも付けず、GLBに法線が無ければ既定�
 `DecodeEmbeddedTextures` はDirectXTexのCPUデコード後、長辺2048pxを上限に縮小する。
 ただし `expo_floor.glb` は例外として縮小せず、生成時の最大8192pxを維持する。
 8192×8192のRGBAテクスチャはGPU上で約256MBを使用するため、床以外のGLBにはこの例外を適用しない。
-ゲーム側のストリーミングではGPU化とリソース破棄を1フレーム6msの時間予算で進める。
+ゲーム側のストリーミングでは、初期ロード中のGPU化とリソース破棄を1フレーム6ms
+（フェード中は最大40ms）で進める。初期完了後は `Present` のあと最大3ms。
+直前フレームの CPU 描画が 8ms 超、または GPU が 8ms 超ならそのフレームはポンプしない。
+描画と同じフレームの先頭で `UpdateSubresource` すると、NVIDIA では続く `DrawIndexed` が待ちやすい。
 `SCENE_GAME`の万博GLBは `GlbModel::ImportPreparedFile` がGLB 2.0のJSON/BIN、
 `bufferView.byteStride`、Accessorの`byteOffset`、u8/u16/u32インデックスを直接検証する。
 ノード変換をCPUで頂点へ適用し、参照された頂点だけからモデル境界を求める。
@@ -327,6 +332,11 @@ Assimpの法線生成フラグも付けず、GLBに法線が無ければ既定�
 メートル座標を 100 倍し Z を反転する。インデックスの巻き順もそれに合わせる。
 直接経路のGPU転送は頂点・インデックス・テクスチャをチャンク化し、全転送完了まで
 `IsLoaded()`を真にしない。
+`AttachPreparedData` のあと、同一マテリアルの prepared メッシュを
+`MergePreparedMeshesByMaterial` で結合できる。結合後も `expo_batch_id` は
+`GlbBatchRange` として残り、hidden batch の省略と隣接範囲の `DrawIndexed` 結合に使う。
+PLATEAU の遠景LOD2は1ファイルでもプリミティブ分割が多く、NVIDIA の D3D11 ユーザモード
+ドライバでは1発行の固定費が AMD APU より高い。結合は見た目を変えずに発行回数を減らす。
 GLB のテクスチャが無い、または SRV を作れないマテリアルには `GlbModel` が内部生成する
 1×1 の白テクスチャを割り当てる。描画時に null の SRV を通常テクスチャとして渡さない。
 
@@ -350,8 +360,8 @@ Near / Far 外にある大きなモデルの描画コストを抑える。`AnimS
 向いて軽くなっても、ロード済みのモデルが多ければRAMとVRAMの使用量は減らない。
 `SCENE_GAME`では別途カメラ距離によるストリーミングを行い、範囲外の`Sprite3D`を破棄する。
 これにより初回ロードと常駐メモリが改善する。新規GLBのCPUデコードはワーカーで行い、
-GPU化と破棄はゲーム更新中の時間予算に分割するため、移動先の建物がロードされても
-更新処理を長時間占有しない。
+GPU化と破棄はゲーム更新中（初期ロード）または Present 後（ストリーミング継続）の
+時間予算に分割するため、移動先の建物がロードされても更新と描画を長時間占有しない。
 
 LOD3パビリオンの距離判定はカメラと移動先予測点のXZ距離に、既知のモデルXZ半径を足す。
 開始はロード半径 24、破棄は半径 36（ワールド単位）。CPUインポートはロード半径内だけ始め、
@@ -612,8 +622,10 @@ SCENE_DEBUG
 距離ストリーミングが範囲外のGPUバッファとテクスチャを破棄する。
 CPU準備済みモデルはGPU待ちキューとして別に数え、ワーカー数をGPU待ちで塞がない。
 GPU待ちは破棄半径内だけを枠に数え、ロード半径外の READY が近景の開始を止めない。
+初期完了後の GPU アップロードは `Present` の後へ送る。
 
-タイル単位カリングと`geometricError`に基づく実行時LODは未実装であり、
+LOD2本体と未パンチLOD2遠景では、`boundingVolume.region` による描画時タイルカリングを使う。
+`geometricError` に基づく実行時LOD切り替えは未実装である。
 距離ストリーミングとロード待ち上限で現在の常駐量を抑えている。
 
 - 可視範囲外のタイルをGPU化しないタイル単位カリング
@@ -635,9 +647,11 @@ SetDepthEnable(false);  // 内部で 2D ビューポートも設定
 // スプライト / Font の Draw()（各 Draw が行列をセットアップ）
 
 Present();
+PumpAfterPresent(lastDrawMs, lastGpuMs);
 ```
 
-`main.cpp` ではシーン `Draw()` の後に `SetDepthEnable(false)` → `Fade_Draw()` → `Present()` を行う。
+`main.cpp` ではシーン `Draw()` の後に `SetDepthEnable(false)` → `Fade_Draw()` → ImGui → `Present()` を行う。
+`SCENE_GAME` は続けて `PumpAfterPresent` で LOD3 の GPU 化を進める。
 静止した通常シーンは `NeedsPresent` が偽なら `Clear` / `Present` を間引く。動いたフレームは `RequestRedraw`。
 処理順の詳細は [起動とメインループ](#起動とメインループ)。
 
@@ -815,7 +829,9 @@ Releaseビルドには `SCENE_DEBUG` が含まれない。
 | `framework/debug_ostream.h` | `hal::dout << "..."` で OutputDebugString（UTF-8） |
 | `framework/input_monitor_console.h` | 別コンソールに入力状態を表示（`main` が自動初期化） |
 | `framework/main.h` | Win32 / D3D / DirectXTex 共通 include、`SAFE_DELETE`、`SetFPS` |
-| `shader/renderer.h` | 描画エンジン API、`SAFE_RELEASE` |
+| `shader/renderer.h` | 描画エンジン API、`SAFE_RELEASE`。Debug では `Direct3D_DebugStageBegin` と Map 回数 |
+
+Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。`F5` は局所影パスのオン／オフ。
 
 サードパーティ（直接触らない）: `assimp/`・`freetype/`・`imgui/`・`nlohmann/`・`DirectXTex.h`・`stb_truetype.h`。
 

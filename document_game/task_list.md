@@ -1,6 +1,6 @@
 # 万博ゲーム 現在地点とタスク
 
-基準日: 2026年9月13日
+基準日: 2026年9月15日
 
 いま何ができて、どう操作し、どのファイルを触るかは
 [game_specification.md](game_specification.md) に書く。
@@ -11,7 +11,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 ## いまここ
 
-会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE まで実装完了。確定仕様は [game_specification.md](game_specification.md) を参照。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA dGPU 向けの `DrawIndexed` 削減と Present 後ストリーミングまで実装完了。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
 現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・霧・昼夜サイクルである。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
@@ -60,6 +60,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `tile-streaming-cache`: 非同期ロード、キャッシュ、GPUアップロード、破棄を追加する
 - [x] `streaming-stall`: 新規建物ロード時の約5秒停止をなくす（直接GLBデコード、CPU/GPU待ち分離、GPU転送チャンク化、6ms予算、先読み、プレースホルダー）
 - [x] `streaming-nearby-miss`: 破棄半径内のREADYをGPU化し、モデルXZ半径を距離に足して近くても始まらない欠落を防ぐ
+- [x] `nvidia-d3d11-drawcall`: ハイブリッドGPUで NVIDIA だけ数fpsになる問題。原因は塗りではなく `DrawIndexed` 発行。マテリアル結合、Present後GPUポンプ、遠景LOD2の影パス除外、レース開始の `cube.fbx` 廃止。780M 互換は維持。計測はキャプションと `debug-frame-perf.log`
 - [x] `glb-vertex-validation`: カタール／中国を含む万博GLBのAccessor境界、インデックス上限、有限値、参照頂点AABBを検証する
 - [x] `glb-uv-coordinate-contract`: 直接デコードのUVをglTFの値のまま使用し、不要なV反転によるテクスチャずれを修正する
 - [x] `flight-hover`: `flytaxi.glb` の静的表示、カメラヨー基準の前進、マウス追従旋回、旋回時のロール傾斜、Wの前進加減速、Space/Shiftのピッチ付き上下移動を実装する
@@ -77,7 +78,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [ ] GLB直接読み込み失敗の謎に迫る
 - [ ] タイトル、リザルトをまともに
 - [ ] アプリアイコン差し替え（手動）
-- [ ] 諸々整備してgithubへ上げる（手動）
+- [x] 諸々整備してgithubへ上げる（手動）
 
 ---
 

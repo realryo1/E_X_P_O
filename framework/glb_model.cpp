@@ -162,6 +162,7 @@ struct GlbPreparedMeshData
 	float metallicFactor = 1.0f;
 	float roughnessFactor = 1.0f;
 	int batchId = -1;
+	std::vector<GlbBatchRange> batchRanges;
 };
 
 struct GlbPreparedTextureData
@@ -1397,6 +1398,150 @@ bool GlbModel::AttachPreparedData(GlbPreparedData* data)
 	return true;
 }
 
+void GlbModel::MergePreparedMeshesByMaterial(void)
+{
+	if (!m_pPreparedData || m_pPreparedData->meshes.size() < 2)
+	{
+		return;
+	}
+
+	auto sameMaterial = [](const GlbPreparedMeshData& left,
+		const GlbPreparedMeshData& right) -> bool
+	{
+		return left.textureIndex == right.textureIndex &&
+			left.metallicRoughnessIndex == right.metallicRoughnessIndex &&
+			left.normalIndex == right.normalIndex &&
+			left.emissiveIndex == right.emissiveIndex &&
+			left.diffuseColor.x == right.diffuseColor.x &&
+			left.diffuseColor.y == right.diffuseColor.y &&
+			left.diffuseColor.z == right.diffuseColor.z &&
+			left.diffuseColor.w == right.diffuseColor.w &&
+			left.metallicFactor == right.metallicFactor &&
+			left.roughnessFactor == right.roughnessFactor;
+	};
+
+	std::vector<GlbPreparedMeshData> merged;
+	merged.reserve(m_pPreparedData->meshes.size());
+	const std::size_t maxIndex =
+		(static_cast<std::size_t>((std::numeric_limits<unsigned int>::max)()));
+
+	for (const GlbPreparedMeshData& source : m_pPreparedData->meshes)
+	{
+		if (source.vertices.empty() || source.indices.empty())
+		{
+			continue;
+		}
+
+		std::size_t targetIndex = merged.size();
+		for (std::size_t i = 0; i < merged.size(); ++i)
+		{
+			if (sameMaterial(merged[i], source))
+			{
+				targetIndex = i;
+				break;
+			}
+		}
+
+		if (targetIndex == merged.size())
+		{
+			GlbPreparedMeshData destination;
+			destination.diffuseColor = source.diffuseColor;
+			destination.textureIndex = source.textureIndex;
+			destination.metallicRoughnessIndex =
+				source.metallicRoughnessIndex;
+			destination.normalIndex = source.normalIndex;
+			destination.emissiveIndex = source.emissiveIndex;
+			destination.metallicFactor = source.metallicFactor;
+			destination.roughnessFactor = source.roughnessFactor;
+			merged.push_back(std::move(destination));
+		}
+
+		GlbPreparedMeshData& destination = merged[targetIndex];
+		const std::size_t vertexBase = destination.vertices.size();
+		const std::size_t indexBase = destination.indices.size();
+		if (vertexBase > maxIndex ||
+			source.vertices.size() > maxIndex - vertexBase ||
+			indexBase > maxIndex ||
+			source.indices.size() > maxIndex - indexBase)
+		{
+			return;
+		}
+
+		for (std::uint32_t index : source.indices)
+		{
+			if (index >= source.vertices.size() ||
+				static_cast<std::size_t>(index) > maxIndex - vertexBase)
+			{
+				return;
+			}
+			destination.indices.push_back(
+				static_cast<std::uint32_t>(vertexBase) + index);
+		}
+		destination.vertices.insert(
+			destination.vertices.end(),
+			source.vertices.begin(),
+			source.vertices.end());
+
+		if (!destination.hasBounds && source.hasBounds)
+		{
+			destination.boundsMin = source.boundsMin;
+			destination.boundsMax = source.boundsMax;
+			destination.hasBounds = true;
+		}
+		else if (source.hasBounds)
+		{
+			destination.boundsMin.x =
+				(std::min)(destination.boundsMin.x, source.boundsMin.x);
+			destination.boundsMin.y =
+				(std::min)(destination.boundsMin.y, source.boundsMin.y);
+			destination.boundsMin.z =
+				(std::min)(destination.boundsMin.z, source.boundsMin.z);
+			destination.boundsMax.x =
+				(std::max)(destination.boundsMax.x, source.boundsMax.x);
+			destination.boundsMax.y =
+				(std::max)(destination.boundsMax.y, source.boundsMax.y);
+			destination.boundsMax.z =
+				(std::max)(destination.boundsMax.z, source.boundsMax.z);
+		}
+
+		if (!source.batchRanges.empty())
+		{
+			for (const GlbBatchRange& sourceRange : source.batchRanges)
+			{
+				if (sourceRange.indexOffset > source.indices.size() ||
+					sourceRange.indexCount >
+						source.indices.size() - sourceRange.indexOffset)
+				{
+					return;
+				}
+				GlbBatchRange destinationRange = sourceRange;
+				destinationRange.indexOffset =
+					static_cast<unsigned int>(indexBase) +
+					sourceRange.indexOffset;
+				destination.batchRanges.push_back(destinationRange);
+			}
+		}
+		else
+		{
+			GlbBatchRange destinationRange;
+			destinationRange.batchId = source.batchId;
+			destinationRange.indexOffset =
+				static_cast<unsigned int>(indexBase);
+			destinationRange.indexCount =
+				static_cast<unsigned int>(source.indices.size());
+			destinationRange.boundsMin = source.boundsMin;
+			destinationRange.boundsMax = source.boundsMax;
+			destinationRange.hasBounds = source.hasBounds;
+			destination.batchRanges.push_back(destinationRange);
+		}
+	}
+
+	if (!merged.empty())
+	{
+		m_pPreparedData->meshes = std::move(merged);
+	}
+}
+
 void GlbModel::PrepareShadowCells(float modelSpaceCellSize)
 {
 	if (!m_pPreparedData || modelSpaceCellSize <= 0.0f)
@@ -1824,6 +1969,7 @@ int GlbModel::ProcessOneMesh(unsigned int meshIndex, ID3D11Device* pDevice)
 		GlbMesh& glbMesh = m_Meshes[meshIndex];
 		glbMesh.diffuseColor = source.diffuseColor;
 		glbMesh.batchId = source.batchId;
+		glbMesh.batchRanges = source.batchRanges;
 		glbMesh.boundsMin = source.boundsMin;
 		glbMesh.boundsMax = source.boundsMax;
 		glbMesh.hasBounds = source.hasBounds;
@@ -2887,7 +3033,9 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 
 		if (!mesh.pVertexBuffer || !mesh.pIndexBuffer || mesh.indexCount == 0)
 			continue;
-		if (mesh.batchId >= 0 && m_HiddenBatchIds.find(mesh.batchId) != m_HiddenBatchIds.end())
+		if (mesh.batchRanges.empty() &&
+			mesh.batchId >= 0 &&
+			m_HiddenBatchIds.find(mesh.batchId) != m_HiddenBatchIds.end())
 			continue;
 		// メッシュ単位の保守的な視錐台カリング。
 		// ワールドAABBはシャドウパスと共有のキャッシュを使う。
@@ -2977,6 +3125,7 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 		UINT offset = 0;
 		pContext->IASetVertexBuffers(0, 1, &mesh.pVertexBuffer, &stride, &offset);
 		if (m_MainPassCellCulling &&
+			m_HiddenBatchIds.empty() &&
 			!mesh.shadowCells.empty() &&
 			mesh.pShadowIndexBuffer &&
 			mesh.shadowIndexCount > 0)
@@ -3025,7 +3174,48 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 		else
 		{
 			pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-			pContext->DrawIndexed(mesh.indexCount, 0, 0);
+			if (mesh.batchRanges.empty())
+			{
+				pContext->DrawIndexed(mesh.indexCount, 0, 0);
+			}
+			else
+			{
+				unsigned int drawOffset = 0;
+				unsigned int drawCount = 0;
+				bool hasDrawRange = false;
+				auto flushDrawRange = [&]()
+				{
+					if (hasDrawRange && drawCount > 0)
+					{
+						pContext->DrawIndexed(drawCount, drawOffset, 0);
+					}
+					hasDrawRange = false;
+					drawOffset = 0;
+					drawCount = 0;
+				};
+				for (const GlbBatchRange& range : mesh.batchRanges)
+				{
+					if (range.indexCount == 0 ||
+						(range.batchId >= 0 &&
+							m_HiddenBatchIds.find(range.batchId) !=
+								m_HiddenBatchIds.end()))
+					{
+						flushDrawRange();
+						continue;
+					}
+					const bool isAdjacent =
+						hasDrawRange &&
+						range.indexOffset == drawOffset + drawCount;
+					if (!isAdjacent)
+					{
+						flushDrawRange();
+						drawOffset = range.indexOffset;
+						hasDrawRange = true;
+					}
+					drawCount += range.indexCount;
+				}
+				flushDrawRange();
+			}
 		}
 	}
 

@@ -189,8 +189,28 @@ float Direct3D_GetClientHeight(void);
 void Direct3D_Resize(unsigned int width, unsigned int height);
 void TakeScreenshot(void);
 bool Direct3D_IsTakingScreenshot(void);
+float Direct3D_GetLastGpuFrameMs(void);
 bool Direct3D_GetMemoryInfo(unsigned long long* localBudgetMb,
 	unsigned long long* localUsageMb,
 	unsigned long long* nonLocalBudgetMb,
 	unsigned long long* nonLocalUsageMb);
+
+#if defined(_DEBUG)
+enum Direct3D_DebugStage
+{
+	DIRECT3D_DEBUG_STAGE_SHADOW = 0,
+	DIRECT3D_DEBUG_STAGE_FIELD,
+	DIRECT3D_DEBUG_STAGE_OBJECTS,
+	DIRECT3D_DEBUG_STAGE_UI,
+	DIRECT3D_DEBUG_STAGE_PUMP,
+	DIRECT3D_DEBUG_STAGE_COUNT
+};
+
+void Direct3D_DebugResetFrameCounters(void);
+void Direct3D_DebugStageBegin(Direct3D_DebugStage stage);
+void Direct3D_DebugStageEnd(Direct3D_DebugStage stage);
+double Direct3D_DebugGetStageMs(Direct3D_DebugStage stage);
+unsigned long long Direct3D_DebugGetMapCount(void);
+double Direct3D_DebugGetMapMs(void);
+#endif
 

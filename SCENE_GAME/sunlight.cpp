@@ -35,7 +35,8 @@ static const float SUN_SHADOW_CASCADE_1_DEFAULT = 10.0f;
 static const float SUN_SHADOW_CASCADE_2_DEFAULT = 70.0f;
 static const float SUN_SHADOW_BIAS_DEFAULT = 0.0005f;
 static const float SUN_SHADOW_BRIGHTNESS_DEFAULT = 0.25f;
-static const float SUN_SHADOW_MAP_SIZE = 4096.0f;
+// renderer.cppのShadowMap実体と同じ解像度に合わせる。
+static const float SUN_SHADOW_MAP_SIZE = 2048.0f;
 static const float SUN_SHADOW_NEAR_PROJECTION_PADDING = 8.0f;
 static const float SUN_SHADOW_PROJECTION_PADDING = 24.0f;
 static const float SUN_SHADOW_CASTER_PADDING = 24.0f;

@@ -233,9 +233,8 @@ bool DrawFont::BakeAtlas() {
 	desc.ArraySize = 1;
 	desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 	desc.SampleDesc.Count = 1;
-	desc.Usage = D3D11_USAGE_DYNAMIC;
+	desc.Usage = D3D11_USAGE_DEFAULT;
 	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
 	for (int i = 0; i < m_AtlasWidth * m_AtlasHeight; i++) {
 		m_pAtlasRGBA[i * 4 + 0] = 255;
@@ -244,31 +243,14 @@ bool DrawFont::BakeAtlas() {
 		m_pAtlasRGBA[i * 4 + 3] = 255;
 	}
 
-	HRESULT hr = pDevice->CreateTexture2D(&desc, nullptr, &m_pTexture);
+	D3D11_SUBRESOURCE_DATA initialData = {};
+	initialData.pSysMem = m_pAtlasRGBA;
+	initialData.SysMemPitch = static_cast<UINT>(m_AtlasWidth * 4);
+	HRESULT hr = pDevice->CreateTexture2D(
+		&desc,
+		&initialData,
+		&m_pTexture);
 	if (FAILED(hr)) {
-		free(m_pAtlasRGBA);
-		free(m_pAtlasData);
-		m_pAtlasRGBA = nullptr;
-		m_pAtlasData = nullptr;
-		m_Ready = false;
-		return false;
-	}
-
-	D3D11_MAPPED_SUBRESOURCE mapped = {};
-	hr = GetDeviceContext()->Map(m_pTexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-	if (SUCCEEDED(hr)) {
-		for (int y = 0; y < m_AtlasHeight; ++y) {
-			memcpy(
-				static_cast<unsigned char*>(mapped.pData) + y * mapped.RowPitch,
-				m_pAtlasRGBA + y * m_AtlasWidth * 4,
-				m_AtlasWidth * 4
-			);
-		}
-		GetDeviceContext()->Unmap(m_pTexture, 0);
-	}
-	else {
-		m_pTexture->Release();
-		m_pTexture = nullptr;
 		free(m_pAtlasRGBA);
 		free(m_pAtlasData);
 		m_pAtlasRGBA = nullptr;
@@ -397,7 +379,27 @@ bool DrawFont::AddGlyphToAtlas(int glyphIndex) {
 	m_AtlasNextX += glyph_width;
 	m_AtlasRowHeight = (std::max)(m_AtlasRowHeight, glyph_height);
 
-	UpdateAtlasTexture();
+	const unsigned char r = (unsigned char)(m_Color.x * 255.0f);
+	const unsigned char g = (unsigned char)(m_Color.y * 255.0f);
+	const unsigned char b = (unsigned char)(m_Color.z * 255.0f);
+	const int glyphX = static_cast<int>(info.x0);
+	const int glyphY = static_cast<int>(info.y0);
+	for (int y = 0; y < glyph_height; ++y) {
+		for (int x = 0; x < glyph_width; ++x) {
+			const int atlasIndex =
+				((glyphY + y) * m_AtlasWidth + (glyphX + x)) * 4;
+			m_pAtlasRGBA[atlasIndex + 0] = r;
+			m_pAtlasRGBA[atlasIndex + 1] = g;
+			m_pAtlasRGBA[atlasIndex + 2] = b;
+			m_pAtlasRGBA[atlasIndex + 3] =
+				m_pAtlasData[(glyphY + y) * m_AtlasWidth + (glyphX + x)];
+		}
+	}
+	UpdateAtlasTextureRect(
+		glyphX,
+		glyphY,
+		glyph_width,
+		glyph_height);
 	return true;
 }
 
@@ -501,20 +503,44 @@ void DrawFont::UpdateAtlasTexture() {
 		m_pAtlasRGBA[i * 4 + 3] = m_pAtlasData[i];
 	}
 
-	D3D11_MAPPED_SUBRESOURCE msr;
-	HRESULT hr = pContext->Map(m_pTexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &msr);
-	if (SUCCEEDED(hr)) {
-		if (msr.RowPitch == (UINT)(m_AtlasWidth * 4)) {
-			memcpy(msr.pData, m_pAtlasRGBA, pixelCount * 4);
-		} else {
-			unsigned char* dst = (unsigned char*)msr.pData;
-			const unsigned char* src = m_pAtlasRGBA;
-			for (int y = 0; y < m_AtlasHeight; y++) {
-				memcpy(dst + y * msr.RowPitch, src + y * m_AtlasWidth * 4, m_AtlasWidth * 4);
-			}
-		}
-		pContext->Unmap(m_pTexture, 0);
+	pContext->UpdateSubresource(
+		m_pTexture,
+		0,
+		nullptr,
+		m_pAtlasRGBA,
+		static_cast<UINT>(m_AtlasWidth * 4),
+		static_cast<UINT>(pixelCount * 4));
+}
+
+void DrawFont::UpdateAtlasTextureRect(
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	ID3D11DeviceContext* pContext = GetDeviceContext();
+	if (!pContext || !m_pTexture || !m_pAtlasRGBA ||
+		width <= 0 || height <= 0)
+	{
+		return;
 	}
+
+	D3D11_BOX box = {};
+	box.left = static_cast<UINT>(x);
+	box.top = static_cast<UINT>(y);
+	box.front = 0;
+	box.right = static_cast<UINT>(x + width);
+	box.bottom = static_cast<UINT>(y + height);
+	box.back = 1;
+	const unsigned char* source =
+		m_pAtlasRGBA + (y * m_AtlasWidth + x) * 4;
+	pContext->UpdateSubresource(
+		m_pTexture,
+		0,
+		&box,
+		source,
+		static_cast<UINT>(m_AtlasWidth * 4),
+		0);
 }
 
 bool DrawFont::EnsureVertexCapacity(UINT vertexCount) {

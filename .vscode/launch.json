@@ -8,6 +8,9 @@
             "program": "${workspaceFolder}/x64/Debug/expogame.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
+            "env": {
+                "_NO_DEBUG_HEAP": "1"
+            },
             "stopOnEntry": false,
             "terminal": "integrated",
             "preLaunchTask": "Build Debug"
@@ -19,6 +22,9 @@
             "program": "${workspaceFolder}/x64/Release/expogame.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
+            "env": {
+                "_NO_DEBUG_HEAP": "1"
+            },
             "stopOnEntry": false,
             "terminal": "integrated",
             "preLaunchTask": "Build Release"

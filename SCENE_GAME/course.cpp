@@ -3,8 +3,8 @@
 #include "player.h"
 #include "billboard.h"
 #include "sprite2d.h"
-#include "sprite3d.h"
 #include "font.h"
+#include "camera.h"
 #include "MultiLineClickFont.h"
 #include "define.h"
 #include "keyboard.h"
@@ -57,7 +57,7 @@ namespace
 	CourseData g_WorkingCourse;
 	CourseData g_RaceCourse;
 	std::vector<Billboard*> g_Rings;
-	Sprite3D* g_StartMarker = nullptr;
+	Billboard* g_StartMarker = nullptr;
 
 	CourseMode g_Mode = CourseMode::FreeFlight;
 	int g_SelectedCourse = -1;
@@ -271,6 +271,24 @@ namespace
 		g_Rings.clear();
 	}
 
+	Billboard* CreateCourseMarker(
+		const XMFLOAT3& pos,
+		float size,
+		const XMFLOAT4& color)
+	{
+		Billboard* marker = new Billboard(
+			pos,
+			{ size, size },
+			{ 0.0f, 0.0f, 0.0f },
+			COURSE_TEXTURE,
+			true);
+		marker->SetBillboardMode(true);
+		marker->SetWallFadeEnabled(false);
+		marker->SetIgnoreLighting(true);
+		marker->SetColor(color);
+		return marker;
+	}
+
 	XMFLOAT3 GetGateDirection(
 		const std::vector<XMFLOAT3>& points,
 		size_t index)
@@ -306,30 +324,40 @@ namespace
 
 	void RebuildRings(const std::vector<XMFLOAT3>& points)
 	{
-		ClearRings();
-		SAFE_DELETE(g_StartMarker);
-		if (!points.empty())
+		if (points.empty())
 		{
-			g_StartMarker = new Sprite3D(
-				points[0],
-				{ 0.4f, 0.4f, 0.4f },
-				{ 0.0f, 0.0f, 0.0f },
-				"asset\\model\\cube.fbx",
-				S_PBR);
+			ClearRings();
+			SAFE_DELETE(g_StartMarker);
+			return;
 		}
 
+		const XMFLOAT4 startColor = { 0.45f, 0.85f, 1.0f, 1.0f };
+		const XMFLOAT4 ringColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+		if (!g_StartMarker)
+		{
+			g_StartMarker = CreateCourseMarker(points[0], 0.8f, startColor);
+		}
+		else
+		{
+			g_StartMarker->SetPos(points[0]);
+		}
+
+		const size_t ringCount = points.size() - 1;
+		while (g_Rings.size() > ringCount)
+		{
+			delete g_Rings.back();
+			g_Rings.pop_back();
+		}
 		for (size_t i = 1; i < points.size(); ++i)
 		{
-			Billboard* ring = new Billboard(
-				points[i],
-				{ COURSE_RING_SIZE, COURSE_RING_SIZE },
-				{ 0.0f, 0.0f, 0.0f },
-				COURSE_TEXTURE,
-				true);
-			ring->SetBillboardMode(true);
-			ring->SetWallFadeEnabled(false);
-			ring->SetIgnoreLighting(true);
-			g_Rings.push_back(ring);
+			const size_t ringIndex = i - 1;
+			if (ringIndex < g_Rings.size())
+			{
+				g_Rings[ringIndex]->SetPos(points[i]);
+				continue;
+			}
+			g_Rings.push_back(
+				CreateCourseMarker(points[i], COURSE_RING_SIZE, ringColor));
 		}
 	}
 
@@ -583,13 +611,22 @@ namespace
 		RebuildRings(g_RaceCourse.points);
 
 		const XMFLOAT3 startPosition = g_RaceCourse.points[0];
-		Player_WarpTo(startPosition);
+		const XMFLOAT3 playerPos = Player_GetPos();
+		const float warpDx = playerPos.x - startPosition.x;
+		const float warpDy = playerPos.y - startPosition.y;
+		const float warpDz = playerPos.z - startPosition.z;
+		const bool needWarp =
+			warpDx * warpDx + warpDy * warpDy + warpDz * warpDz > 0.25f;
+		if (needWarp)
+		{
+			Player_WarpTo(startPosition);
+			GameAudio_PlayWarp();
+		}
 		Player_SetControlEnabled(false);
 		g_LastPlayerPos = startPosition;
 		g_CountdownStarted = std::chrono::steady_clock::now();
 		g_Mode = CourseMode::RaceCountdown;
 		g_LastCountdownNumber = 0;
-		GameAudio_PlayWarp();
 		GameAudio_SetBgmExplore();
 	}
 
@@ -1065,26 +1102,52 @@ void Course_Draw(void)
 	{
 		return;
 	}
-	if (g_StartMarker)
+	const bool racing =
+		g_Mode == CourseMode::RaceCountdown ||
+		g_Mode == CourseMode::RaceRunning ||
+		g_Mode == CourseMode::RaceGoal;
+	XMFLOAT3 cameraPos = {};
+	Camera* camera = GetCamera();
+	if (camera)
+	{
+		cameraPos = camera->GetPos();
+	}
+	const float markerCullSq = 48.0f * 48.0f;
+	auto isNearCamera = [&](const XMFLOAT3& pos) -> bool
+	{
+		if (!camera)
+		{
+			return true;
+		}
+		const float dx = pos.x - cameraPos.x;
+		const float dy = pos.y - cameraPos.y;
+		const float dz = pos.z - cameraPos.z;
+		return dx * dx + dy * dy + dz * dz <= markerCullSq;
+	};
+	if (g_StartMarker && (!racing || isNearCamera(g_StartMarker->GetPos())))
 	{
 		g_StartMarker->Draw();
 	}
 	for (size_t i = 0; i < g_Rings.size(); ++i)
 	{
 		const int gateIndex = static_cast<int>(i) + 1;
-		if ((g_Mode == CourseMode::RaceCountdown ||
-			g_Mode == CourseMode::RaceRunning ||
-			g_Mode == CourseMode::RaceGoal) &&
-			gateIndex < g_NextGate)
+		if (racing && gateIndex < g_NextGate)
 		{
 			continue;
 		}
 
 		Billboard* ring = g_Rings[i];
-		if (ring)
+		if (!ring)
 		{
-			ring->Draw();
+			continue;
 		}
+		if (racing &&
+			gateIndex > g_NextGate + 1 &&
+			!isNearCamera(ring->GetPos()))
+		{
+			continue;
+		}
+		ring->Draw();
 	}
 }
 

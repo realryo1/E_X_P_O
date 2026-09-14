@@ -48,6 +48,16 @@ struct GlbShadowCell
 	float worldRadius = 0.0f;
 };
 
+struct GlbBatchRange
+{
+	int batchId = -1;
+	unsigned int indexOffset = 0;
+	unsigned int indexCount = 0;
+	XMFLOAT3 boundsMin = { 0.0f, 0.0f, 0.0f };
+	XMFLOAT3 boundsMax = { 0.0f, 0.0f, 0.0f };
+	bool hasBounds = false;
+};
+
 struct GlbMesh
 {
 	ID3D11Buffer* pVertexBuffer = nullptr;
@@ -78,6 +88,7 @@ struct GlbMesh
 	float metallicFactor = 1.0f;
 	float roughnessFactor = 1.0f;
 	int batchId = -1;
+	std::vector<GlbBatchRange> batchRanges;
 };
 
 //==============================================================================
@@ -102,6 +113,7 @@ public:
 	// 返されたデータの所有権は呼び出し側が持ち、AttachPreparedDataへ渡す。
 	static GlbPreparedData* ImportPreparedFile(const char* filePath);
 	bool AttachPreparedData(GlbPreparedData* data);
+	void MergePreparedMeshesByMaterial(void);
 
 	// 影パス用に、準備済み頂点をモデル空間の XZ セルへ分割する。ワーカーから呼ぶ。
 	void PrepareShadowCells(float modelSpaceCellSize);

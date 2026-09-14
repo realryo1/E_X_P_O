@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <d3d11.h>
 #include <DirectXMath.h>
@@ -7,6 +7,7 @@
 void Field_Initialize(void);
 void Field_Finalize(void);
 void Field_PumpLoad(void);
+void Field_PumpAfterPresent(double lastDrawMs, float lastGpuMs);
 bool Field_IsLoadComplete(void);
 float Field_GetInitialLoadProgress(void);
 void Field_Draw(void);
@@ -26,3 +27,4 @@ void Field_GetFinishedStatus(char* out, size_t outSize);
 void Field_GetMemoryStatus(char* out, size_t outSize);
 void Field_SetSkyboxYaw(float yawDegrees);
 void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture);
+void Field_SetSkyboxEnabled(bool enabled);

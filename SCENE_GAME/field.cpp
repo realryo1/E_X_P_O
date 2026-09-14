@@ -1,4 +1,4 @@
-#include "field.h"
+﻿#include "field.h"
 #include "define.h"
 #include "main.h"
 #include "sprite3d.h"
@@ -44,6 +44,9 @@ static const float EXPO_PAVILION_LOAD_RADIUS = 24.0f;
 static const float EXPO_PAVILION_UNLOAD_RADIUS = 36.0f;
 static const float EXPO_PAVILION_PREFETCH_DISTANCE = 24.0f;
 static const double EXPO_LOAD_BUDGET_MILLISECONDS = 6.0;
+static const double EXPO_STREAM_AFTER_PRESENT_BUDGET_MS = 3.0;
+static const double EXPO_STREAM_SKIP_DRAW_MS = 8.0;
+static const float EXPO_STREAM_SKIP_GPU_MS = 8.0f;
 static const double EXPO_GRS80_A = 6378137.0;
 static const double EXPO_GRS80_F = 1.0 / 298.257222101;
 static const double EXPO_GRS80_E2 =
@@ -97,6 +100,7 @@ static std::vector<Sprite3D*> g_ExpoPavilions;
 static Sprite3D* g_ExpoRing = nullptr;
 static Sprite3D* g_ExpoSkybox = nullptr;
 static float g_ExpoSkyboxYaw = 0.0f;
+static bool g_ExpoSkyboxEnabled = true;
 static std::vector<float> g_TileBaseY;
 static std::vector<float> g_FarTileBaseY;
 static std::vector<float> g_PavilionBaseY;
@@ -338,6 +342,7 @@ static void ClearExpoTiles(void)
 	SAFE_DELETE(g_ExpoRing);
 	SAFE_DELETE(g_ExpoSkybox);
 	g_ExpoSkyboxYaw = 0.0f;
+	g_ExpoSkyboxEnabled = true;
 	g_RingBaseY = 0.0f;
 	Collision_Clear();
 	g_FloorCollisionId = -1;
@@ -990,6 +995,14 @@ static void CommitDrawJob(ExpoDrawJob* job)
 	ConfigureExpoShadowModel(
 		model,
 		job->kind != ExpoDrawKind::Pavilion);
+	if (job->kind == ExpoDrawKind::Floor ||
+		job->kind == ExpoDrawKind::Lod2 ||
+		job->kind == ExpoDrawKind::FallbackLod2 ||
+		job->kind == ExpoDrawKind::Ring ||
+		job->kind == ExpoDrawKind::Pavilion)
+	{
+		model->SetMainPassCellCulling(true);
+	}
 	switch (job->kind)
 	{
 	case ExpoDrawKind::Floor:
@@ -1038,7 +1051,6 @@ static void CommitDrawJob(ExpoDrawJob* job)
 		g_LoadedPavilions += 1;
 		break;
 	case ExpoDrawKind::Ring:
-		model->SetMainPassCellCulling(true);
 		g_ExpoRing = model;
 		g_RingBaseY = model->GetPos().y;
 		break;
@@ -1173,6 +1185,7 @@ static void StartDrawWorker(ExpoDrawJob* job)
 			raw->workerDone = true;
 			return;
 		}
+		model->MergePreparedMeshesByMaterial();
 		if (raw->kind != ExpoDrawKind::Pavilion)
 		{
 			model->PrepareShadowCells(EXPO_SHADOW_CELL_WORLD / EXPO_MODEL_SCALE);
@@ -1975,9 +1988,8 @@ void Field_PumpLoad(void)
 	UpdatePrefetchPosition();
 	if (g_LoadComplete)
 	{
-		PumpPavilionStreaming(deadline);
+		// GPU転送は Draw と同一フレームで重ねない。Present 後へ送る。
 		StartPendingImports();
-		PumpOneGpu(deadline);
 		return;
 	}
 	if (g_DrawJobs.empty() && g_CollisionFinished)
@@ -2017,6 +2029,27 @@ void Field_PumpLoad(void)
 		ApplyFixedYOffsets();
 		FinishLoad();
 	}
+}
+
+void Field_PumpAfterPresent(double lastDrawMs, float lastGpuMs)
+{
+	if (!g_LoadComplete)
+	{
+		return;
+	}
+	if (lastDrawMs > EXPO_STREAM_SKIP_DRAW_MS)
+	{
+		return;
+	}
+	if (lastGpuMs > EXPO_STREAM_SKIP_GPU_MS)
+	{
+		return;
+	}
+	const LONGLONG deadline = GetLoadDeadline(
+		EXPO_STREAM_AFTER_PRESENT_BUDGET_MS);
+	UpdatePrefetchPosition();
+	PumpPavilionStreaming(deadline);
+	PumpOneGpu(deadline);
 }
 
 void Field_Initialize(void)
@@ -2179,6 +2212,11 @@ void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture)
 	g_ExpoSkybox->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
+void Field_SetSkyboxEnabled(bool enabled)
+{
+	g_ExpoSkyboxEnabled = enabled;
+}
+
 static void ClearFarBatchVisibility(void)
 {
 	for (Sprite3D* model : g_ExpoFarTiles)
@@ -2229,13 +2267,7 @@ void Field_DrawLocalShadow(
 			model->DrawShadowMap(lightView, lightProjection, focus, radius);
 		}
 	}
-	for (Sprite3D* model : g_ExpoFarTiles)
-	{
-		if (model)
-		{
-			model->DrawShadowMap(lightView, lightProjection, focus, radius);
-		}
-	}
+	// 遠景LOD2は画面上の影への寄与が小さいため、影パスでは省略する。
 	if (g_ExpoRing)
 	{
 		g_ExpoRing->DrawShadowMap(lightView, lightProjection, focus, radius);
@@ -2299,7 +2331,7 @@ void Field_Draw(void)
 	{
 		g_ExpoRing->Draw();
 	}
-	if (g_ExpoSkybox)
+	if (g_ExpoSkyboxEnabled && g_ExpoSkybox)
 	{
 		if (Camera* camera = GetCamera())
 		{

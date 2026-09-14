@@ -11,6 +11,7 @@ enum SCENE {
 
 void Init(void);
 void Update(void);
+void PumpAfterPresent(double lastDrawMs, float lastGpuMs);
 void Draw(void);
 void Finalize(void);
 

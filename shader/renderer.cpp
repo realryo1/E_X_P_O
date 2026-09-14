@@ -10,7 +10,11 @@
 #include "renderer.h"
 #include "define.h"
 #include <dxgi1_4.h>
+#include "../framework/debug_ostream.h"
 #include <cstring>
+#include <cwchar>
+#include <chrono>
+#include <string>
 
 #pragma comment(lib, "dxgi.lib")
 
@@ -89,7 +93,9 @@ static bool g_HasLastParameter = false;
 
 // ShadowMapは、ライトから見た「深度だけの画像」。
 // Texture本体、深度書き込み用View、シェーダーで読む用View、読み取り用Samplerを分けて持つ。
-static const UINT SHADOW_MAP_SIZE = 4096;
+// NVIDIAを含むdGPUでのカスケード影の深度描画負荷を抑える。
+// カスケード数と影判定は維持し、解像度だけを下げて互換性を保つ。
+static const UINT SHADOW_MAP_SIZE = 2048;
 static ID3D11Texture2D* g_ShadowMapTexture = NULL;
 static ID3D11DepthStencilView* g_ShadowMapDepthViews[NUM_SHADOW_CASCADES] = {};
 static ID3D11ShaderResourceView* g_ShadowMapShaderView = NULL;
@@ -116,6 +122,273 @@ static ID3D11Texture2D* g_pDepthStencilBuffer = NULL;
 static bool g_IsTakingScreenshot = false;
 static ID3D11RenderTargetView* g_SSTargetView = nullptr;
 static ID3D11DepthStencilView* g_SSDepthView = nullptr;
+
+#if defined(_DEBUG)
+static constexpr int GPU_TIMING_QUERY_COUNT = 8;
+
+struct GpuTimingQuery
+{
+	ID3D11Query* disjoint = nullptr;
+	ID3D11Query* begin = nullptr;
+	ID3D11Query* end = nullptr;
+	bool submitted = false;
+};
+
+static GpuTimingQuery g_GpuTimingQueries[GPU_TIMING_QUERY_COUNT] = {};
+static int g_ActiveGpuTimingQuery = -1;
+static bool g_GpuTimingAvailable = false;
+#endif
+static float g_LastGpuFrameMs = -1.0f;
+
+#if defined(_DEBUG)
+static unsigned long long g_DebugMapCount = 0;
+static double g_DebugMapMs = 0.0;
+static std::chrono::steady_clock::time_point
+	g_DebugStageStarts[DIRECT3D_DEBUG_STAGE_COUNT] = {};
+static bool g_DebugStageActive[DIRECT3D_DEBUG_STAGE_COUNT] = {};
+static double g_DebugStageMs[DIRECT3D_DEBUG_STAGE_COUNT] = {};
+#endif
+
+namespace
+{
+	enum class GpuSelectionMode
+	{
+		Auto,
+		HighPerformance
+	};
+
+	static bool HasCommandLineOption(const wchar_t* option)
+	{
+		const wchar_t* commandLine = GetCommandLineW();
+		return commandLine && option && wcsstr(commandLine, option) != nullptr;
+	}
+
+	static bool AdapterHasDisplayOutput(IDXGIAdapter1* adapter)
+	{
+		if (!adapter)
+		{
+			return false;
+		}
+
+		for (UINT outputIndex = 0; ; ++outputIndex)
+		{
+			IDXGIOutput* output = nullptr;
+			const HRESULT hr = adapter->EnumOutputs(outputIndex, &output);
+			if (hr == DXGI_ERROR_NOT_FOUND)
+			{
+				break;
+			}
+			if (SUCCEEDED(hr) && output)
+			{
+				output->Release();
+				return true;
+			}
+			SAFE_RELEASE(output);
+			if (FAILED(hr))
+			{
+				break;
+			}
+		}
+		return false;
+	}
+
+	static std::string AdapterNameForLog(const DXGI_ADAPTER_DESC1& desc)
+	{
+		std::string name;
+		for (int i = 0; i < ARRAYSIZE(desc.Description) && desc.Description[i] != L'\0'; ++i)
+		{
+			const wchar_t c = desc.Description[i];
+			name.push_back(c >= 0 && c <= 0x7f ? static_cast<char>(c) : '?');
+		}
+		return name;
+	}
+
+	static bool UpdateDynamicConstantBuffer(
+		ID3D11Buffer* buffer,
+		const void* data,
+		size_t dataSize)
+	{
+		if (!g_ImmediateContext || !buffer || !data || dataSize == 0)
+		{
+			return false;
+		}
+
+		D3D11_MAPPED_SUBRESOURCE mapped = {};
+#if defined(_DEBUG)
+		const auto mapStart = std::chrono::steady_clock::now();
+		++g_DebugMapCount;
+#endif
+		const HRESULT mapResult = g_ImmediateContext->Map(
+			buffer,
+			0,
+			D3D11_MAP_WRITE_DISCARD,
+			0,
+			&mapped);
+		if (FAILED(mapResult))
+		{
+#if defined(_DEBUG)
+			g_DebugMapMs += std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - mapStart).count();
+#endif
+			return false;
+		}
+
+		memcpy(mapped.pData, data, dataSize);
+		g_ImmediateContext->Unmap(buffer, 0);
+#if defined(_DEBUG)
+		g_DebugMapMs += std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - mapStart).count();
+#endif
+		return true;
+	}
+
+#if defined(_DEBUG)
+	static void ReleaseGpuTimingQueries(void)
+	{
+		for (GpuTimingQuery& query : g_GpuTimingQueries)
+		{
+			SAFE_RELEASE(query.disjoint);
+			SAFE_RELEASE(query.begin);
+			SAFE_RELEASE(query.end);
+			query.submitted = false;
+		}
+		g_ActiveGpuTimingQuery = -1;
+		g_GpuTimingAvailable = false;
+	}
+
+	static void InitializeGpuTimingQueries(void)
+	{
+		ReleaseGpuTimingQueries();
+		if (!g_D3DDevice)
+		{
+			return;
+		}
+
+		D3D11_QUERY_DESC disjointDesc = {};
+		disjointDesc.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+		D3D11_QUERY_DESC timestampDesc = {};
+		timestampDesc.Query = D3D11_QUERY_TIMESTAMP;
+
+		for (GpuTimingQuery& query : g_GpuTimingQueries)
+		{
+			if (FAILED(g_D3DDevice->CreateQuery(&disjointDesc, &query.disjoint)) ||
+				FAILED(g_D3DDevice->CreateQuery(&timestampDesc, &query.begin)) ||
+				FAILED(g_D3DDevice->CreateQuery(&timestampDesc, &query.end)))
+			{
+				ReleaseGpuTimingQueries();
+				return;
+			}
+		}
+		g_GpuTimingAvailable = true;
+	}
+
+	static void PollGpuTimingQueries(void)
+	{
+		if (!g_GpuTimingAvailable || !g_ImmediateContext)
+		{
+			return;
+		}
+
+		GpuTimingQuery* query = nullptr;
+		for (GpuTimingQuery& candidate : g_GpuTimingQueries)
+		{
+			if (candidate.submitted)
+			{
+				query = &candidate;
+				break;
+			}
+		}
+		if (!query)
+		{
+			return;
+		}
+
+		D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint = {};
+		const HRESULT disjointResult = g_ImmediateContext->GetData(
+			query->disjoint,
+			&disjoint,
+			sizeof(disjoint),
+			D3D11_ASYNC_GETDATA_DONOTFLUSH);
+		if (disjointResult == S_FALSE)
+		{
+			return;
+		}
+		if (FAILED(disjointResult))
+		{
+			query->submitted = false;
+			return;
+		}
+
+		UINT64 beginTimestamp = 0;
+		UINT64 endTimestamp = 0;
+		const HRESULT beginResult = g_ImmediateContext->GetData(
+			query->begin,
+			&beginTimestamp,
+			sizeof(beginTimestamp),
+			D3D11_ASYNC_GETDATA_DONOTFLUSH);
+		const HRESULT endResult = g_ImmediateContext->GetData(
+			query->end,
+			&endTimestamp,
+			sizeof(endTimestamp),
+			D3D11_ASYNC_GETDATA_DONOTFLUSH);
+		if (beginResult == S_FALSE || endResult == S_FALSE)
+		{
+			return;
+		}
+
+		if (SUCCEEDED(beginResult) &&
+			SUCCEEDED(endResult) &&
+			!disjoint.Disjoint &&
+			disjoint.Frequency > 0 &&
+			endTimestamp >= beginTimestamp)
+		{
+			const double elapsedSeconds =
+				static_cast<double>(endTimestamp - beginTimestamp) /
+				static_cast<double>(disjoint.Frequency);
+			g_LastGpuFrameMs = static_cast<float>(elapsedSeconds * 1000.0);
+		}
+		query->submitted = false;
+	}
+
+	static void BeginGpuFrameTiming(void)
+	{
+		if (!g_GpuTimingAvailable || !g_ImmediateContext)
+		{
+			return;
+		}
+
+		PollGpuTimingQueries();
+		g_ActiveGpuTimingQuery = -1;
+		for (int i = 0; i < GPU_TIMING_QUERY_COUNT; ++i)
+		{
+			GpuTimingQuery& query = g_GpuTimingQueries[i];
+			if (!query.submitted)
+			{
+				g_ImmediateContext->Begin(query.disjoint);
+				g_ImmediateContext->End(query.begin);
+				g_ActiveGpuTimingQuery = i;
+				return;
+			}
+		}
+	}
+
+	static void EndGpuFrameTiming(void)
+	{
+		if (g_ActiveGpuTimingQuery < 0 ||
+			g_ActiveGpuTimingQuery >= GPU_TIMING_QUERY_COUNT ||
+			!g_ImmediateContext)
+		{
+			return;
+		}
+
+		GpuTimingQuery& query = g_GpuTimingQueries[g_ActiveGpuTimingQuery];
+		g_ImmediateContext->End(query.end);
+		g_ImmediateContext->End(query.disjoint);
+		query.submitted = true;
+		g_ActiveGpuTimingQuery = -1;
+	}
+#endif
+}
 
 static void ResetRendererStateCache(void)
 {
@@ -346,7 +619,7 @@ void SetWorldMatrix( XMMATRIX WorldMatrix )
 	world = XMMatrixTranspose(WorldMatrix);
 	XMFLOAT4X4 matrix;
 	XMStoreFloat4x4(&matrix, world);
-	g_ImmediateContext->UpdateSubresource(g_WorldBuffer, 0, NULL, &matrix, 0, 0);
+	UpdateDynamicConstantBuffer(g_WorldBuffer, &matrix, sizeof(matrix));
 	g_LastWorldMatrix = WorldMatrix;
 	g_HasLastWorldMatrix = true;
 }
@@ -362,7 +635,7 @@ void SetViewMatrix( XMMATRIX ViewMatrix )
 	view = XMMatrixTranspose(ViewMatrix);
 	XMFLOAT4X4 matrix;
 	XMStoreFloat4x4(&matrix, view);
-	g_ImmediateContext->UpdateSubresource(g_ViewBuffer, 0, NULL, &matrix, 0, 0);
+	UpdateDynamicConstantBuffer(g_ViewBuffer, &matrix, sizeof(matrix));
 	g_LastViewMatrix = ViewMatrix;
 	g_HasLastViewMatrix = true;
 }
@@ -378,7 +651,7 @@ void SetProjectionMatrix( XMMATRIX ProjectionMatrix )
 	projection = XMMatrixTranspose(ProjectionMatrix);
 	XMFLOAT4X4 matrix;
 	XMStoreFloat4x4(&matrix, projection);
-	g_ImmediateContext->UpdateSubresource(g_ProjectionBuffer, 0, NULL, &matrix, 0, 0);
+	UpdateDynamicConstantBuffer(g_ProjectionBuffer, &matrix, sizeof(matrix));
 	g_LastProjectionMatrix = ProjectionMatrix;
 	g_HasLastProjectionMatrix = true;
 }
@@ -392,7 +665,7 @@ void SetMaterial( MATERIAL Material )
 	{
 		return;
 	}
-	GetDeviceContext()->UpdateSubresource( g_MaterialBuffer, 0, NULL, &Material, 0, 0 );
+	UpdateDynamicConstantBuffer(g_MaterialBuffer, &Material, sizeof(Material));
 	g_LastMaterial = Material;
 	g_HasLastMaterial = true;
 }
@@ -405,7 +678,7 @@ void SetCameraPosition(XMFLOAT3 CameraPosition)
 	{
 		return;
 	}
-	GetDeviceContext()->UpdateSubresource(g_CameraBuffer, 0, NULL, &temp, 0, 0);
+	UpdateDynamicConstantBuffer(g_CameraBuffer, &temp, sizeof(temp));
 	g_LastCameraPosition = temp;
 	g_HasLastCameraPosition = true;
 }
@@ -418,7 +691,7 @@ void SetParameter(XMFLOAT4 Parameter)
 	{
 		return;
 	}
-	GetDeviceContext()->UpdateSubresource(g_ParameterBuffer, 0, NULL, &g_Parameter, 0, 0);
+	UpdateDynamicConstantBuffer(g_ParameterBuffer, &g_Parameter, sizeof(g_Parameter));
 	g_LastParameter = Parameter;
 	g_HasLastParameter = true;
 }
@@ -441,7 +714,7 @@ void SetParameterW(float w)
 	}
 	if (g_ParameterBuffer)
 	{
-		GetDeviceContext()->UpdateSubresource(g_ParameterBuffer, 0, NULL, &g_Parameter, 0, 0);
+		UpdateDynamicConstantBuffer(g_ParameterBuffer, &g_Parameter, sizeof(g_Parameter));
 	}
 	g_LastParameter = g_Parameter;
 	g_HasLastParameter = true;
@@ -466,7 +739,7 @@ void SetShadowMatrix(XMMATRIX LightViewProjection, XMFLOAT4 Param)
 		1.0f / static_cast<float>(SHADOW_MAP_SIZE),
 		0.0f);
 
-	g_ImmediateContext->UpdateSubresource(g_ShadowBuffer, 0, NULL, &shadow, 0, 0);
+	UpdateDynamicConstantBuffer(g_ShadowBuffer, &shadow, sizeof(shadow));
 }
 
 void SetShadowCascadeMatrices(
@@ -490,7 +763,7 @@ void SetShadowCascadeMatrices(
 	shadow.Param = Param;
 	shadow.CascadeSplits = CascadeSplits;
 	shadow.CascadeTexelSize = CascadeTexelSize;
-	g_ImmediateContext->UpdateSubresource(g_ShadowBuffer, 0, NULL, &shadow, 0, 0);
+	UpdateDynamicConstantBuffer(g_ShadowBuffer, &shadow, sizeof(shadow));
 }
 
 void BeginShadowMap(void)
@@ -566,7 +839,7 @@ void SetFaceShadowMatrices(const XMMATRIX faceViewProjection[NUM_SHADOW_FACES], 
 		1.0f / static_cast<float>(SHADOW_MAP_SIZE));
 	c.Param2 = XMFLOAT4(enemyBrightness, 0.0f, 0.0f, 0.0f);
 
-	g_ImmediateContext->UpdateSubresource(g_FaceShadowBuffer, 0, NULL, &c, 0, 0);
+	UpdateDynamicConstantBuffer(g_FaceShadowBuffer, &c, sizeof(c));
 }
 
 void BeginFaceShadowMap(int slice)
@@ -646,8 +919,15 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		return hr;
 	}
 
+	const GpuSelectionMode gpuSelectionMode =
+		HasCommandLineOption(L"--gpu=high")
+		? GpuSelectionMode::HighPerformance
+		: GpuSelectionMode::Auto;
+
 	IDXGIAdapter1* selectedAdapter = nullptr;
 	SIZE_T selectedMemory = 0;
+	bool selectedHasDisplayOutput = false;
+	DXGI_ADAPTER_DESC1 selectedAdapterDesc = {};
 	for (UINT index = 0; ; ++index)
 	{
 		IDXGIAdapter1* adapter = nullptr;
@@ -662,15 +942,54 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 
 		DXGI_ADAPTER_DESC1 desc = {};
 		adapter->GetDesc1(&desc);
-		if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0 &&
-			desc.DedicatedVideoMemory >= selectedMemory)
+		if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+		{
+			adapter->Release();
+			continue;
+		}
+
+		const bool hasDisplayOutput = AdapterHasDisplayOutput(adapter);
+		bool shouldSelect = selectedAdapter == nullptr;
+		if (!shouldSelect)
+		{
+			// autoでは表示出力を持つGPUを優先し、同条件なら専用VRAM量で選ぶ。
+			// highでは従来どおり専用VRAM量だけで選ぶ。
+			if (gpuSelectionMode == GpuSelectionMode::Auto &&
+				hasDisplayOutput != selectedHasDisplayOutput)
+			{
+				shouldSelect = hasDisplayOutput;
+			}
+			else
+			{
+				shouldSelect = desc.DedicatedVideoMemory >= selectedMemory;
+			}
+		}
+
+		if (shouldSelect)
 		{
 			SAFE_RELEASE(selectedAdapter);
 			selectedAdapter = adapter;
 			selectedMemory = desc.DedicatedVideoMemory;
-			continue;
+			selectedHasDisplayOutput = hasDisplayOutput;
+			selectedAdapterDesc = desc;
 		}
-		adapter->Release();
+		else
+		{
+			adapter->Release();
+		}
+	}
+
+	if (selectedAdapter)
+	{
+		hal::dout
+			<< "[Renderer] GPU mode: "
+			<< (gpuSelectionMode == GpuSelectionMode::HighPerformance ? "high" : "auto")
+			<< " | Adapter: " << AdapterNameForLog(selectedAdapterDesc)
+			<< " | Display output: " << (selectedHasDisplayOutput ? "yes" : "no")
+			<< " | Dedicated VRAM: "
+			<< static_cast<unsigned long long>(
+				selectedMemory / (1024 * 1024))
+			<< " MB" << std::endl;
 	}
 
 	D3D_FEATURE_LEVEL featureLevels[] = {
@@ -699,7 +1018,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		swapDesc.SampleDesc.Count = 1;
 		swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		swapDesc.BufferCount = 2;
-		swapDesc.Scaling = DXGI_SCALING_STRETCH;
+		swapDesc.Scaling = DXGI_SCALING_NONE;
 		swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		swapDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 
@@ -711,6 +1030,17 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 			nullptr,
 			nullptr,
 			&swapChain1);
+		if (FAILED(hr) && swapDesc.Scaling == DXGI_SCALING_NONE)
+		{
+			swapDesc.Scaling = DXGI_SCALING_STRETCH;
+			hr = dxgiFactory->CreateSwapChainForHwnd(
+				g_D3DDevice,
+				hWnd,
+				&swapDesc,
+				nullptr,
+				nullptr,
+				&swapChain1);
+		}
 		if (SUCCEEDED(hr))
 		{
 			hr = swapChain1->QueryInterface(IID_PPV_ARGS(&g_SwapChain));
@@ -735,6 +1065,9 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	}
 
 	configureBackBuffer();
+#if defined(_DEBUG)
+	InitializeGpuTimingQueries();
+#endif
 
 	// ラスタライザステート設定
 	D3D11_RASTERIZER_DESC rd;
@@ -843,7 +1176,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	shadowTextureDesc.Height = SHADOW_MAP_SIZE;
 	shadowTextureDesc.MipLevels = 1;
 	shadowTextureDesc.ArraySize = NUM_SHADOW_CASCADES;
-	shadowTextureDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+	shadowTextureDesc.Format = DXGI_FORMAT_R16_TYPELESS;
 	shadowTextureDesc.SampleDesc.Count = 1;
 	shadowTextureDesc.SampleDesc.Quality = 0;
 	shadowTextureDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -853,7 +1186,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	// ShadowMapへ深度を書き込むためのView。
 	D3D11_DEPTH_STENCIL_VIEW_DESC shadowDepthDesc;
 	ZeroMemory(&shadowDepthDesc, sizeof(shadowDepthDesc));
-	shadowDepthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+	shadowDepthDesc.Format = DXGI_FORMAT_D16_UNORM;
 	shadowDepthDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
 	shadowDepthDesc.Texture2DArray.MipSlice = 0;
 	shadowDepthDesc.Texture2DArray.ArraySize = 1;
@@ -869,7 +1202,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	// ShadowMapをピクセルシェーダーで読むためのView。
 	D3D11_SHADER_RESOURCE_VIEW_DESC shadowResourceDesc;
 	ZeroMemory(&shadowResourceDesc, sizeof(shadowResourceDesc));
-	shadowResourceDesc.Format = DXGI_FORMAT_R32_FLOAT;
+	shadowResourceDesc.Format = DXGI_FORMAT_R16_UNORM;
 	shadowResourceDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
 	shadowResourceDesc.Texture2DArray.MostDetailedMip = 0;
 	shadowResourceDesc.Texture2DArray.MipLevels = 1;
@@ -902,7 +1235,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		td.Height = SHADOW_MAP_SIZE;
 		td.MipLevels = 1;
 		td.ArraySize = NUM_SHADOW_SLICES;
-		td.Format = DXGI_FORMAT_R32_TYPELESS;
+		td.Format = DXGI_FORMAT_R16_TYPELESS;
 		td.SampleDesc.Count = 1;
 		td.Usage = D3D11_USAGE_DEFAULT;
 		td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
@@ -913,7 +1246,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		{
 			D3D11_DEPTH_STENCIL_VIEW_DESC dsv;
 			ZeroMemory(&dsv, sizeof(dsv));
-			dsv.Format = DXGI_FORMAT_D32_FLOAT;
+			dsv.Format = DXGI_FORMAT_D16_UNORM;
 			dsv.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
 			dsv.Texture2DArray.FirstArraySlice = i;
 			dsv.Texture2DArray.ArraySize = 1;
@@ -923,7 +1256,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		// 配列全体を読むためのSRV
 		D3D11_SHADER_RESOURCE_VIEW_DESC srv;
 		ZeroMemory(&srv, sizeof(srv));
-		srv.Format = DXGI_FORMAT_R32_FLOAT;
+		srv.Format = DXGI_FORMAT_R16_UNORM;
 		srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
 		srv.Texture2DArray.MostDetailedMip = 0;
 		srv.Texture2DArray.MipLevels = 1;
@@ -935,8 +1268,9 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		D3D11_BUFFER_DESC bd;
 		ZeroMemory(&bd, sizeof(bd));
 		bd.ByteWidth = sizeof(FACE_SHADOW_CONSTANT);
-		bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.Usage = D3D11_USAGE_DYNAMIC;
 		bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 		g_D3DDevice->CreateBuffer(&bd, NULL, &g_FaceShadowBuffer);
 		g_ImmediateContext->VSSetConstantBuffers(9, 1, &g_FaceShadowBuffer);
 		g_ImmediateContext->PSSetConstantBuffers(9, 1, &g_FaceShadowBuffer);
@@ -947,13 +1281,13 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 
 	//================================================
 	// WorldViewProjection行列用定数バッファ生成
-	D3D11_BUFFER_DESC hBufferDesc;
+	D3D11_BUFFER_DESC hBufferDesc = {};
 	hBufferDesc.ByteWidth = sizeof(XMMATRIX);
-	hBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+	hBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
 	hBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	hBufferDesc.CPUAccessFlags = 0;
+	hBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 	hBufferDesc.MiscFlags = 0;
-	hBufferDesc.StructureByteStride = sizeof(float);
+	hBufferDesc.StructureByteStride = 0;
 	//行列オブジェクトをシェーダーへ接続　b0をつかう
 	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_WorldBuffer);
 	g_ImmediateContext->VSSetConstantBuffers(0, 1, &g_WorldBuffer);
@@ -967,11 +1301,6 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 
 	//マテリアル用定数バッファ生成
 	hBufferDesc.ByteWidth = sizeof(MATERIAL);
-	hBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-	hBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	hBufferDesc.CPUAccessFlags = 0;
-	hBufferDesc.MiscFlags = 0;
-	hBufferDesc.StructureByteStride = sizeof(float);
 	//マテリアルオブジェクトをシェーダーへ接続　b1を使う
 	g_D3DDevice->CreateBuffer( &hBufferDesc, NULL, &g_MaterialBuffer );
 	g_ImmediateContext->VSSetConstantBuffers( 3, 1, &g_MaterialBuffer );
@@ -1052,6 +1381,9 @@ void FinalizeRenderer(void)
 		SAFE_RELEASE(rState[i]);
 	}
 
+#if defined(_DEBUG)
+	ReleaseGpuTimingQueries();
+#endif
 	if( g_ImmediateContext )	g_ImmediateContext->ClearState();
 	releaseBackBuffer();
 	SAFE_RELEASE(g_SwapChain3);
@@ -1066,6 +1398,9 @@ void FinalizeRenderer(void)
 //=============================================================================
 void Clear(void)
 {
+#if defined(_DEBUG)
+	BeginGpuFrameTiming();
+#endif
 	// バックバッファクリア色
 	float ClearColor[4] = { 0.2f, 0.2f, 0.2f, 1.0f };//純黒は避ける
 	//バックバッファをクリア
@@ -1108,6 +1443,9 @@ void Present(void)
 		return;
 	}
 
+#if defined(_DEBUG)
+	EndGpuFrameTiming();
+#endif
 	const HRESULT presentResult = g_SwapChain->Present(1, 0);
 	if (SUCCEEDED(presentResult))
 	{
@@ -1198,7 +1536,7 @@ void SetLight(LIGHT Light)
 	{
 		return;
 	}
-	g_ImmediateContext->UpdateSubresource(g_LightBuffer, 0, NULL, &Light, 0, 0);
+	UpdateDynamicConstantBuffer(g_LightBuffer, &Light, sizeof(Light));
 	g_LastLight = Light;
 	g_HasLastLight = true;
 }
@@ -1206,7 +1544,10 @@ void SetLight(LIGHT Light)
 // 3点照明(キー/フィル/リム)をまとめてPBRシェーダー(b7)へ送る。
 void SetPlayerLights(const LIGHT lights[NUM_PLAYER_LIGHTS])
 {
-	g_ImmediateContext->UpdateSubresource(g_PlayerLightBuffer, 0, NULL, lights, 0, 0);
+	UpdateDynamicConstantBuffer(
+		g_PlayerLightBuffer,
+		lights,
+		sizeof(LIGHT) * NUM_PLAYER_LIGHTS);
 }
 
 //=============================================================================
@@ -1433,6 +1774,66 @@ bool Direct3D_IsTakingScreenshot(void)
 {
 	return g_IsTakingScreenshot;
 }
+
+float Direct3D_GetLastGpuFrameMs(void)
+{
+	return g_LastGpuFrameMs;
+}
+
+#if defined(_DEBUG)
+void Direct3D_DebugResetFrameCounters(void)
+{
+	g_DebugMapCount = 0;
+	g_DebugMapMs = 0.0;
+	for (int i = 0; i < DIRECT3D_DEBUG_STAGE_COUNT; ++i)
+	{
+		g_DebugStageActive[i] = false;
+		g_DebugStageMs[i] = 0.0;
+	}
+}
+
+void Direct3D_DebugStageBegin(Direct3D_DebugStage stage)
+{
+	if (stage < 0 || stage >= DIRECT3D_DEBUG_STAGE_COUNT)
+	{
+		return;
+	}
+	g_DebugStageStarts[stage] = std::chrono::steady_clock::now();
+	g_DebugStageActive[stage] = true;
+}
+
+void Direct3D_DebugStageEnd(Direct3D_DebugStage stage)
+{
+	if (stage < 0 ||
+		stage >= DIRECT3D_DEBUG_STAGE_COUNT ||
+		!g_DebugStageActive[stage])
+	{
+		return;
+	}
+	g_DebugStageMs[stage] += std::chrono::duration<double, std::milli>(
+		std::chrono::steady_clock::now() - g_DebugStageStarts[stage]).count();
+	g_DebugStageActive[stage] = false;
+}
+
+double Direct3D_DebugGetStageMs(Direct3D_DebugStage stage)
+{
+	if (stage < 0 || stage >= DIRECT3D_DEBUG_STAGE_COUNT)
+	{
+		return 0.0;
+	}
+	return g_DebugStageMs[stage];
+}
+
+unsigned long long Direct3D_DebugGetMapCount(void)
+{
+	return g_DebugMapCount;
+}
+
+double Direct3D_DebugGetMapMs(void)
+{
+	return g_DebugMapMs;
+}
+#endif
 
 bool Direct3D_GetMemoryInfo(
 	unsigned long long* localBudgetMb,

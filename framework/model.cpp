@@ -958,34 +958,17 @@ MODEL* ModelLoad(const char* FileName)
 
 			D3D11_BUFFER_DESC bd;
 			ZeroMemory(&bd, sizeof(bd));
-			bd.Usage = D3D11_USAGE_DYNAMIC;  // 動的更新対応に変更
+			bd.Usage = D3D11_USAGE_DEFAULT;
 			bd.ByteWidth = sizeof(Vertex3D) * mesh->mNumVertices;
 			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-			bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;  // CPU書き込み対応
+			bd.CPUAccessFlags = 0;
 
-			HRESULT hr = GetDevice()->CreateBuffer(&bd, nullptr, &model->VertexBuffer[m]);
+			D3D11_SUBRESOURCE_DATA sd = {};
+			sd.pSysMem = vertex;
+
+			HRESULT hr = GetDevice()->CreateBuffer(&bd, &sd, &model->VertexBuffer[m]);
 			if (FAILED(hr))
 			{
-				delete[] vertex;
-				return nullptr;
-			}
-
-			D3D11_MAPPED_SUBRESOURCE mapped = {};
-			hr = GetDeviceContext()->Map(
-				model->VertexBuffer[m],
-				0,
-				D3D11_MAP_WRITE_DISCARD,
-				0,
-				&mapped);
-			if (SUCCEEDED(hr))
-			{
-				memcpy(mapped.pData, vertex, sizeof(Vertex3D) * mesh->mNumVertices);
-				GetDeviceContext()->Unmap(model->VertexBuffer[m], 0);
-			}
-			else
-			{
-				model->VertexBuffer[m]->Release();
-				model->VertexBuffer[m] = nullptr;
 				delete[] vertex;
 				return nullptr;
 			}

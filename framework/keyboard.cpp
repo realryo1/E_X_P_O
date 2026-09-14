@@ -22,6 +22,7 @@ static_assert(sizeof(Keyboard_State) == 256 / 8, "キーボード状態構造体
 
 static Keyboard_State gState = {};
 static Keyboard_State gStateOld = {};
+static Keyboard_State gLatched = {};
 
 
 void keycopy()
@@ -30,7 +31,7 @@ void keycopy()
     
 }
 
-static void keyDown(int key)
+static void keyDown(int key, bool isRepeat)
 {
     if (key < 0 || key > 0xfe) { return;  }
 
@@ -38,7 +39,11 @@ static void keyDown(int key)
     unsigned int bf = 1u << (key & 0x1f);
  
     p[(key >> 5)] |= bf;
-
+    if (!isRepeat)
+    {
+        unsigned int* latched = (unsigned int*)&gLatched;
+        latched[(key >> 5)] |= bf;
+    }
 }
 
 
@@ -80,7 +85,12 @@ bool Keyboard_IsKeyDownTrigger(Keyboard_Keys key)
 
         unsigned int bf = 1u << (key & 0x1f);
 
-        return ((p[(key >> 5)] & bf) ^ (p2[(key >> 5)] & bf)) & (p[(key >> 5)] & bf);
+        const unsigned int currentBit = p[(key >> 5)] & bf;
+        const unsigned int oldBit = p2[(key >> 5)] & bf;
+        unsigned int* latched = (unsigned int*)&gLatched;
+        const unsigned int latchedBit = latched[(key >> 5)] & bf;
+        latched[(key >> 5)] &= ~bf;
+        return (((currentBit ^ oldBit) & currentBit) | latchedBit) != 0;
 
     }
     return false;
@@ -128,6 +138,7 @@ void Keyboard_Reset(void)
 {
     ZeroMemory(&gState, sizeof(Keyboard_State));
     ZeroMemory(&gStateOld, sizeof(Keyboard_State));
+    ZeroMemory(&gLatched, sizeof(Keyboard_State));
 }
 
 
@@ -179,7 +190,8 @@ void Keyboard_ProcessMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     if (down)
     {
-        keyDown(vk);
+        const bool isRepeat = (lParam & (1 << 30)) != 0;
+        keyDown(vk, isRepeat);
     }
     else
     {

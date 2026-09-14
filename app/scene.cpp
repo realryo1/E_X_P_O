@@ -88,6 +88,14 @@ void Update( void )
 	}
 }
 
+void PumpAfterPresent(double lastDrawMs, float lastGpuMs)
+{
+	if (scene == SCENE_GAME)
+	{
+		Game_PumpAfterPresent(lastDrawMs, lastGpuMs);
+	}
+}
+
 void Draw( void )
 {
 	switch ( scene )

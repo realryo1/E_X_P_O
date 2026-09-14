@@ -71,7 +71,7 @@ grass.jpg / normal.png / tex.png / icon.ico：検証・アプリアイコン用 
 KaiseiDecol-Medium.ttf：日本語 UI フォント 
 
 ## モデル
-cube.fbx / model.fbx：デバッグシーン用 
+cube.fbx / model.fbx：デバッグシーン用。`cube.fbx` は `SCENE_GAME` の LOD3 プレースホルダーにも使う（レースのスタートマーカーには使わない） 
 
 basic_skybox_3d.fbx：スカイドーム用モデル 
 
