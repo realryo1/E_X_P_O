@@ -1,54 +1,53 @@
-ï»¿@echo off
+@echo off
 setlocal EnableExtensions
-chcp 65001 >nul
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
 set "ROOT=%~dp0.."
 pushd "%ROOT%"
 if errorlevel 1 (
-    echo ãƒ—ãƒ­ã‚¸ã‚§ã‚¯ãƒˆãƒ«ãƒ¼ãƒˆã¸ç§»å‹•ã§ãã¾ã›ã‚“ã§ã—ãŸã€‚
+    echo ƒvƒƒWƒFƒNƒgƒ‹[ƒg‚ÖˆÚ“®‚Å‚«‚Ü‚¹‚ñ‚Å‚µ‚½B
     echo.
     pause
     exit /b 1
 )
 
 echo.
-echo ä¸‡åšã‚¢ã‚»ãƒƒãƒˆå–å¾—ãƒ„ãƒ¼ãƒ«
+echo –œ”ƒAƒZƒbƒgæ“¾ƒc[ƒ‹
 echo.
-echo Project PLATEAU ã®å…¬å¼ãƒ‡ãƒ¼ã‚¿ã‚’ãƒ€ã‚¦ãƒ³ãƒ­ãƒ¼ãƒ‰ã—ã€ã‚²ãƒ¼ãƒ ç”¨ãƒ¢ãƒ‡ãƒ«ã¸å¤‰æ›ã—ã¾ã™ã€‚
+echo Project PLATEAU ‚ÌŒö®ƒf[ƒ^‚ğƒ_ƒEƒ“ƒ[ƒh‚µAƒQ[ƒ€—pƒ‚ƒfƒ‹‚Ö•ÏŠ·‚µ‚Ü‚·B
 echo.
-echo å¿…è¦ãªç’°å¢ƒ:
-echo   - Python 3.10 ä»¥é™
-echo   - Node.js 18 ä»¥é™ / npm
-echo   - curl.exe / Windows æ¨™æº–
+echo •K—v‚ÈŠÂ‹«:
+echo   * Python 3.10 ˆÈ~
+echo   * Node.js 18 ˆÈ~ ‚Æ npm
+echo   * curl.exe (Windows •W€)
 echo.
-echo æ¤œå‡ºçµæœ:
+echo ŒŸoŒ‹‰Ê:
 set "DEP_OK=1"
 where python >nul 2>&1
 if errorlevel 1 (
-    echo   Python : è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“
+    echo   Python : Œ©‚Â‚©‚è‚Ü‚¹‚ñ
     set "DEP_OK=0"
 ) else (
     for /f "delims=" %%V in ('python --version 2^>^&1') do echo   Python : %%V
 )
 where node >nul 2>&1
 if errorlevel 1 (
-    echo   Node.js: è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“
+    echo   Node.js: Œ©‚Â‚©‚è‚Ü‚¹‚ñ
     set "DEP_OK=0"
 ) else (
     for /f "delims=" %%V in ('node --version 2^>^&1') do echo   Node.js: %%V
 )
 where npm >nul 2>&1
 if errorlevel 1 (
-    echo   npm    : è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“
+    echo   npm    : Œ©‚Â‚©‚è‚Ü‚¹‚ñ
     set "DEP_OK=0"
 ) else (
     for /f "delims=" %%V in ('npm --version 2^>^&1') do echo   npm    : %%V
 )
 where curl.exe >nul 2>&1
 if errorlevel 1 (
-    echo   curl   : è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“
+    echo   curl   : Œ©‚Â‚©‚è‚Ü‚¹‚ñ
     set "DEP_OK=0"
 ) else (
     for /f "tokens=1,2 delims= " %%A in ('curl.exe --version 2^>^&1') do (
@@ -59,59 +58,59 @@ if errorlevel 1 (
 :curl_version_done
 if "%DEP_OK%"=="0" (
     echo.
-    echo å¿…è¦ãªç’°å¢ƒãŒä¸è¶³ã—ã¦ã„ã¾ã™ã€‚ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã¦ã‹ã‚‰å†å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚
+    echo •K—v‚ÈŠÂ‹«‚ª•s‘«‚µ‚Ä‚¢‚Ü‚·BƒCƒ“ƒXƒg[ƒ‹‚µ‚Ä‚©‚çÄÀs‚µ‚Ä‚­‚¾‚³‚¢B
     set "EXIT_CODE=3"
     goto :finish
 )
 echo.
-echo ç¶šã‘ã‚‹å‰ã«ã€æœ€æ–°ã®åˆ©ç”¨æ¡ä»¶ã‚’ç¢ºèªã—ã¦ãã ã•ã„:
+echo ‘±‚¯‚é‘O‚ÉAÅV‚Ì—˜—pğŒ‚ğŠm”F‚µ‚Ä‚­‚¾‚³‚¢:
 echo https://www.geospatial.jp/ckan/dataset/plateau-27999-osaka-shi-2025
 echo.
-echo æ³¨æ„:
-echo - ãƒ‡ãƒ¼ã‚¿ã«ã¯ç¬¬ä¸‰è€…ã®è‘—ä½œæ¨©ãƒ»å•†æ¨™ãŒå«ã¾ã‚Œã‚‹å ´åˆãŒã‚ã‚Šã¾ã™ã€‚
-echo - å…¬å¼ã®åˆ©ç”¨æ¡ä»¶ã«å¾“ã£ã¦ãã ã•ã„ã€‚éå–¶åˆ©ãªã©ã®åˆ¶é™ã‚’å«ã¿ã¾ã™ã€‚
-echo - å…ƒãƒ‡ãƒ¼ã‚¿ã®å†é…å¸ƒã‚„ã€å…¬å¼ä½œå“ã§ã‚ã‚‹ã‹ã®ã‚ˆã†ãªè¡¨ç¤ºã¯ã—ãªã„ã§ãã ã•ã„ã€‚
-echo - å…¬é–‹ã‚„å–¶åˆ©åˆ©ç”¨ã®å‰ã«ã€æœ€æ–°ã®åˆ©ç”¨æ¡ä»¶ã‚’å†ç¢ºèªã—ã¦ãã ã•ã„ã€‚
+echo ’ˆÓ:
+echo * ƒf[ƒ^‚É‚Í‘æOÒ‚Ì’˜ìŒ E¤•W‚ªŠÜ‚Ü‚ê‚éê‡‚ª‚ ‚è‚Ü‚·B
+echo * Œö®‚Ì—˜—pğŒ‚É]‚Á‚Ä‚­‚¾‚³‚¢B”ñ‰c—˜‚È‚Ç‚Ì§ŒÀ‚ğŠÜ‚İ‚Ü‚·B
+echo * Œ³ƒf[ƒ^‚ÌÄ”z•z‚âAŒö®ì•i‚Å‚ ‚é‚©‚Ì‚æ‚¤‚È•\¦‚Í‚µ‚È‚¢‚Å‚­‚¾‚³‚¢B
+echo * ŒöŠJ‚â‰c—˜—˜—p‚Ì‘O‚ÉAÅV‚Ì—˜—pğŒ‚ğÄŠm”F‚µ‚Ä‚­‚¾‚³‚¢B
 echo.
-set /p "AGREE=åˆ©ç”¨æ¡ä»¶ã‚’ç¢ºèªãƒ»åŒæ„ã—ãŸã‚‰ AGREE ã¨å…¥åŠ›: "
+set /p "AGREE=—˜—pğŒ‚ğŠm”FE“¯ˆÓ‚µ‚½‚ç AGREE ‚Æ“ü—Í: "
 if /I not "%AGREE%"=="AGREE" (
-    echo åŒæ„ãŒç¢ºèªã§ãã¾ã›ã‚“ã§ã—ãŸã€‚ä¸­æ­¢ã—ã¾ã™ã€‚
+    echo “¯ˆÓ‚ªŠm”F‚Å‚«‚Ü‚¹‚ñ‚Å‚µ‚½B’†~‚µ‚Ü‚·B
     set "EXIT_CODE=2"
     goto :finish
 )
 
 if not exist "data_original" mkdir "data_original"
 if not exist "data_original\27999_osaka-shi_city_2025_3dtiles_mvt_1_op.zip" (
-    echo [1/8] å…¬å¼ 3D Tiles ã‚’ãƒ€ã‚¦ãƒ³ãƒ­ãƒ¼ãƒ‰ã—ã¦ã„ã¾ã™...
+    echo [1/8] Œö® 3D Tiles ‚ğƒ_ƒEƒ“ƒ[ƒh‚µ‚Ä‚¢‚Ü‚·...
     curl.exe --fail --location --retry 3 -o "data_original\27999_osaka-shi_city_2025_3dtiles_mvt_1_op.zip" "https://www.geospatial.jp/ckan/dataset/plateau-27999-osaka-shi-2025/resource/c3cb4e3a-9190-4c71-a8d4-cc519464700b/download/27999_osaka-shi_city_2025_3dtiles_mvt_1_op.zip"
     if errorlevel 1 goto :download_failed
 ) else (
-    echo [1/8] å…¬å¼ 3D Tiles ã¯æ—¢ã«ã‚ã‚Šã¾ã™ã€‚
+    echo [1/8] Œö® 3D Tiles ‚ÍŠù‚É‚ ‚è‚Ü‚·B
 )
 if not exist "data_original\27999_osaka-shi_city_2025_citygml_1_op.zip" (
-    echo [2/8] å…¬å¼ CityGML ã‚’ãƒ€ã‚¦ãƒ³ãƒ­ãƒ¼ãƒ‰ã—ã¦ã„ã¾ã™...
+    echo [2/8] Œö® CityGML ‚ğƒ_ƒEƒ“ƒ[ƒh‚µ‚Ä‚¢‚Ü‚·...
     curl.exe --fail --location --retry 3 -o "data_original\27999_osaka-shi_city_2025_citygml_1_op.zip" "https://assets.cms.plateau.reearth.io/assets/9d/d092b9-a371-499d-832e-de6fdf538b22/27999_osaka-shi_city_2025_citygml_1_op.zip"
     if errorlevel 1 goto :download_failed
 ) else (
-    echo [2/8] å…¬å¼ CityGML ã¯æ—¢ã«ã‚ã‚Šã¾ã™ã€‚
+    echo [2/8] Œö® CityGML ‚ÍŠù‚É‚ ‚è‚Ü‚·B
 )
 if not exist "data_original\27999_osaka-shi_city_2025_ortho_1_op.zip" (
-    echo [3/8] å…¬å¼ã‚ªãƒ«ã‚½ç”»åƒã‚’ãƒ€ã‚¦ãƒ³ãƒ­ãƒ¼ãƒ‰ã—ã¦ã„ã¾ã™...
+    echo [3/8] Œö®ƒIƒ‹ƒ\‰æ‘œ‚ğƒ_ƒEƒ“ƒ[ƒh‚µ‚Ä‚¢‚Ü‚·...
     curl.exe --fail --location --retry 3 -o "data_original\27999_osaka-shi_city_2025_ortho_1_op.zip" "https://assets.cms.plateau.reearth.io/assets/72/3ad7c7-896b-455b-b3b1-7799fae342e4/27999_osaka-shi_city_2025_ortho_1_op.zip"
     if errorlevel 1 goto :download_failed
 ) else (
-    echo [3/8] å…¬å¼ã‚ªãƒ«ã‚½ç”»åƒã¯æ—¢ã«ã‚ã‚Šã¾ã™ã€‚
+    echo [3/8] Œö®ƒIƒ‹ƒ\‰æ‘œ‚ÍŠù‚É‚ ‚è‚Ü‚·B
 )
 
-echo [4/8] ZIP ã‚’å±•é–‹ã—ã¦ã„ã¾ã™...
+echo [4/8] ZIP ‚ğ“WŠJ‚µ‚Ä‚¢‚Ü‚·...
 python "tool\download_expo_assets.py"
 if errorlevel 1 goto :failed
 
-echo [5/8] Node.js ã®ä¾å­˜é–¢ä¿‚ã‚’ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã¦ã„ã¾ã™...
+echo [5/8] Node.js ‚ÌˆË‘¶ŠÖŒW‚ğƒCƒ“ƒXƒg[ƒ‹‚µ‚Ä‚¢‚Ü‚·...
 call npm install --prefix tool
 if errorlevel 1 goto :failed
 
-echo [6/8] LOD1ã€LOD2ã€åºŠã€å¤§å±‹æ ¹ãƒªãƒ³ã‚°ã‚’ç”Ÿæˆã—ã¦ã„ã¾ã™...
+echo [6/8] LOD1ALOD2A°A‘å‰®ªƒŠƒ“ƒO‚ğ¶¬‚µ‚Ä‚¢‚Ü‚·...
 python "tool\prepare_expo_model.py" --tileset "data_original\3dtiles\27999_osaka-shi_city_2025_citygml_1_op_bldg_lod1\tileset.json" --output-name "expo_tile.glb" --runtime-output "asset\expomodel\expo_tile.glb"
 if errorlevel 1 goto :failed
 python "tool\prepare_expo_model.py" --tileset "data_original\3dtiles\27999_osaka-shi_city_2025_citygml_1_op_bldg_lod2\tileset.json" --output-name "expo_tile_lod2.glb" --runtime-output "asset\expomodel\expo_tile_lod2.glb" --max-tiles 4 --leaf-only
@@ -121,17 +120,17 @@ if errorlevel 1 goto :failed
 python "tool\prepare_expo_ring.py"
 if errorlevel 1 goto :failed
 
-echo [7/8] LOD3 ãƒ‘ãƒ“ãƒªã‚ªãƒ³ã‚’ç”Ÿæˆã—ã¦ã„ã¾ã™...
+echo [7/8] LOD3 ƒpƒrƒŠƒIƒ“‚ğ¶¬‚µ‚Ä‚¢‚Ü‚·...
 python "tool\prepare_expo_pavilion.py" --all-names
 if errorlevel 1 goto :failed
 
-echo [8/8] Better Co-Being ã‚’ç°¡ç•¥åŒ–ã—ã¦ã„ã¾ã™...
+echo [8/8] Better Co-Being ‚ğŠÈ—ª‰»‚µ‚Ä‚¢‚Ü‚·...
 node "tool\simplify_glb.cjs" --config "tool\expo_simplify.json"
 if errorlevel 1 goto :failed
 
 echo.
-echo ä¸‡åšã‚¢ã‚»ãƒƒãƒˆã®ç”ŸæˆãŒå®Œäº†ã—ã¾ã—ãŸã€‚
-echo ã‚²ãƒ¼ãƒ ç”¨ãƒ¢ãƒ‡ãƒ«: asset\expomodel
+echo –œ”ƒAƒZƒbƒg‚Ì¶¬‚ªŠ®—¹‚µ‚Ü‚µ‚½B
+echo ƒQ[ƒ€—pƒ‚ƒfƒ‹: asset\expomodel
 echo.
 python "tool\download_expo_assets.py" --report-data-dirs
 if errorlevel 1 (
@@ -139,30 +138,30 @@ if errorlevel 1 (
     goto :finish
 )
 echo.
-echo å‰Šé™¤ã—ã¦ã‚‚ asset\expomodel ã®ã‚²ãƒ¼ãƒ ç”¨ãƒ¢ãƒ‡ãƒ«ã¯æ®‹ã‚Šã¾ã™ã€‚
-echo æ®‹ã™ã¨ã€å†å¤‰æ›æ™‚ã®ãƒ€ã‚¦ãƒ³ãƒ­ãƒ¼ãƒ‰ã‚’çœç•¥ã§ãã¾ã™ã€‚
-set /p "CLEAN=ä¸€æ™‚ãƒ•ã‚©ãƒ«ãƒ€ data_* ã‚’å‰Šé™¤ã—ã¾ã™ã‹ï¼Ÿ Y / N: "
+echo íœ‚µ‚Ä‚à asset\expomodel ‚ÌƒQ[ƒ€—pƒ‚ƒfƒ‹‚Íc‚è‚Ü‚·B
+echo c‚·‚ÆAÄ•ÏŠ·‚Ìƒ_ƒEƒ“ƒ[ƒh‚ğÈ—ª‚Å‚«‚Ü‚·B
+set /p "CLEAN=ˆêƒtƒHƒ‹ƒ_ data_* ‚ğíœ‚µ‚Ü‚·‚©H Y / N: "
 if /I "%CLEAN%"=="Y" (
     python "tool\download_expo_assets.py" --delete-data-dirs
     if errorlevel 1 (
-        echo ä¸€æ™‚ãƒ•ã‚©ãƒ«ãƒ€ã®å‰Šé™¤ã«å¤±æ•—ã—ã¾ã—ãŸã€‚
+        echo ˆêƒtƒHƒ‹ƒ_‚Ìíœ‚É¸”s‚µ‚Ü‚µ‚½B
         set "EXIT_CODE=6"
         goto :finish
     )
-    echo ä¸€æ™‚ãƒ•ã‚©ãƒ«ãƒ€ã‚’å‰Šé™¤ã—ã¾ã—ãŸã€‚
+    echo ˆêƒtƒHƒ‹ƒ_‚ğíœ‚µ‚Ü‚µ‚½B
 ) else (
-    echo ä¸€æ™‚ãƒ•ã‚©ãƒ«ãƒ€ã¯æ®‹ã—ã¾ã—ãŸã€‚
+    echo ˆêƒtƒHƒ‹ƒ_‚Íc‚µ‚Ü‚µ‚½B
 )
 set "EXIT_CODE=0"
 goto :finish
 
 :download_failed
-echo ãƒ€ã‚¦ãƒ³ãƒ­ãƒ¼ãƒ‰ã«å¤±æ•—ã—ã¾ã—ãŸã€‚ãƒãƒƒãƒˆãƒ¯ãƒ¼ã‚¯ã¨å…¬å¼URLã‚’ç¢ºèªã—ã¦ãã ã•ã„ã€‚
+echo ƒ_ƒEƒ“ƒ[ƒh‚É¸”s‚µ‚Ü‚µ‚½Bƒlƒbƒgƒ[ƒN‚ÆŒö®URL‚ğŠm”F‚µ‚Ä‚­‚¾‚³‚¢B
 set "EXIT_CODE=4"
 goto :finish
 
 :failed
-echo ã‚¢ã‚»ãƒƒãƒˆå¤‰æ›ã«å¤±æ•—ã—ã¾ã—ãŸã€‚
+echo ƒAƒZƒbƒg•ÏŠ·‚É¸”s‚µ‚Ü‚µ‚½B
 set "EXIT_CODE=5"
 
 :finish
