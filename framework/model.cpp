@@ -339,7 +339,7 @@ static void RenderAnimatedNodeRecursive(
 		unsigned int indexCount = model->MeshIndexCounts[meshIndex];
 		if (indexCount > 0)
 		{
-			GetDeviceContext()->DrawIndexed(indexCount, 0, 0);
+			DrawIndexed(indexCount, 0, 0);
 		}
 	}
 
@@ -538,7 +538,7 @@ void RenderNode(MODEL* model, aiNode* node, XMMATRIX parentTransform, const XMFL
 		if (indexCount > 0)
 		{
 			// 描画(保持されているインデックス数を使用)
-			GetDeviceContext()->DrawIndexed(indexCount, 0, 0);
+			DrawIndexed(indexCount, 0, 0);
 		}
 	}
 
@@ -640,7 +640,7 @@ void RenderNodeAnimation(MODEL* model, aiNode* node, XMMATRIX parentTransform, c
 		if (indexCount > 0)
 		{
 			// 描画
-			GetDeviceContext()->DrawIndexed(indexCount, 0, 0);
+			DrawIndexed(indexCount, 0, 0);
 		}
 	}
 
@@ -1553,7 +1553,7 @@ void ModelDrawShadowMapSkinned(MODEL* model, XMFLOAT3 pos, XMFLOAT3 rot, XMFLOAT
 		unsigned int indexCount = model->MeshIndexCounts[m];
 		if (indexCount > 0)
 		{
-			context->DrawIndexed(indexCount, 0, 0);
+			DrawIndexed(indexCount, 0, 0);
 		}
 	}
 }
@@ -1683,7 +1683,7 @@ void ModelAnimationDraw(MODEL* model, XMFLOAT3 pos, XMFLOAT3 rot, XMFLOAT3 scale
 		unsigned int indexCount = model->MeshIndexCounts[m];
 		if (indexCount > 0)
 		{
-			context->DrawIndexed(indexCount, 0, 0);
+			DrawIndexed(indexCount, 0, 0);
 		}
 	}
 }

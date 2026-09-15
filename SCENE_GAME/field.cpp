@@ -7,6 +7,7 @@
 #include "renderer.h"
 #include "camera.h"
 #include "playercamera.h"
+#include "envprobe.h"
 #include "input_manager.h"
 #include "fade.h"
 #include <algorithm>
@@ -20,6 +21,7 @@
 #include <vector>
 #include <memory>
 #include <utility>
+#include <unordered_set>
 #include <windows.h>
 #include <psapi.h>
 #pragma comment(lib, "Psapi.lib")
@@ -107,6 +109,7 @@ static Sprite3D* g_ExpoFloor = nullptr;
 static std::vector<Sprite3D*> g_ExpoTiles;
 static std::vector<Sprite3D*> g_ExpoFarTiles;
 static std::vector<Sprite3D*> g_ExpoPavilions;
+static Sprite3D* g_Null2Pavilion = nullptr;
 static Sprite3D* g_ExpoRing = nullptr;
 static Sprite3D* g_ExpoSkybox = nullptr;
 static float g_ExpoSkyboxYaw = 0.0f;
@@ -189,6 +192,12 @@ static XMFLOAT3 g_LookPrefetchPosition = { 0.0f, 0.0f, 0.0f };
 static bool g_HasLookPrefetchPosition = false;
 static float g_LookDirX = 0.0f;
 static float g_LookDirZ = 1.0f;
+static ID3D11ShaderResourceView* g_PendingSkyboxTexture = nullptr;
+static bool g_SkyboxLoadAttempted = false;
+static LONGLONG g_LoadStartCounter = 0;
+static bool g_LoggedCoreImport = false;
+static bool g_LoggedCoreGpu = false;
+static bool g_LoggedCollision = false;
 
 static void ConfigureExpoShadowModel(Sprite3D* model, bool castShadow)
 {
@@ -205,6 +214,11 @@ static bool FileExists(const char* path)
 	if (!path) return false;
 	const DWORD attrib = GetFileAttributesA(path);
 	return attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+static bool IsNull2Path(const char* path)
+{
+	return path && strstr(path, "expo_pavilion_null2") != nullptr;
 }
 
 static LONGLONG GetPerformanceCounter(void)
@@ -236,6 +250,35 @@ static LONGLONG GetLoadDeadline(double budgetMilliseconds = EXPO_LOAD_BUDGET_MIL
 static bool HasLoadTime(const LONGLONG deadline)
 {
 	return GetPerformanceCounter() < deadline;
+}
+
+static double LoadElapsedMilliseconds(void)
+{
+	static LONGLONG frequency = 0;
+	if (frequency == 0)
+	{
+		LARGE_INTEGER value = {};
+		QueryPerformanceFrequency(&value);
+		frequency = value.QuadPart;
+	}
+	if (frequency <= 0 || g_LoadStartCounter == 0)
+	{
+		return 0.0;
+	}
+	const LONGLONG now = GetPerformanceCounter();
+	return static_cast<double>(now - g_LoadStartCounter) * 1000.0 /
+		static_cast<double>(frequency);
+}
+
+static void LogLoadPhase(const char* label)
+{
+	if (!label)
+	{
+		return;
+	}
+	char line[256] = {};
+	sprintf_s(line, "[ExpoLoad] %s: %.1f ms\n", label, LoadElapsedMilliseconds());
+	OutputDebugStringA(line);
 }
 
 static bool GetCameraLookXZ(float* outX, float* outZ)
@@ -396,8 +439,11 @@ static void ClearExpoTiles(void)
 	}
 	g_ExpoPavilions.clear();
 	g_PavilionBaseY.clear();
+	g_Null2Pavilion = nullptr;
 	SAFE_DELETE(g_ExpoRing);
 	SAFE_DELETE(g_ExpoSkybox);
+	g_PendingSkyboxTexture = nullptr;
+	g_SkyboxLoadAttempted = false;
 	g_ExpoSkyboxYaw = 0.0f;
 	g_ExpoSkyboxEnabled = true;
 	g_RingBaseY = 0.0f;
@@ -1141,6 +1187,7 @@ static void CommitDrawJob(ExpoDrawJob* job)
 		g_ExpoFarTiles[static_cast<size_t>(job->index)] = model;
 		g_FarTileBaseY[static_cast<size_t>(job->index)] = model->GetPos().y;
 		model->SetPosY(g_FarTileBaseY[static_cast<size_t>(job->index)] + EXPO_BUILDING_Y_OFFSET);
+		model->SetShadowUseCells(false);
 		g_LoadedFarTiles += 1;
 		break;
 	case ExpoDrawKind::Pavilion:
@@ -1152,6 +1199,11 @@ static void CommitDrawJob(ExpoDrawJob* job)
 		g_ExpoPavilions[static_cast<size_t>(job->index)] = model;
 		g_PavilionBaseY[static_cast<size_t>(job->index)] = model->GetPos().y;
 		model->SetPosY(g_PavilionBaseY[static_cast<size_t>(job->index)] + EXPO_BUILDING_Y_OFFSET);
+		if (IsNull2Path(job->path.c_str()))
+		{
+			model->SetMirrorEnv(true);
+			g_Null2Pavilion = model;
+		}
 		g_LoadedPavilions += 1;
 		break;
 	case ExpoDrawKind::Ring:
@@ -1163,9 +1215,21 @@ static void CommitDrawJob(ExpoDrawJob* job)
 
 static int MaxImportWorkers(void)
 {
-	// UMA環境ではインポート中のCPUシーンと画像デコードが共有メモリを
-	// 圧迫するため、同時実行数を固定してピーク使用量を抑える。
-	int n = 2;
+	// 利用可能メモリが少ないUMA環境では同時実行を2に抑え、
+	// それ以外では最大4まで広げて初期ロードを短縮する。
+	int n = 4;
+	const unsigned int hardware = std::thread::hardware_concurrency();
+	if (hardware > 0 && static_cast<int>(hardware) < n)
+	{
+		n = static_cast<int>(hardware);
+	}
+	MEMORYSTATUSEX memory = {};
+	memory.dwLength = sizeof(memory);
+	if (GlobalMemoryStatusEx(&memory) &&
+		memory.ullAvailPhys < (3ull * 1024ull * 1024ull * 1024ull))
+	{
+		n = 2;
+	}
 	const int jobCount = static_cast<int>(g_DrawJobs.size());
 	if (n > jobCount)
 	{
@@ -1181,6 +1245,26 @@ static int MaxImportWorkers(void)
 static bool IsCoreDrawJob(const ExpoDrawJob* job)
 {
 	return job && job->kind != ExpoDrawKind::Pavilion;
+}
+
+static bool AreCoreImportsDone(void)
+{
+	if (g_DrawJobs.empty())
+	{
+		return true;
+	}
+	for (const std::unique_ptr<ExpoDrawJob>& job : g_DrawJobs)
+	{
+		if (!IsCoreDrawJob(job.get()))
+		{
+			continue;
+		}
+		if (!job->workerDone && !job->finished && !job->failed)
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 static float GetDistanceSquaredXZ(const XMFLOAT3& left, const XMFLOAT3& right)
@@ -1342,6 +1426,10 @@ static void StartDrawWorker(ExpoDrawJob* job)
 			return;
 		}
 		model->MergePreparedMeshesByMaterial();
+		if (raw->kind == ExpoDrawKind::Lod2Far)
+		{
+			model->CollapsePreparedMeshes(1);
+		}
 		if (raw->kind != ExpoDrawKind::Pavilion)
 		{
 			model->PrepareShadowCells(EXPO_SHADOW_CELL_WORLD / EXPO_MODEL_SCALE);
@@ -1563,6 +1651,10 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 				g_ExpoPavilions[job->index] == old)
 			{
 				g_ExpoPavilions[job->index] = nullptr;
+			}
+			if (old == g_Null2Pavilion)
+			{
+				g_Null2Pavilion = nullptr;
 			}
 			SAFE_DELETE(old);
 			job->result = nullptr;
@@ -1843,10 +1935,16 @@ static void FinishLoad(void)
 		return;
 	}
 	g_LoadComplete = true;
+	LogLoadPhase("初期ロード完了");
 }
 
 static void KickoffLoad(void)
 {
+	g_LoadStartCounter = GetPerformanceCounter();
+	g_LoggedCoreImport = false;
+	g_LoggedCoreGpu = false;
+	g_LoggedCollision = false;
+	LogLoadPhase("キックオフ");
 	g_CollisionSlot = 0;
 	g_CollisionTargetCount = 0;
 	g_CollisionFinished = false;
@@ -2198,6 +2296,8 @@ void Field_GetMemoryStatus(char* out, size_t outSize)
 		failed);
 }
 
+static void EnsureSkyboxLoaded(void);
+
 void Field_PumpLoad(void)
 {
 	if (g_PumpedThisFrame)
@@ -2239,6 +2339,22 @@ void Field_PumpLoad(void)
 	PumpCollisionLoad();
 	PumpOneGpu(deadline);
 
+	if (!g_LoggedCoreImport && AreCoreImportsDone())
+	{
+		g_LoggedCoreImport = true;
+		LogLoadPhase("コアCPUインポート完了");
+	}
+	if (!g_LoggedCoreGpu && AllDrawJobsSettled())
+	{
+		g_LoggedCoreGpu = true;
+		LogLoadPhase("コアGPU化完了");
+	}
+	if (!g_LoggedCollision && g_CollisionFinished)
+	{
+		g_LoggedCollision = true;
+		LogLoadPhase("衝突ロード完了");
+	}
+
 	if (!g_HasEcefToEnu && AllDrawJobsSettled() && !g_TriedFallbackLod1)
 	{
 		g_TriedFallbackLod1 = true;
@@ -2257,8 +2373,37 @@ void Field_PumpLoad(void)
 
 	if (AllDrawJobsSettled() && g_CollisionFinished)
 	{
+		if (!g_SkyboxLoadAttempted)
+		{
+			EnsureSkyboxLoaded();
+			return;
+		}
 		ApplyFixedYOffsets();
 		FinishLoad();
+	}
+}
+
+static void EnsureSkyboxLoaded(void)
+{
+	if (g_SkyboxLoadAttempted)
+	{
+		return;
+	}
+	g_SkyboxLoadAttempted = true;
+	if (!FileExists(EXPO_SKYBOX_PATH))
+	{
+		return;
+	}
+	g_ExpoSkybox = new Sprite3D(
+		{ 0.0f, 0.0f, 0.0f },
+		{ EXPO_SKYBOX_SCALE, EXPO_SKYBOX_SCALE, EXPO_SKYBOX_SCALE },
+		{ EXPO_SKYBOX_PITCH, g_ExpoSkyboxYaw, 0.0f },
+		EXPO_SKYBOX_PATH,
+		S_SKYBOX);
+	if (g_ExpoSkybox && g_PendingSkyboxTexture)
+	{
+		g_ExpoSkybox->SetCustomTexture(g_PendingSkyboxTexture);
+		g_ExpoSkybox->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 	}
 }
 
@@ -2306,19 +2451,15 @@ void Field_Initialize(void)
 	g_HasPreviousCameraPos = false;
 	g_HasPrefetchPosition = false;
 	g_HasLookPrefetchPosition = false;
+	g_PendingSkyboxTexture = nullptr;
+	g_SkyboxLoadAttempted = false;
+	g_LoadStartCounter = 0;
+	g_LoggedCoreImport = false;
+	g_LoggedCoreGpu = false;
+	g_LoggedCollision = false;
 	g_MeshRotation = XMMatrixIdentity();
 	g_EcefToEnu = XMMatrixIdentity();
 	InitTileSetDefaults(&g_TileSet);
-
-	if (FileExists(EXPO_SKYBOX_PATH))
-	{
-		g_ExpoSkybox = new Sprite3D(
-			{ 0.0f, 0.0f, 0.0f },
-			{ EXPO_SKYBOX_SCALE, EXPO_SKYBOX_SCALE, EXPO_SKYBOX_SCALE },
-			{ EXPO_SKYBOX_PITCH, 0.0f, 0.0f },
-			EXPO_SKYBOX_PATH,
-			S_SKYBOX);
-	}
 
 	g_HasLod2 = ParseExpoTileSet(EXPO_TILE_SET_LOD2_PATH, &g_TileSet);
 	if (!g_HasLod2)
@@ -2436,6 +2577,7 @@ void Field_SetSkyboxYaw(float yawDegrees)
 
 void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture)
 {
+	g_PendingSkyboxTexture = texture;
 	if (!g_ExpoSkybox || !texture)
 	{
 		return;
@@ -2462,7 +2604,7 @@ static void ClearFarBatchVisibility(void)
 
 static void UpdateFarBatchVisibility(void)
 {
-	ClearFarBatchVisibility();
+	std::vector<std::unordered_set<int>> hiddenByTile(g_ExpoFarTiles.size());
 	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
 	{
 		const ExpoDrawJob* job = holder.get();
@@ -2473,11 +2615,17 @@ static void UpdateFarBatchVisibility(void)
 		for (const std::pair<int, int>& ref : job->farBatchRefs)
 		{
 			if (ref.first >= 0 &&
-				ref.first < static_cast<int>(g_ExpoFarTiles.size()) &&
-				g_ExpoFarTiles[ref.first])
+				ref.first < static_cast<int>(hiddenByTile.size()))
 			{
-				g_ExpoFarTiles[ref.first]->HideGlbBatchId(ref.second);
+				hiddenByTile[static_cast<size_t>(ref.first)].insert(ref.second);
 			}
+		}
+	}
+	for (size_t i = 0; i < g_ExpoFarTiles.size(); ++i)
+	{
+		if (g_ExpoFarTiles[i])
+		{
+			g_ExpoFarTiles[i]->SetHiddenGlbBatchIds(hiddenByTile[i]);
 		}
 	}
 }
@@ -2499,8 +2647,8 @@ void Field_DrawLocalShadow(
 			model->DrawShadowMap(lightView, lightProjection, focus, radius);
 		}
 	}
-	// パンチ済みLOD2から抜けたパビリオン・企業館は、未パンチ遠景LOD2が影を落とす。
-	// DrawShadowMap は hidden batch を無視するため、LOD3表示中もLOD2影を維持する。
+	// パンチ済みLOD2から抜けたパビリオンは、未パンチ遠景LOD2が影を落とす。
+	// 遠景はセル割りせずメッシュ単位で発行し、DrawIndexed の増加を抑える。
 	for (Sprite3D* model : g_ExpoFarTiles)
 	{
 		if (model)
@@ -2514,16 +2662,24 @@ void Field_DrawLocalShadow(
 	}
 }
 
-void Field_Draw(void)
+static void DrawPavilionModel(Sprite3D* model, bool bindMirror)
 {
-	if (!g_LoadComplete)
+	if (!model || !model->IsModelInFrontOfCamera())
 	{
-		// 初期ロード中はシーン描画を省略する。
-		// Game_Draw が短絡した場合でも、次フレームのロードを止めない。
-		g_HasPresentedInitialLoadFrame = true;
-		g_PumpedThisFrame = false;
 		return;
 	}
+	if (bindMirror && model == g_Null2Pavilion && EnvProbe_IsReady())
+	{
+		BindEnvCube();
+		model->Draw();
+		UnbindEnvCube();
+		return;
+	}
+	model->Draw();
+}
+
+static void DrawFieldContent(bool probePass)
+{
 	if (g_ExpoFloor)
 	{
 		g_ExpoFloor->Draw();
@@ -2538,33 +2694,40 @@ void Field_Draw(void)
 			model->Draw();
 		}
 	}
-	UpdateFarBatchVisibility();
-	for (size_t i = 0; i < g_ExpoFarTiles.size(); ++i)
+	if (!probePass)
 	{
-		Sprite3D* model = g_ExpoFarTiles[i];
-		if (model)
+		UpdateFarBatchVisibility();
+		for (size_t i = 0; i < g_ExpoFarTiles.size(); ++i)
 		{
-			if (i >= static_cast<size_t>(g_TileSet.farCount) ||
-				IsTileVisibleFromCamera(g_TileSet.farTiles[i]))
+			Sprite3D* model = g_ExpoFarTiles[i];
+			if (model)
 			{
-				model->Draw();
+				if (i >= static_cast<size_t>(g_TileSet.farCount) ||
+					IsTileVisibleFromCamera(g_TileSet.farTiles[i]))
+				{
+					model->Draw();
+				}
 			}
 		}
 	}
 	for (Sprite3D* model : g_ExpoPavilions)
 	{
-		if (model && model->IsModelInFrontOfCamera())
+		if (probePass && model == g_Null2Pavilion)
 		{
-			model->Draw();
+			continue;
 		}
+		DrawPavilionModel(model, !probePass);
 	}
-	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+	if (!probePass)
 	{
-		if (holder && holder->placeholder &&
-			!HasReadyFarFallback(holder.get()) &&
-			holder->placeholder->IsModelInFrontOfCamera())
+		for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
 		{
-			holder->placeholder->Draw();
+			if (holder && holder->placeholder &&
+				!HasReadyFarFallback(holder.get()) &&
+				holder->placeholder->IsModelInFrontOfCamera())
+			{
+				holder->placeholder->Draw();
+			}
 		}
 	}
 	if (g_ExpoRing)
@@ -2582,18 +2745,42 @@ void Field_Draw(void)
 		g_ExpoSkybox->Draw();
 		SetParameter(savedParameter);
 	}
+}
+
+void Field_Draw(void)
+{
+	if (!g_LoadComplete)
+	{
+		g_HasPresentedInitialLoadFrame = true;
+		g_PumpedThisFrame = false;
+		return;
+	}
+	DrawFieldContent(false);
 	g_PumpedThisFrame = false;
+}
+
+void Field_DrawProbeScene(void)
+{
+	if (!g_LoadComplete)
+	{
+		return;
+	}
+	DrawFieldContent(true);
+}
+
+bool Field_TryGetNull2ProbeCenter(XMFLOAT3* outCenter)
+{
+	if (!outCenter || !g_Null2Pavilion)
+	{
+		return false;
+	}
+	*outCenter = g_Null2Pavilion->GetWorldCenter();
+	return true;
 }
 
 XMFLOAT3 Field_GetSpawnPos(void)
 {
-	XMFLOAT3 spawnPos = { 0.0f, 8.0f, 0.0f };
-	if (g_ExpoFloor)
-	{
-		spawnPos = g_ExpoFloor->GetPos();
-		spawnPos.y += 4.0f;
-	}
-	return spawnPos;
+	return { -16.2099f, -7.95906f, -59.6799f };
 }
 
 XMFLOAT3 Field_GetLookTarget(void)

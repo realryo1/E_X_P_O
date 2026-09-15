@@ -1,6 +1,10 @@
 ﻿#include "gameaudio.h"
 #include "define.h"
 #include "sound.h"
+#include <atomic>
+#include <thread>
+#include <cstdio>
+#include <windows.h>
 
 namespace
 {
@@ -13,10 +17,10 @@ namespace
 		Menu,
 	};
 
-	SoundData* g_BgmExplore = nullptr;
-	SoundData* g_BgmRace = nullptr;
-	SoundData* g_BgmGoal = nullptr;
-	SoundData* g_BgmMenu = nullptr;
+	std::atomic<SoundData*> g_BgmExplore{ nullptr };
+	std::atomic<SoundData*> g_BgmRace{ nullptr };
+	std::atomic<SoundData*> g_BgmGoal{ nullptr };
+	std::atomic<SoundData*> g_BgmMenu{ nullptr };
 	SoundData* g_SeMenu = nullptr;
 	SoundData* g_SeCursor = nullptr;
 	SoundData* g_SeInvalid = nullptr;
@@ -34,8 +38,24 @@ namespace
 	SoundData* g_SeSpawn = nullptr;
 
 	BgmKind g_CurrentBgm = BgmKind::None;
+	bool g_BgmPlaying = false;
 	bool g_HoverPlaying = false;
 	int g_HitCooldown = 0;
+	std::thread g_BgmThread;
+	std::atomic<bool> g_BgmShutdown{ false };
+	LONGLONG g_BgmLoadStart = 0;
+
+	SoundData* CurrentBgmData(void)
+	{
+		switch (g_CurrentBgm)
+		{
+		case BgmKind::Explore: return g_BgmExplore.load();
+		case BgmKind::Race: return g_BgmRace.load();
+		case BgmKind::Goal: return g_BgmGoal.load();
+		case BgmKind::Menu: return g_BgmMenu.load();
+		default: return nullptr;
+		}
+	}
 
 	void PlaySe(SoundData* data)
 	{
@@ -49,14 +69,46 @@ namespace
 			return;
 		}
 
-		StopSound(g_BgmExplore);
-		StopSound(g_BgmRace);
-		StopSound(g_BgmGoal);
-		StopSound(g_BgmMenu);
+		StopSound(g_BgmExplore.load());
+		StopSound(g_BgmRace.load());
+		StopSound(g_BgmGoal.load());
+		StopSound(g_BgmMenu.load());
 		g_CurrentBgm = kind;
-		if (kind != BgmKind::None)
+		g_BgmPlaying = false;
+		if (kind != BgmKind::None && data)
 		{
 			PlaySound(data, true);
+			g_BgmPlaying = true;
+		}
+	}
+
+	void LogBgmLoadDone(void)
+	{
+		static LONGLONG frequency = 0;
+		if (frequency == 0)
+		{
+			LARGE_INTEGER value = {};
+			QueryPerformanceFrequency(&value);
+			frequency = value.QuadPart;
+		}
+		double elapsed = 0.0;
+		if (frequency > 0 && g_BgmLoadStart != 0)
+		{
+			LARGE_INTEGER now = {};
+			QueryPerformanceCounter(&now);
+			elapsed = static_cast<double>(now.QuadPart - g_BgmLoadStart) * 1000.0 /
+				static_cast<double>(frequency);
+		}
+		char line[128] = {};
+		sprintf_s(line, "[ExpoLoad] BGMロード完了: %.1f ms\n", elapsed);
+		OutputDebugStringA(line);
+	}
+
+	void JoinBgmThread(void)
+	{
+		if (g_BgmThread.joinable())
+		{
+			g_BgmThread.join();
 		}
 	}
 }
@@ -64,13 +116,11 @@ namespace
 void GameAudio_Initialize(void)
 {
 	g_CurrentBgm = BgmKind::None;
+	g_BgmPlaying = false;
 	g_HoverPlaying = false;
 	g_HitCooldown = 0;
+	g_BgmShutdown = false;
 
-	g_BgmExplore = LoadMP3("asset/sound/bgm/explore.mp3");
-	g_BgmRace = LoadMP3("asset/sound/bgm/race.mp3");
-	g_BgmGoal = LoadMP3("asset/sound/bgm/goal.mp3");
-	g_BgmMenu = LoadMP3("asset/sound/bgm/menu.mp3");
 	g_SeMenu = LoadMP3("asset/sound/se/menu_open.mp3");
 	g_SeCursor = LoadMP3("asset/sound/se/cursor.mp3");
 	g_SeInvalid = LoadMP3("asset/sound/se/invalid.mp3");
@@ -87,17 +137,64 @@ void GameAudio_Initialize(void)
 	g_SeLand = LoadMP3("asset/sound/se/land.mp3");
 	g_SeSpawn = LoadMP3("asset/sound/se/spawn.mp3");
 
+	LARGE_INTEGER start = {};
+	QueryPerformanceCounter(&start);
+	g_BgmLoadStart = start.QuadPart;
+	g_BgmThread = std::thread([]()
+	{
+		const HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		const bool shouldUninit = SUCCEEDED(coHr);
+		if (!g_BgmShutdown.load())
+		{
+			g_BgmExplore.store(LoadMP3("asset/sound/bgm/explore.mp3"));
+		}
+		if (!g_BgmShutdown.load())
+		{
+			g_BgmRace.store(LoadMP3("asset/sound/bgm/race.mp3"));
+		}
+		if (!g_BgmShutdown.load())
+		{
+			g_BgmGoal.store(LoadMP3("asset/sound/bgm/goal.mp3"));
+		}
+		if (!g_BgmShutdown.load())
+		{
+			g_BgmMenu.store(LoadMP3("asset/sound/bgm/menu.mp3"));
+		}
+		LogBgmLoadDone();
+		if (shouldUninit)
+		{
+			CoUninitialize();
+		}
+	});
+
 	GameAudio_SetBgmExplore();
+}
+
+void GameAudio_Pump(void)
+{
+	if (g_CurrentBgm == BgmKind::None || g_BgmPlaying)
+	{
+		return;
+	}
+	SoundData* data = CurrentBgmData();
+	if (!data)
+	{
+		return;
+	}
+	PlaySound(data, true);
+	g_BgmPlaying = true;
 }
 
 void GameAudio_Finalize(void)
 {
+	g_BgmShutdown = true;
+	JoinBgmThread();
 	GameAudio_UpdateHover(false, 0.0f);
 	SetBgm(BgmKind::None, nullptr);
-	UnloadSound(g_BgmExplore);
-	UnloadSound(g_BgmRace);
-	UnloadSound(g_BgmGoal);
-	UnloadSound(g_BgmMenu);
+	UnloadSound(g_BgmExplore.exchange(nullptr));
+	UnloadSound(g_BgmRace.exchange(nullptr));
+	UnloadSound(g_BgmGoal.exchange(nullptr));
+	UnloadSound(g_BgmMenu.exchange(nullptr));
 	UnloadSound(g_SeMenu);
 	UnloadSound(g_SeCursor);
 	UnloadSound(g_SeInvalid);
@@ -113,10 +210,6 @@ void GameAudio_Finalize(void)
 	UnloadSound(g_SeHit);
 	UnloadSound(g_SeLand);
 	UnloadSound(g_SeSpawn);
-	g_BgmExplore = nullptr;
-	g_BgmRace = nullptr;
-	g_BgmGoal = nullptr;
-	g_BgmMenu = nullptr;
 	g_SeMenu = nullptr;
 	g_SeCursor = nullptr;
 	g_SeInvalid = nullptr;
@@ -136,22 +229,22 @@ void GameAudio_Finalize(void)
 
 void GameAudio_SetBgmExplore(void)
 {
-	SetBgm(BgmKind::Explore, g_BgmExplore);
+	SetBgm(BgmKind::Explore, g_BgmExplore.load());
 }
 
 void GameAudio_SetBgmRace(void)
 {
-	SetBgm(BgmKind::Race, g_BgmRace);
+	SetBgm(BgmKind::Race, g_BgmRace.load());
 }
 
 void GameAudio_SetBgmGoal(void)
 {
-	SetBgm(BgmKind::Goal, g_BgmGoal);
+	SetBgm(BgmKind::Goal, g_BgmGoal.load());
 }
 
 void GameAudio_SetBgmMenu(void)
 {
-	SetBgm(BgmKind::Menu, g_BgmMenu);
+	SetBgm(BgmKind::Menu, g_BgmMenu.load());
 }
 
 void GameAudio_SetBgmCourseCreate(void)

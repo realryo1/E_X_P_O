@@ -90,6 +90,9 @@ namespace
 	Sprite2D* g_pGoalBackground = nullptr;
 	bool g_GoalRecordUpdated = false;
 	DrawFont* g_pCourseHintText = nullptr;
+	DrawFont* g_pModeLabelText = nullptr;
+	DrawFont* g_pMenuHintHudText = nullptr;
+	CourseMode g_ModeHudKind = CourseMode::FreeFlight;
 	DrawFont* g_pMenuTitleText = nullptr;
 	DrawFont* g_pMenuHintText = nullptr;
 	MultiLineClickFont* g_pMenuText = nullptr;
@@ -800,7 +803,7 @@ namespace
 		{
 			return static_cast<int>(g_Courses.size()) + 2;
 		}
-		return 3;
+		return 4;
 	}
 
 	bool MenuHasBackGap(void)
@@ -879,6 +882,7 @@ namespace
 			lines = {
 				"レース開始",
 				"コース編集・追加",
+				"スタート地点へ戻る",
 				"",
 				"戻る",
 			};
@@ -1140,6 +1144,21 @@ namespace
 			SetMenuPage(MenuPage::EditSelect);
 			break;
 		case 2:
+		{
+			const XMFLOAT3 before = Player_GetPos();
+			Player_WarpToStart();
+			const XMFLOAT3 after = Player_GetPos();
+			const float warpDx = before.x - after.x;
+			const float warpDy = before.y - after.y;
+			const float warpDz = before.z - after.z;
+			if (warpDx * warpDx + warpDy * warpDy + warpDz * warpDz > 0.25f)
+			{
+				GameAudio_PlayWarp();
+			}
+			SetMenuOpen(false);
+			break;
+		}
+		case 3:
 			SetMenuOpen(false);
 			break;
 		default:
@@ -1307,6 +1326,21 @@ void Course_Initialize(void)
 		{ 0.1f, 0.1f, 0.1f, 1.0f },
 		"P: 配置   U: 取り消し   ESC / START: メニュー",
 		TA_MIDDLE);
+	g_ModeHudKind = CourseMode::FreeFlight;
+	g_pModeLabelText = new DrawFont(
+		{ SCREEN_X - 28.0f, 32.0f },
+		26.0f,
+		0.0f,
+		{ 0.25f, 0.55f, 1.0f, 1.0f },
+		"フリー飛行モード",
+		TA_END);
+	g_pMenuHintHudText = new DrawFont(
+		{ SCREEN_X - 28.0f, 62.0f },
+		16.0f,
+		0.0f,
+		{ 0.55f, 0.55f, 0.55f, 1.0f },
+		"ESCでメニュー",
+		TA_END);
 	g_pMenuTitleText = new DrawFont(
 		{ SCREEN_X * 0.5f, 120.0f },
 		42.0f,
@@ -1327,7 +1361,7 @@ void Course_Initialize(void)
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
 		{ 1.0f, 0.85f, 0.25f, 1.0f },
-		"レース開始\nコース編集・追加\n\n戻る",
+		"レース開始\nコース編集・追加\nスタート地点へ戻る\n\n戻る",
 		1.5f,
 		TA_MIDDLE);
 	g_pMenuBackground = new Sprite2D(
@@ -1354,6 +1388,8 @@ void Course_Finalize(void)
 	SAFE_DELETE(g_pGoalHintText);
 	g_GoalRecordUpdated = false;
 	SAFE_DELETE(g_pCourseHintText);
+	SAFE_DELETE(g_pModeLabelText);
+	SAFE_DELETE(g_pMenuHintHudText);
 	SAFE_DELETE(g_pMenuTitleText);
 	SAFE_DELETE(g_pMenuHintText);
 	SAFE_DELETE(g_pMenuText);
@@ -1524,6 +1560,45 @@ void Course_DrawHud(void)
 	if (Direct3D_IsTakingScreenshot())
 	{
 		return;
+	}
+
+	CourseMode hudKind = CourseMode::FreeFlight;
+	if (g_Mode == CourseMode::CourseCreate)
+	{
+		hudKind = CourseMode::CourseCreate;
+	}
+	else if (g_Mode == CourseMode::RaceCountdown ||
+		g_Mode == CourseMode::RaceRunning ||
+		g_Mode == CourseMode::RaceGoal)
+	{
+		hudKind = CourseMode::RaceRunning;
+	}
+	if (g_pModeLabelText && hudKind != g_ModeHudKind)
+	{
+		g_ModeHudKind = hudKind;
+		if (hudKind == CourseMode::CourseCreate)
+		{
+			g_pModeLabelText->SetText("コース編集モード");
+			g_pModeLabelText->SetColor({ 1.0f, 0.55f, 0.12f, 1.0f });
+		}
+		else if (hudKind == CourseMode::RaceRunning)
+		{
+			g_pModeLabelText->SetText("レースモード");
+			g_pModeLabelText->SetColor({ 0.95f, 0.22f, 0.22f, 1.0f });
+		}
+		else
+		{
+			g_pModeLabelText->SetText("フリー飛行モード");
+			g_pModeLabelText->SetColor({ 0.25f, 0.55f, 1.0f, 1.0f });
+		}
+	}
+	if (g_pModeLabelText)
+	{
+		g_pModeLabelText->Draw();
+	}
+	if (g_pMenuHintHudText)
+	{
+		g_pMenuHintHudText->Draw();
 	}
 
 	if (g_Mode == CourseMode::CourseCreate && g_pCourseHintText)

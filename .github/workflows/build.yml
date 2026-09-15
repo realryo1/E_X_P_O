@@ -65,6 +65,7 @@ jobs:
             Copy-Item -Path "assimp-vc143-mt.dll" -Destination "release" -Force
         }
         Copy-Item -Path "readme.md" -Destination "release" -Force
+        Copy-Item -Path "document_game/copylight.md" -Destination "release" -Force
         Copy-Item -Path "asset" -Destination "release" -Recurse -Force
         if (Test-Path "release/asset/expomodel") {
             Remove-Item -Path "release/asset/expomodel" -Recurse -Force

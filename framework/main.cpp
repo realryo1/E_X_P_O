@@ -13,6 +13,7 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <shellapi.h>
 #include "main.h"
 #include "define.h"
 #include "scene.h"
@@ -43,6 +44,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #pragma	comment (lib, "winmm.lib")
 #pragma	comment (lib, "dxguid.lib")
 #pragma	comment (lib, "dinput8.lib")
+#pragma	comment (lib, "shell32.lib")
 
 using namespace DirectX;
 
@@ -98,7 +100,7 @@ static void DebugFramePerfLogInitialize(void)
 	if (g_DebugFramePerfLog)
 	{
 		g_DebugFramePerfLog
-			<< "frame,totalUs,updUs,drwUs,prsMs,gpuMs,mapCount,mapMs,"
+			<< "frame,totalUs,updUs,drwUs,prsMs,gpuMs,mapCount,mapMs,idx,"
 			<< "shdMs,fldMs,objMs,uiMs,pumpMs\n";
 	}
 }
@@ -119,6 +121,7 @@ static void DebugFramePerfLogWrite(float gpuFrameMs)
 		<< gpuFrameMs << ','
 		<< Direct3D_DebugGetMapCount() << ','
 		<< Direct3D_DebugGetMapMs() << ','
+		<< Direct3D_DebugGetDrawIndexedCount() << ','
 		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_SHADOW) << ','
 		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_FIELD) << ','
 		<< Direct3D_DebugGetStageMs(DIRECT3D_DEBUG_STAGE_OBJECTS) << ','
@@ -167,6 +170,179 @@ static bool NeedsPresent(void)
 	return false;
 }
 
+static bool PathExistsW(const wchar_t* path)
+{
+	return GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+static bool LooksLikeProjectRoot(const wchar_t* root)
+{
+	wchar_t batPath[MAX_PATH];
+	if (swprintf_s(batPath, L"%s\\tool\\download_expo_assets.bat", root) < 0)
+	{
+		return false;
+	}
+	return PathExistsW(batPath);
+}
+
+static bool TryCopyRoot(wchar_t* outRoot, size_t outCap, const wchar_t* candidate)
+{
+	if (!LooksLikeProjectRoot(candidate))
+	{
+		return false;
+	}
+	wcsncpy_s(outRoot, outCap, candidate, _TRUNCATE);
+	return true;
+}
+
+static bool ResolveProjectRoot(wchar_t* outRoot, size_t outCap)
+{
+	wchar_t cwd[MAX_PATH];
+	if (GetCurrentDirectoryW(MAX_PATH, cwd) != 0)
+	{
+		if (TryCopyRoot(outRoot, outCap, cwd))
+		{
+			return true;
+		}
+	}
+
+	wchar_t exeDir[MAX_PATH];
+	if (GetModuleFileNameW(NULL, exeDir, MAX_PATH) == 0)
+	{
+		return false;
+	}
+
+	wchar_t* slash = wcsrchr(exeDir, L'\\');
+	if (slash != nullptr)
+	{
+		*slash = L'\0';
+	}
+	if (TryCopyRoot(outRoot, outCap, exeDir))
+	{
+		return true;
+	}
+
+	for (int climb = 0; climb < 2; ++climb)
+	{
+		slash = wcsrchr(exeDir, L'\\');
+		if (slash == nullptr)
+		{
+			return false;
+		}
+		*slash = L'\0';
+		if (TryCopyRoot(outRoot, outCap, exeDir))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool ExpoModelDirectoryIsEmpty(const wchar_t* dir)
+{
+	const DWORD attr = GetFileAttributesW(dir);
+	if (attr == INVALID_FILE_ATTRIBUTES)
+	{
+		return true;
+	}
+	if ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0)
+	{
+		return true;
+	}
+
+	wchar_t pattern[MAX_PATH];
+	if (swprintf_s(pattern, L"%s\\*", dir) < 0)
+	{
+		return true;
+	}
+
+	WIN32_FIND_DATAW findData;
+	const HANDLE findHandle = FindFirstFileW(pattern, &findData);
+	if (findHandle == INVALID_HANDLE_VALUE)
+	{
+		return true;
+	}
+
+	bool empty = true;
+	do
+	{
+		if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
+		{
+			continue;
+		}
+		empty = false;
+		break;
+	} while (FindNextFileW(findHandle, &findData));
+
+	FindClose(findHandle);
+	return empty;
+}
+
+// 続行するなら true。ダウンロード起動後に終了するなら false。
+static bool EnsureExpoAssetsOrPrompt(void)
+{
+	wchar_t root[MAX_PATH];
+	if (!ResolveProjectRoot(root, MAX_PATH))
+	{
+		return true;
+	}
+
+	wchar_t expoDir[MAX_PATH];
+	if (swprintf_s(expoDir, L"%s\\asset\\expomodel", root) < 0)
+	{
+		return true;
+	}
+	if (!ExpoModelDirectoryIsEmpty(expoDir))
+	{
+		return true;
+	}
+
+	const int answer = MessageBoxW(
+		NULL,
+		L"asset\\expomodel に万博モデルがありません。\n"
+		L"ゲームを終了して tool\\download_expo_assets.bat を実行しますか？\n\n"
+		L"実行後、コンソールで利用条件を確認し AGREE と入力してください。\n"
+		L"完了したらゲームを再起動してください。",
+		L"万博アセット未配置",
+		MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST);
+
+	if (answer != IDYES)
+	{
+		return true;
+	}
+
+	wchar_t batPath[MAX_PATH];
+	if (swprintf_s(batPath, L"%s\\tool\\download_expo_assets.bat", root) < 0 || !PathExistsW(batPath))
+	{
+		MessageBoxW(
+			NULL,
+			L"tool\\download_expo_assets.bat が見つかりません。",
+			L"万博アセット未配置",
+			MB_OK | MB_ICONERROR);
+		return false;
+	}
+
+	const HINSTANCE launched = ShellExecuteW(
+		NULL,
+		L"open",
+		batPath,
+		NULL,
+		root,
+		SW_SHOWNORMAL);
+	if (reinterpret_cast<INT_PTR>(launched) <= 32)
+	{
+		MessageBoxW(
+			NULL,
+			L"download_expo_assets.bat を起動できませんでした。\n"
+			L"プロジェクトルートで tool\\download_expo_assets.bat を実行してください。",
+			L"万博アセット未配置",
+			MB_OK | MB_ICONERROR);
+	}
+
+	return false;
+}
+
 //==================================
 //メイン関数
 //==================================
@@ -175,6 +351,11 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 {
 	// モニターごとのDPI認識を有効化（DWMによる拡大描画を防ぎ、物理ピクセルでウィンドウ管理する）
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+	if (!EnsureExpoAssetsOrPrompt())
+	{
+		return 0;
+	}
 
 	//フレームレート計測用変数（steady_clock ベース）
 	using SteadyClock = std::chrono::steady_clock;
@@ -488,6 +669,8 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 				const unsigned long long mapCount =
 					Direct3D_DebugGetMapCount();
 				const double mapMs = Direct3D_DebugGetMapMs();
+				const unsigned long long drawIndexedCount =
+					Direct3D_DebugGetDrawIndexedCount();
 				const double shadowMs = Direct3D_DebugGetStageMs(
 					DIRECT3D_DEBUG_STAGE_SHADOW);
 				const double fieldMs = Direct3D_DebugGetStageMs(
@@ -501,7 +684,7 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 				if (gpuFrameMs >= 0.0f)
 				{
 					swprintf(g_DebugStr, sizeof(g_DebugStr) / sizeof(wchar_t),
-						L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus | Prs: %.1fms | GPU: %.1fms | Map: %llu/%.2fms | Shd: %.1f | Fld: %.1f | Obj: %.1f | UI: %.1f | Pump: %.1f",
+						L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus | Prs: %.1fms | GPU: %.1fms | Map: %llu/%.2fms | Idx: %llu | Shd: %.1f | Fld: %.1f | Obj: %.1f | UI: %.1f | Pump: %.1f",
 						g_CountFPS,
 						g_CountUpdateFPS,
 						g_UpdateTime + g_DrawTime,
@@ -511,6 +694,7 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 						gpuFrameMs,
 						mapCount,
 						mapMs,
+						drawIndexedCount,
 						shadowMs,
 						fieldMs,
 						objectsMs,
@@ -520,7 +704,7 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 				else
 				{
 					swprintf(g_DebugStr, sizeof(g_DebugStr) / sizeof(wchar_t),
-						L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus | Prs: %.1fms | GPU: n/a | Map: %llu/%.2fms | Shd: %.1f | Fld: %.1f | Obj: %.1f | UI: %.1f | Pump: %.1f",
+						L"Draw: %dfps | Logic: %dfps | Total: %lldus | Upd: %lldus | Drw: %lldus | Prs: %.1fms | GPU: n/a | Map: %llu/%.2fms | Idx: %llu | Shd: %.1f | Fld: %.1f | Obj: %.1f | UI: %.1f | Pump: %.1f",
 						g_CountFPS,
 						g_CountUpdateFPS,
 						g_UpdateTime + g_DrawTime,
@@ -529,6 +713,7 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 						g_PresentTimeMs,
 						mapCount,
 						mapMs,
+						drawIndexedCount,
 						shadowMs,
 						fieldMs,
 						objectsMs,

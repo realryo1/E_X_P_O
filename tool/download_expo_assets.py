@@ -11,6 +11,13 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
 DATA_ORIGINAL = PROJECT_ROOT / "data_original"
 THREE_D_TILES_DIR = DATA_ORIGINAL / "3dtiles"
 ORTHO_DIR = DATA_ORIGINAL / "ortho"
@@ -76,6 +83,56 @@ def normalize_ortho() -> None:
     move_to_expected(source, expected)
 
 
+def data_dirs(root: Path | None = None) -> list[Path]:
+    base = PROJECT_ROOT if root is None else root
+    return sorted(path for path in base.glob("data_*") if path.is_dir())
+
+
+def dir_size_bytes(path: Path) -> int:
+    total = 0
+    for file_path in path.rglob("*"):
+        if not file_path.is_file():
+            continue
+        try:
+            total += file_path.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def format_gb(byte_count: int) -> str:
+    return f"{byte_count / (1024 ** 3):.2f}"
+
+
+def report_data_dirs() -> int:
+    dirs = data_dirs()
+    if not dirs:
+        print("一時フォルダ data_* はありません。")
+        return 1
+
+    total = 0
+    print("一時フォルダの削減目安（実測）:")
+    for path in dirs:
+        size = dir_size_bytes(path)
+        total += size
+        print(f"  {path.name}/ : {format_gb(size)} GB")
+    print(f"  合計       : {format_gb(total)} GB")
+    return 0
+
+
+def delete_data_dirs() -> int:
+    dirs = data_dirs()
+    if not dirs:
+        print("削除対象の data_* はありません。")
+        return 0
+
+    for path in dirs:
+        print(f"削除中: {path.name}/")
+        shutil.rmtree(path)
+        print(f"削除しました: {path.name}/")
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="公式ZIPを変換ツール用に展開する")
     parser.add_argument(
@@ -88,11 +145,27 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DATA_ORIGINAL / "27999_osaka-shi_city_2025_ortho_1_op.zip",
     )
+    parser.add_argument(
+        "--report-data-dirs",
+        action="store_true",
+        help="data_* フォルダの実測サイズを表示する",
+    )
+    parser.add_argument(
+        "--delete-data-dirs",
+        action="store_true",
+        help="data_* フォルダを削除する",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
+    configure_stdio()
     args = parse_args()
+    if args.report_data_dirs:
+        return report_data_dirs()
+    if args.delete_data_dirs:
+        return delete_data_dirs()
+
     for archive in (args.tiles_zip, args.ortho_zip):
         if not archive.is_file():
             print(f"ZIPがありません: {archive}", file=sys.stderr)

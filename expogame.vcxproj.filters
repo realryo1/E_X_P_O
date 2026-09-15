@@ -112,6 +112,9 @@
     <ClCompile Include="SCENE_GAME\sunlight.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
+    <ClCompile Include="SCENE_GAME\envprobe.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
     <ClCompile Include="SCENE_GAME\course.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
@@ -274,6 +277,9 @@
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\sunlight.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\envprobe.h">
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\course.h">

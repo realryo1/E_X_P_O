@@ -20,12 +20,14 @@
 #include <limits>
 #include <cmath>
 #include <unordered_map>
+#include <thread>
 #include "nlohmann/json.hpp"
 
 using namespace DirectX;
 using json = nlohmann::json;
 
 static const size_t GLB_MAX_TEXTURE_DIMENSION = 2048;
+static const unsigned int GLB_MAX_CELL_DRAW_INDEXED = 1;
 static std::mutex g_AssimpMutex;
 
 static XMMATRIX AiMatrixToGlbMatrix(const aiMatrix4x4& matrix)
@@ -180,6 +182,8 @@ struct GlbPreparedData
 	XMFLOAT3 boundsCenter = XMFLOAT3(0.0f, 0.0f, 0.0f);
 	bool hasBounds = false;
 	bool enablePreparedPbr = false;
+	std::vector<Vertex3D> combinedShadowVertices;
+	std::vector<std::uint32_t> combinedShadowIndices;
 };
 
 struct GlbAccessorView
@@ -916,7 +920,8 @@ static bool WalkPreparedNodes(
 
 static bool ExtractPreparedGlb(
 	const std::vector<std::uint8_t>& bytes,
-	GlbPreparedData* outData)
+	GlbPreparedData* outData,
+	bool skipTextures)
 {
 	const std::uint32_t GLB_MAGIC = 0x46546c67;
 	const std::uint32_t JSON_CHUNK = 0x4e4f534a;
@@ -976,7 +981,8 @@ static bool ExtractPreparedGlb(
 		return false;
 	}
 
-	if (root.contains("images") && root["images"].is_array())
+	if (!skipTextures &&
+		root.contains("images") && root["images"].is_array())
 	{
 		outData->textures.reserve(root["images"].size());
 		for (const json& image : root["images"])
@@ -1078,7 +1084,7 @@ static void ResizeDecodedTextureIfNeeded(GlbDecodedTexture* decoded)
 		decoded->metadata,
 		width,
 		height,
-		TEX_FILTER_FANT,
+		TEX_FILTER_LINEAR,
 		resized);
 	if (SUCCEEDED(hr))
 	{
@@ -1132,7 +1138,7 @@ static void GenerateMipMapsIfNeeded(
 		decoded->image.GetImages(),
 		decoded->image.GetImageCount(),
 		decoded->metadata,
-		TEX_FILTER_FANT,
+		TEX_FILTER_LINEAR,
 		0,
 		mipChain);
 	if (SUCCEEDED(hr) && mipChain.GetImageCount() > 1)
@@ -1280,7 +1286,7 @@ const aiScene* GlbModel::ImportSceneFile(const char* filePath, const GlbImportOp
 	return scene;
 }
 
-GlbPreparedData* GlbModel::ImportPreparedFile(const char* filePath)
+GlbPreparedData* GlbModel::ImportPreparedFile(const char* filePath, bool skipTextures)
 {
 	if (!filePath)
 	{
@@ -1297,7 +1303,7 @@ GlbPreparedData* GlbModel::ImportPreparedFile(const char* filePath)
 	data->enablePreparedPbr = true;
 	try
 	{
-		if (!ExtractPreparedGlb(bytes, data.get()))
+		if (!ExtractPreparedGlb(bytes, data.get(), skipTextures))
 		{
 			return nullptr;
 		}
@@ -1307,6 +1313,47 @@ GlbPreparedData* GlbModel::ImportPreparedFile(const char* filePath)
 		return nullptr;
 	}
 	return data.release();
+}
+
+bool GlbModel::ImportCollisionTriangles(
+	const char* filePath,
+	std::vector<XMFLOAT3>* outTriangleVertices)
+{
+	if (!outTriangleVertices)
+	{
+		return false;
+	}
+	outTriangleVertices->clear();
+	GlbPreparedData* data = ImportPreparedFile(filePath, true);
+	if (!data)
+	{
+		return false;
+	}
+
+	for (const GlbPreparedMeshData& mesh : data->meshes)
+	{
+		if (mesh.vertices.empty() || mesh.indices.size() < 3)
+		{
+			continue;
+		}
+		for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+		{
+			const std::uint32_t ia = mesh.indices[i + 0];
+			const std::uint32_t ib = mesh.indices[i + 1];
+			const std::uint32_t ic = mesh.indices[i + 2];
+			if (ia >= mesh.vertices.size() ||
+				ib >= mesh.vertices.size() ||
+				ic >= mesh.vertices.size())
+			{
+				continue;
+			}
+			outTriangleVertices->push_back(mesh.vertices[ia].position);
+			outTriangleVertices->push_back(mesh.vertices[ib].position);
+			outTriangleVertices->push_back(mesh.vertices[ic].position);
+		}
+	}
+	delete data;
+	return !outTriangleVertices->empty();
 }
 
 bool GlbModel::AttachImportedScene(const aiScene* scene)
@@ -1398,6 +1445,114 @@ bool GlbModel::AttachPreparedData(GlbPreparedData* data)
 	return true;
 }
 
+static bool AppendPreparedMesh(
+	GlbPreparedMeshData* destination,
+	const GlbPreparedMeshData& source)
+{
+	if (!destination || source.vertices.empty() || source.indices.empty())
+	{
+		return true;
+	}
+
+	const std::size_t maxIndex =
+		static_cast<std::size_t>((std::numeric_limits<unsigned int>::max)());
+	const std::size_t vertexBase = destination->vertices.size();
+	const std::size_t indexBase = destination->indices.size();
+	if (vertexBase > maxIndex ||
+		source.vertices.size() > maxIndex - vertexBase ||
+		indexBase > maxIndex ||
+		source.indices.size() > maxIndex - indexBase)
+	{
+		return false;
+	}
+
+	for (std::uint32_t index : source.indices)
+	{
+		if (index >= source.vertices.size() ||
+			static_cast<std::size_t>(index) > maxIndex - vertexBase)
+		{
+			return false;
+		}
+		destination->indices.push_back(
+			static_cast<std::uint32_t>(vertexBase) + index);
+	}
+	destination->vertices.insert(
+		destination->vertices.end(),
+		source.vertices.begin(),
+		source.vertices.end());
+
+	if (!destination->hasBounds && source.hasBounds)
+	{
+		destination->boundsMin = source.boundsMin;
+		destination->boundsMax = source.boundsMax;
+		destination->hasBounds = true;
+	}
+	else if (source.hasBounds)
+	{
+		destination->boundsMin.x =
+			(std::min)(destination->boundsMin.x, source.boundsMin.x);
+		destination->boundsMin.y =
+			(std::min)(destination->boundsMin.y, source.boundsMin.y);
+		destination->boundsMin.z =
+			(std::min)(destination->boundsMin.z, source.boundsMin.z);
+		destination->boundsMax.x =
+			(std::max)(destination->boundsMax.x, source.boundsMax.x);
+		destination->boundsMax.y =
+			(std::max)(destination->boundsMax.y, source.boundsMax.y);
+		destination->boundsMax.z =
+			(std::max)(destination->boundsMax.z, source.boundsMax.z);
+	}
+
+	if (!source.batchRanges.empty())
+	{
+		for (const GlbBatchRange& sourceRange : source.batchRanges)
+		{
+			if (sourceRange.indexOffset > source.indices.size() ||
+				sourceRange.indexCount >
+					source.indices.size() - sourceRange.indexOffset)
+			{
+				continue;
+			}
+			GlbBatchRange destinationRange = sourceRange;
+			destinationRange.indexOffset =
+				static_cast<unsigned int>(indexBase) +
+				sourceRange.indexOffset;
+			destination->batchRanges.push_back(destinationRange);
+		}
+	}
+	else
+	{
+		GlbBatchRange destinationRange;
+		destinationRange.batchId = source.batchId;
+		destinationRange.indexOffset =
+			static_cast<unsigned int>(indexBase);
+		destinationRange.indexCount =
+			static_cast<unsigned int>(source.indices.size());
+		destinationRange.boundsMin = source.boundsMin;
+		destinationRange.boundsMax = source.boundsMax;
+		destinationRange.hasBounds = source.hasBounds;
+		destination->batchRanges.push_back(destinationRange);
+	}
+	return true;
+}
+
+static void CopyPreparedMaterial(
+	GlbPreparedMeshData* destination,
+	const GlbPreparedMeshData& source)
+{
+	if (!destination)
+	{
+		return;
+	}
+	destination->diffuseColor = source.diffuseColor;
+	destination->textureIndex = source.textureIndex;
+	destination->metallicRoughnessIndex = source.metallicRoughnessIndex;
+	destination->normalIndex = source.normalIndex;
+	destination->emissiveIndex = source.emissiveIndex;
+	destination->metallicFactor = source.metallicFactor;
+	destination->roughnessFactor = source.roughnessFactor;
+}
+
 void GlbModel::MergePreparedMeshesByMaterial(void)
 {
 	if (!m_pPreparedData || m_pPreparedData->meshes.size() < 2)
@@ -1408,22 +1563,22 @@ void GlbModel::MergePreparedMeshesByMaterial(void)
 	auto sameMaterial = [](const GlbPreparedMeshData& left,
 		const GlbPreparedMeshData& right) -> bool
 	{
-		return left.textureIndex == right.textureIndex &&
-			left.metallicRoughnessIndex == right.metallicRoughnessIndex &&
-			left.normalIndex == right.normalIndex &&
-			left.emissiveIndex == right.emissiveIndex &&
-			left.diffuseColor.x == right.diffuseColor.x &&
+		if (left.textureIndex != right.textureIndex)
+		{
+			return false;
+		}
+		if (left.textureIndex >= 0)
+		{
+			return true;
+		}
+		return left.diffuseColor.x == right.diffuseColor.x &&
 			left.diffuseColor.y == right.diffuseColor.y &&
 			left.diffuseColor.z == right.diffuseColor.z &&
-			left.diffuseColor.w == right.diffuseColor.w &&
-			left.metallicFactor == right.metallicFactor &&
-			left.roughnessFactor == right.roughnessFactor;
+			left.diffuseColor.w == right.diffuseColor.w;
 	};
 
 	std::vector<GlbPreparedMeshData> merged;
 	merged.reserve(m_pPreparedData->meshes.size());
-	const std::size_t maxIndex =
-		(static_cast<std::size_t>((std::numeric_limits<unsigned int>::max)()));
 
 	for (const GlbPreparedMeshData& source : m_pPreparedData->meshes)
 	{
@@ -1445,94 +1600,17 @@ void GlbModel::MergePreparedMeshesByMaterial(void)
 		if (targetIndex == merged.size())
 		{
 			GlbPreparedMeshData destination;
-			destination.diffuseColor = source.diffuseColor;
-			destination.textureIndex = source.textureIndex;
-			destination.metallicRoughnessIndex =
-				source.metallicRoughnessIndex;
-			destination.normalIndex = source.normalIndex;
-			destination.emissiveIndex = source.emissiveIndex;
-			destination.metallicFactor = source.metallicFactor;
-			destination.roughnessFactor = source.roughnessFactor;
+			CopyPreparedMaterial(&destination, source);
 			merged.push_back(std::move(destination));
 		}
 
-		GlbPreparedMeshData& destination = merged[targetIndex];
-		const std::size_t vertexBase = destination.vertices.size();
-		const std::size_t indexBase = destination.indices.size();
-		if (vertexBase > maxIndex ||
-			source.vertices.size() > maxIndex - vertexBase ||
-			indexBase > maxIndex ||
-			source.indices.size() > maxIndex - indexBase)
+		if (!AppendPreparedMesh(&merged[targetIndex], source))
 		{
-			return;
-		}
-
-		for (std::uint32_t index : source.indices)
-		{
-			if (index >= source.vertices.size() ||
-				static_cast<std::size_t>(index) > maxIndex - vertexBase)
+			if (merged[targetIndex].vertices.empty() &&
+				targetIndex + 1 == merged.size())
 			{
-				return;
+				merged.pop_back();
 			}
-			destination.indices.push_back(
-				static_cast<std::uint32_t>(vertexBase) + index);
-		}
-		destination.vertices.insert(
-			destination.vertices.end(),
-			source.vertices.begin(),
-			source.vertices.end());
-
-		if (!destination.hasBounds && source.hasBounds)
-		{
-			destination.boundsMin = source.boundsMin;
-			destination.boundsMax = source.boundsMax;
-			destination.hasBounds = true;
-		}
-		else if (source.hasBounds)
-		{
-			destination.boundsMin.x =
-				(std::min)(destination.boundsMin.x, source.boundsMin.x);
-			destination.boundsMin.y =
-				(std::min)(destination.boundsMin.y, source.boundsMin.y);
-			destination.boundsMin.z =
-				(std::min)(destination.boundsMin.z, source.boundsMin.z);
-			destination.boundsMax.x =
-				(std::max)(destination.boundsMax.x, source.boundsMax.x);
-			destination.boundsMax.y =
-				(std::max)(destination.boundsMax.y, source.boundsMax.y);
-			destination.boundsMax.z =
-				(std::max)(destination.boundsMax.z, source.boundsMax.z);
-		}
-
-		if (!source.batchRanges.empty())
-		{
-			for (const GlbBatchRange& sourceRange : source.batchRanges)
-			{
-				if (sourceRange.indexOffset > source.indices.size() ||
-					sourceRange.indexCount >
-						source.indices.size() - sourceRange.indexOffset)
-				{
-					return;
-				}
-				GlbBatchRange destinationRange = sourceRange;
-				destinationRange.indexOffset =
-					static_cast<unsigned int>(indexBase) +
-					sourceRange.indexOffset;
-				destination.batchRanges.push_back(destinationRange);
-			}
-		}
-		else
-		{
-			GlbBatchRange destinationRange;
-			destinationRange.batchId = source.batchId;
-			destinationRange.indexOffset =
-				static_cast<unsigned int>(indexBase);
-			destinationRange.indexCount =
-				static_cast<unsigned int>(source.indices.size());
-			destinationRange.boundsMin = source.boundsMin;
-			destinationRange.boundsMax = source.boundsMax;
-			destinationRange.hasBounds = source.hasBounds;
-			destination.batchRanges.push_back(destinationRange);
 		}
 	}
 
@@ -1540,6 +1618,55 @@ void GlbModel::MergePreparedMeshesByMaterial(void)
 	{
 		m_pPreparedData->meshes = std::move(merged);
 	}
+}
+
+void GlbModel::CollapsePreparedMeshes(unsigned int maxMeshes)
+{
+	if (!m_pPreparedData || maxMeshes == 0)
+	{
+		return;
+	}
+
+	std::vector<GlbPreparedMeshData>& meshes = m_pPreparedData->meshes;
+	if (meshes.size() <= maxMeshes)
+	{
+		return;
+	}
+
+	std::vector<std::size_t> order(meshes.size());
+	for (std::size_t i = 0; i < order.size(); ++i)
+	{
+		order[i] = i;
+	}
+	std::sort(
+		order.begin(),
+		order.end(),
+		[&meshes](std::size_t left, std::size_t right)
+		{
+			return meshes[left].vertices.size() > meshes[right].vertices.size();
+		});
+
+	std::vector<char> taken(meshes.size(), 0);
+	std::vector<GlbPreparedMeshData> kept;
+	kept.reserve(maxMeshes);
+	for (unsigned int i = 0; i < maxMeshes && i < order.size(); ++i)
+	{
+		taken[order[i]] = 1;
+		kept.push_back(std::move(meshes[order[i]]));
+	}
+	if (kept.empty())
+	{
+		return;
+	}
+	for (std::size_t i = 0; i < meshes.size(); ++i)
+	{
+		if (taken[i])
+		{
+			continue;
+		}
+		AppendPreparedMesh(&kept[0], meshes[i]);
+	}
+	meshes = std::move(kept);
 }
 
 void GlbModel::PrepareShadowCells(float modelSpaceCellSize)
@@ -1667,6 +1794,134 @@ void GlbModel::PrepareShadowCells(float modelSpaceCellSize)
 			mesh.shadowCells.push_back(prep);
 		}
 	}
+	BuildCombinedShadowGeometry();
+}
+
+void GlbModel::BuildCombinedShadowGeometry(void)
+{
+	if (!m_pPreparedData || m_pPreparedData->meshes.empty())
+	{
+		return;
+	}
+
+	m_pPreparedData->combinedShadowVertices.clear();
+	m_pPreparedData->combinedShadowIndices.clear();
+	const std::size_t maxIndex =
+		static_cast<std::size_t>((std::numeric_limits<unsigned int>::max)());
+	for (const GlbPreparedMeshData& mesh : m_pPreparedData->meshes)
+	{
+		if (mesh.vertices.empty() || mesh.indices.size() < 3)
+		{
+			continue;
+		}
+		const std::size_t vertexBase = m_pPreparedData->combinedShadowVertices.size();
+		if (vertexBase > maxIndex ||
+			mesh.vertices.size() > maxIndex - vertexBase)
+		{
+			break;
+		}
+		for (std::size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+		{
+			const std::uint32_t i0 = mesh.indices[i];
+			const std::uint32_t i1 = mesh.indices[i + 1];
+			const std::uint32_t i2 = mesh.indices[i + 2];
+			if (i0 >= mesh.vertices.size() ||
+				i1 >= mesh.vertices.size() ||
+				i2 >= mesh.vertices.size() ||
+				static_cast<std::size_t>(i0) > maxIndex - vertexBase ||
+				static_cast<std::size_t>(i1) > maxIndex - vertexBase ||
+				static_cast<std::size_t>(i2) > maxIndex - vertexBase)
+			{
+				continue;
+			}
+			m_pPreparedData->combinedShadowIndices.push_back(
+				static_cast<std::uint32_t>(vertexBase) + i0);
+			m_pPreparedData->combinedShadowIndices.push_back(
+				static_cast<std::uint32_t>(vertexBase) + i1);
+			m_pPreparedData->combinedShadowIndices.push_back(
+				static_cast<std::uint32_t>(vertexBase) + i2);
+		}
+		m_pPreparedData->combinedShadowVertices.insert(
+			m_pPreparedData->combinedShadowVertices.end(),
+			mesh.vertices.begin(),
+			mesh.vertices.end());
+	}
+	if (m_pPreparedData->combinedShadowIndices.size() < 3)
+	{
+		m_pPreparedData->combinedShadowVertices.clear();
+		m_pPreparedData->combinedShadowIndices.clear();
+	}
+}
+
+int GlbModel::PumpCombinedShadow(ID3D11Device* pDevice)
+{
+	if (!m_pPreparedData ||
+		m_pPreparedData->combinedShadowVertices.empty() ||
+		m_pPreparedData->combinedShadowIndices.empty() ||
+		!pDevice)
+	{
+		return 1;
+	}
+
+	const std::size_t vertexBytes =
+		m_pPreparedData->combinedShadowVertices.size() * sizeof(Vertex3D);
+	const std::size_t indexBytes =
+		m_pPreparedData->combinedShadowIndices.size() * sizeof(std::uint32_t);
+	if (vertexBytes == 0 ||
+		indexBytes == 0 ||
+		vertexBytes > static_cast<std::size_t>((std::numeric_limits<UINT>::max)()) ||
+		indexBytes > static_cast<std::size_t>((std::numeric_limits<UINT>::max)()) ||
+		m_pPreparedData->combinedShadowIndices.size() >
+			static_cast<std::size_t>((std::numeric_limits<unsigned int>::max)()))
+	{
+		return 1;
+	}
+
+	auto skipCombined = [this]() -> int
+	{
+		SAFE_RELEASE(m_pCombinedShadowVertexBuffer);
+		SAFE_RELEASE(m_pCombinedShadowIndexBuffer);
+		m_CombinedShadowIndexCount = 0;
+		m_CombinedShadowVertexUploadOffset = 0;
+		m_CombinedShadowIndexUploadOffset = 0;
+		return 1;
+	};
+
+	if (!m_pCombinedShadowVertexBuffer)
+	{
+		D3D11_BUFFER_DESC desc = {};
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.ByteWidth = static_cast<UINT>(vertexBytes);
+		desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		D3D11_SUBRESOURCE_DATA data = {};
+		data.pSysMem = m_pPreparedData->combinedShadowVertices.data();
+		if (FAILED(pDevice->CreateBuffer(
+			&desc, &data, &m_pCombinedShadowVertexBuffer)))
+		{
+			return skipCombined();
+		}
+		m_CombinedShadowVertexUploadOffset = vertexBytes;
+	}
+
+	if (!m_pCombinedShadowIndexBuffer)
+	{
+		D3D11_BUFFER_DESC desc = {};
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.ByteWidth = static_cast<UINT>(indexBytes);
+		desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+		D3D11_SUBRESOURCE_DATA data = {};
+		data.pSysMem = m_pPreparedData->combinedShadowIndices.data();
+		if (FAILED(pDevice->CreateBuffer(
+			&desc, &data, &m_pCombinedShadowIndexBuffer)))
+		{
+			return skipCombined();
+		}
+		m_CombinedShadowIndexUploadOffset = indexBytes;
+	}
+
+	m_CombinedShadowIndexCount = static_cast<unsigned int>(
+		m_pPreparedData->combinedShadowIndices.size());
+	return 1;
 }
 
 void GlbModel::GetGpuProgress(unsigned int* done, unsigned int* total) const
@@ -1828,6 +2083,12 @@ int GlbModel::PumpGpu(ID3D11Device* pDevice, int itemBudget)
 		}
 		if (m_GpuPhase == 4)
 		{
+			PumpCombinedShadow(pDevice);
+			m_GpuPhase = 5;
+			continue;
+		}
+		if (m_GpuPhase == 5)
+		{
 			if (m_pScene)
 			{
 				SetupMeshMaterials(m_pScene);
@@ -1896,7 +2157,11 @@ void GlbModel::Release()
 		SAFE_RELEASE(mesh.pVertexBuffer);
 		SAFE_RELEASE(mesh.pIndexBuffer);
 		SAFE_RELEASE(mesh.pShadowIndexBuffer);
+		SAFE_RELEASE(mesh.pVisibleIndexBuffer);
+		mesh.sourceIndices.clear();
 		mesh.shadowCells.clear();
+		mesh.batchRanges.clear();
+		mesh.visibleIndexCount = 0;
 	}
 	m_Meshes.clear();
 	m_MeshNodeTransforms.clear();
@@ -1911,6 +2176,11 @@ void GlbModel::Release()
 	SAFE_RELEASE(m_pWhiteTexture);
 	SAFE_RELEASE(m_pBlackTexture);
 	SAFE_RELEASE(m_pFlatNormalTexture);
+	SAFE_RELEASE(m_pCombinedShadowVertexBuffer);
+	SAFE_RELEASE(m_pCombinedShadowIndexBuffer);
+	m_CombinedShadowIndexCount = 0;
+	m_CombinedShadowVertexUploadOffset = 0;
+	m_CombinedShadowIndexUploadOffset = 0;
 	m_EnablePreparedPbr = false;
 	for (const std::unique_ptr<GlbDecodedTexture>& decoded : m_DecodedTextures)
 	{
@@ -1932,7 +2202,9 @@ void GlbModel::Release()
 	m_IsLoaded = false;
 	m_ReceiveShadow = false;
 	m_PhotoAlbedo = false;
+	m_MirrorEnv = false;
 	m_MainPassCellCulling = false;
+	m_ShadowUseCells = true;
 	m_GpuPhase = 0;
 	m_GpuIndex = 0;
 	m_BoundsMin = XMFLOAT3(0.0f, 0.0f, 0.0f);
@@ -1942,15 +2214,107 @@ void GlbModel::Release()
 
 void GlbModel::ClearHiddenBatchIds(void)
 {
+	if (m_HiddenBatchIds.empty())
+	{
+		return;
+	}
 	m_HiddenBatchIds.clear();
+	for (GlbMesh& mesh : m_Meshes)
+	{
+		RebuildVisibleIndexBuffer(mesh);
+	}
 }
 
 void GlbModel::HideBatchId(int batchId)
 {
-	if (batchId >= 0)
+	if (batchId < 0)
 	{
-		m_HiddenBatchIds.insert(batchId);
+		return;
 	}
+	if (!m_HiddenBatchIds.insert(batchId).second)
+	{
+		return;
+	}
+	for (GlbMesh& mesh : m_Meshes)
+	{
+		RebuildVisibleIndexBuffer(mesh);
+	}
+}
+
+void GlbModel::SetHiddenBatchIds(const std::unordered_set<int>& batchIds)
+{
+	if (batchIds == m_HiddenBatchIds)
+	{
+		return;
+	}
+	m_HiddenBatchIds = batchIds;
+	for (GlbMesh& mesh : m_Meshes)
+	{
+		RebuildVisibleIndexBuffer(mesh);
+	}
+}
+
+void GlbModel::RebuildVisibleIndexBuffer(GlbMesh& mesh)
+{
+	SAFE_RELEASE(mesh.pVisibleIndexBuffer);
+	mesh.visibleIndexCount = 0;
+	if (m_HiddenBatchIds.empty() ||
+		mesh.sourceIndices.empty() ||
+		mesh.batchRanges.empty())
+	{
+		return;
+	}
+
+	std::vector<std::uint32_t> compact;
+	compact.reserve(mesh.sourceIndices.size());
+	for (const GlbBatchRange& range : mesh.batchRanges)
+	{
+		if (range.indexCount == 0)
+		{
+			continue;
+		}
+		if (range.batchId >= 0 &&
+			m_HiddenBatchIds.find(range.batchId) != m_HiddenBatchIds.end())
+		{
+			continue;
+		}
+		if (range.indexOffset > mesh.sourceIndices.size() ||
+			range.indexCount > mesh.sourceIndices.size() - range.indexOffset)
+		{
+			continue;
+		}
+		compact.insert(
+			compact.end(),
+			mesh.sourceIndices.begin() + range.indexOffset,
+			mesh.sourceIndices.begin() + range.indexOffset + range.indexCount);
+	}
+	if (compact.empty())
+	{
+		return;
+	}
+	if (compact.size() >
+		static_cast<std::size_t>((std::numeric_limits<unsigned int>::max)()))
+	{
+		return;
+	}
+
+	ID3D11Device* pDevice = GetDevice();
+	if (!pDevice)
+	{
+		return;
+	}
+	D3D11_BUFFER_DESC desc = {};
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	desc.ByteWidth = static_cast<UINT>(compact.size() * sizeof(std::uint32_t));
+	desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	D3D11_SUBRESOURCE_DATA data = {};
+	data.pSysMem = compact.data();
+	if (FAILED(pDevice->CreateBuffer(&desc, &data, &mesh.pVisibleIndexBuffer)))
+	{
+		mesh.pVisibleIndexBuffer = nullptr;
+		return;
+	}
+	mesh.visibleIndexCount = static_cast<unsigned int>(compact.size());
 }
 
 //==============================================================================
@@ -1970,6 +2334,10 @@ int GlbModel::ProcessOneMesh(unsigned int meshIndex, ID3D11Device* pDevice)
 		glbMesh.diffuseColor = source.diffuseColor;
 		glbMesh.batchId = source.batchId;
 		glbMesh.batchRanges = source.batchRanges;
+		if (!source.batchRanges.empty() && glbMesh.sourceIndices.empty())
+		{
+			glbMesh.sourceIndices = source.indices;
+		}
 		glbMesh.boundsMin = source.boundsMin;
 		glbMesh.boundsMax = source.boundsMax;
 		glbMesh.hasBounds = source.hasBounds;
@@ -2267,6 +2635,198 @@ int GlbModel::ProcessOneMesh(unsigned int meshIndex, ID3D11Device* pDevice)
 	return 1;
 }
 
+static void FinishDecodedTexture(
+	GlbDecodedTexture* decoded,
+	bool skipTextureResize)
+{
+	if (!skipTextureResize)
+	{
+		ResizeDecodedTextureIfNeeded(decoded);
+	}
+	NormalizeDecodedTextureForUpload(decoded);
+	// expo_floor.glb は分割前の巨大テクスチャをそのまま使うため、
+	// skipTextureResize=true の経路ではミップマップも生成しない。
+	GenerateMipMapsIfNeeded(decoded, skipTextureResize);
+}
+
+static void DecodePreparedTexture(
+	const GlbPreparedTextureData& source,
+	GlbDecodedTexture* decoded,
+	bool skipTextureResize)
+{
+	if (!decoded)
+	{
+		return;
+	}
+	if (!source.bytes.empty())
+	{
+		HRESULT hr = LoadFromWICMemory(
+			source.bytes.data(),
+			source.bytes.size(),
+			WIC_FLAGS_NONE,
+			&decoded->metadata,
+			decoded->image);
+		if (FAILED(hr))
+		{
+			hr = LoadFromWICMemory(
+				source.bytes.data(),
+				source.bytes.size(),
+				WIC_FLAGS_FORCE_SRGB,
+				&decoded->metadata,
+				decoded->image);
+		}
+		decoded->ok = SUCCEEDED(hr);
+	}
+	FinishDecodedTexture(decoded, skipTextureResize);
+}
+
+static void DecodeAssimpTexture(
+	const aiTexture* pAiTex,
+	GlbDecodedTexture* decoded,
+	bool skipTextureResize)
+{
+	if (!decoded)
+	{
+		return;
+	}
+	if (!pAiTex || !pAiTex->pcData)
+	{
+		return;
+	}
+
+	if (pAiTex->mHeight == 0)
+	{
+		if (pAiTex->mWidth > 0)
+		{
+			HRESULT hr = LoadFromWICMemory(
+				reinterpret_cast<const uint8_t*>(pAiTex->pcData),
+				static_cast<size_t>(pAiTex->mWidth),
+				WIC_FLAGS_NONE,
+				&decoded->metadata,
+				decoded->image
+			);
+			if (FAILED(hr))
+			{
+				hr = LoadFromWICMemory(
+					reinterpret_cast<const uint8_t*>(pAiTex->pcData),
+					static_cast<size_t>(pAiTex->mWidth),
+					WIC_FLAGS_FORCE_SRGB,
+					&decoded->metadata,
+					decoded->image
+				);
+			}
+			decoded->ok = SUCCEEDED(hr);
+		}
+	}
+	else if (pAiTex->mWidth > 0 && pAiTex->mHeight > 0)
+	{
+		HRESULT hr = decoded->image.Initialize2D(
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			static_cast<size_t>(pAiTex->mWidth),
+			static_cast<size_t>(pAiTex->mHeight),
+			1, 1
+		);
+		if (SUCCEEDED(hr))
+		{
+			const Image* pImg = decoded->image.GetImage(0, 0, 0);
+			if (pImg && pImg->pixels)
+			{
+				const size_t byteSize = static_cast<size_t>(pAiTex->mWidth)
+					* static_cast<size_t>(pAiTex->mHeight) * 4;
+				memcpy(
+					pImg->pixels,
+					reinterpret_cast<const uint8_t*>(pAiTex->pcData),
+					byteSize
+				);
+				decoded->metadata = decoded->image.GetMetadata();
+				decoded->ok = true;
+			}
+		}
+	}
+	if (!skipTextureResize)
+	{
+		ResizeDecodedTextureIfNeeded(decoded);
+	}
+	GenerateMipMapsIfNeeded(decoded, skipTextureResize);
+}
+
+static unsigned int TextureDecodeWorkerCount(std::size_t textureCount)
+{
+	if (textureCount <= 1)
+	{
+		return 1;
+	}
+	unsigned int n = std::thread::hardware_concurrency();
+	if (n == 0)
+	{
+		n = 2;
+	}
+	if (n > 4)
+	{
+		n = 4;
+	}
+	if (n > textureCount)
+	{
+		n = static_cast<unsigned int>(textureCount);
+	}
+	return n;
+}
+
+static void RunTextureDecodeJobs(
+	std::size_t textureCount,
+	const std::function<void(std::size_t)>& decodeOne)
+{
+	const unsigned int workerCount = TextureDecodeWorkerCount(textureCount);
+	if (workerCount <= 1)
+	{
+		HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		const bool shouldUninit = SUCCEEDED(coHr);
+		for (std::size_t i = 0; i < textureCount; ++i)
+		{
+			decodeOne(i);
+		}
+		if (shouldUninit)
+		{
+			CoUninitialize();
+		}
+		return;
+	}
+
+	std::vector<std::thread> workers;
+	workers.reserve(workerCount);
+	const std::size_t chunk = (textureCount + workerCount - 1) / workerCount;
+	for (unsigned int w = 0; w < workerCount; ++w)
+	{
+		const std::size_t begin = static_cast<std::size_t>(w) * chunk;
+		if (begin >= textureCount)
+		{
+			break;
+		}
+		std::size_t end = begin + chunk;
+		if (end > textureCount)
+		{
+			end = textureCount;
+		}
+		workers.emplace_back([begin, end, &decodeOne]()
+		{
+			HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+			const bool shouldUninit = SUCCEEDED(coHr);
+			for (std::size_t i = begin; i < end; ++i)
+			{
+				decodeOne(i);
+			}
+			if (shouldUninit)
+			{
+				CoUninitialize();
+			}
+		});
+	}
+	for (std::thread& worker : workers)
+	{
+		worker.join();
+	}
+}
+
 //==============================================================================
 // 埋め込みテクスチャの CPU デコード（ワーカー可。D3Dは触らない）
 //==============================================================================
@@ -2276,49 +2836,21 @@ bool GlbModel::DecodeEmbeddedTextures(bool skipTextureResize)
 	m_TexturesDecoded = false;
 	if (m_pPreparedData)
 	{
-		HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-		const bool shouldUninit = SUCCEEDED(coHr);
 		m_DecodedTextures.resize(m_pPreparedData->textures.size());
 		for (std::size_t i = 0; i < m_pPreparedData->textures.size(); ++i)
 		{
-			std::unique_ptr<GlbDecodedTexture> decoded(new GlbDecodedTexture());
-			const GlbPreparedTextureData& source = m_pPreparedData->textures[i];
-			if (!source.bytes.empty())
-			{
-				HRESULT hr = LoadFromWICMemory(
-					source.bytes.data(),
-					source.bytes.size(),
-					WIC_FLAGS_NONE,
-					&decoded->metadata,
-					decoded->image);
-				if (FAILED(hr))
-				{
-					hr = LoadFromWICMemory(
-						source.bytes.data(),
-						source.bytes.size(),
-						WIC_FLAGS_FORCE_SRGB,
-						&decoded->metadata,
-						decoded->image);
-				}
-				decoded->ok = SUCCEEDED(hr);
-			}
-			m_DecodedTextures[i] = std::move(decoded);
-			if (!skipTextureResize)
-			{
-				ResizeDecodedTextureIfNeeded(m_DecodedTextures[i].get());
-			}
-			NormalizeDecodedTextureForUpload(m_DecodedTextures[i].get());
-			// expo_floor.glb は分割前の巨大テクスチャをそのまま使うため、
-			// skipTextureResize=true の経路ではミップマップも生成しない。
-			GenerateMipMapsIfNeeded(
-				m_DecodedTextures[i].get(),
-				skipTextureResize);
+			m_DecodedTextures[i].reset(new GlbDecodedTexture());
 		}
+		RunTextureDecodeJobs(
+			m_pPreparedData->textures.size(),
+			[this, skipTextureResize](std::size_t i)
+			{
+				DecodePreparedTexture(
+					m_pPreparedData->textures[i],
+					m_DecodedTextures[i].get(),
+					skipTextureResize);
+			});
 		m_TexturesDecoded = true;
-		if (shouldUninit)
-		{
-			CoUninitialize();
-		}
 		return true;
 	}
 	if (!m_pScene)
@@ -2326,84 +2858,21 @@ bool GlbModel::DecodeEmbeddedTextures(bool skipTextureResize)
 		return false;
 	}
 
-	HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-	const bool shouldUninit = SUCCEEDED(coHr);
-
 	m_DecodedTextures.resize(m_pScene->mNumTextures);
 	for (unsigned int i = 0; i < m_pScene->mNumTextures; ++i)
 	{
-		std::unique_ptr<GlbDecodedTexture> decoded(new GlbDecodedTexture());
-		const aiTexture* pAiTex = m_pScene->mTextures[i];
-		if (!pAiTex || !pAiTex->pcData)
-		{
-			m_DecodedTextures[i] = std::move(decoded);
-			continue;
-		}
-
-		if (pAiTex->mHeight == 0)
-		{
-			if (pAiTex->mWidth > 0)
-			{
-				HRESULT hr = LoadFromWICMemory(
-					reinterpret_cast<const uint8_t*>(pAiTex->pcData),
-					static_cast<size_t>(pAiTex->mWidth),
-					WIC_FLAGS_NONE,
-					&decoded->metadata,
-					decoded->image
-				);
-				if (FAILED(hr))
-				{
-					hr = LoadFromWICMemory(
-						reinterpret_cast<const uint8_t*>(pAiTex->pcData),
-						static_cast<size_t>(pAiTex->mWidth),
-						WIC_FLAGS_FORCE_SRGB,
-						&decoded->metadata,
-						decoded->image
-					);
-				}
-				decoded->ok = SUCCEEDED(hr);
-			}
-		}
-		else if (pAiTex->mWidth > 0 && pAiTex->mHeight > 0)
-		{
-			HRESULT hr = decoded->image.Initialize2D(
-				DXGI_FORMAT_R8G8B8A8_UNORM,
-				static_cast<size_t>(pAiTex->mWidth),
-				static_cast<size_t>(pAiTex->mHeight),
-				1, 1
-			);
-			if (SUCCEEDED(hr))
-			{
-				const Image* pImg = decoded->image.GetImage(0, 0, 0);
-				if (pImg && pImg->pixels)
-				{
-					const size_t byteSize = static_cast<size_t>(pAiTex->mWidth)
-						* static_cast<size_t>(pAiTex->mHeight) * 4;
-					memcpy(
-						pImg->pixels,
-						reinterpret_cast<const uint8_t*>(pAiTex->pcData),
-						byteSize
-					);
-					decoded->metadata = decoded->image.GetMetadata();
-					decoded->ok = true;
-				}
-			}
-		}
-		m_DecodedTextures[i] = std::move(decoded);
-		if (!skipTextureResize)
-		{
-			ResizeDecodedTextureIfNeeded(m_DecodedTextures[i].get());
-		}
-		GenerateMipMapsIfNeeded(
-			m_DecodedTextures[i].get(),
-			skipTextureResize);
+		m_DecodedTextures[i].reset(new GlbDecodedTexture());
 	}
-
+	RunTextureDecodeJobs(
+		static_cast<std::size_t>(m_pScene->mNumTextures),
+		[this, skipTextureResize](std::size_t i)
+		{
+			DecodeAssimpTexture(
+				m_pScene->mTextures[i],
+				m_DecodedTextures[i].get(),
+				skipTextureResize);
+		});
 	m_TexturesDecoded = true;
-	if (shouldUninit)
-	{
-		CoUninitialize();
-	}
 	return true;
 }
 
@@ -3086,14 +3555,20 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 			const bool hasPackedOrm = mesh.pMetallicRoughnessSRV != nullptr;
 			const bool hasMaterialMaps =
 				hasNormalMap || hasPackedOrm || mesh.pEmissiveSRV != nullptr;
-			// 0.5 は法線／エミッシブのみ、2.0 は packed ORM を表す。
-			const float texMode = hasPackedOrm ? 2.0f
-				: (hasMaterialMaps ? 0.5f : 0.0f);
-			// 写真アルベドだけのLOD3は glTF の metallicFactor を真の金属とみなさない。
-			// 0.5 金属・0.3 粗さのままだと太陽光 Intensity 既定で白壁がクリップする。
 			float roughness = mesh.roughnessFactor;
 			float metallic = mesh.metallicFactor;
-			if (!hasMaterialMaps)
+			float texMode = hasPackedOrm ? 2.0f
+				: (hasMaterialMaps ? 0.5f : 0.0f);
+			if (m_MirrorEnv)
+			{
+				roughness = 0.08f;
+				metallic = 1.0f;
+				texMode = 3.0f;
+				finalColor = XMFLOAT4(0.92f, 0.94f, 0.96f, 1.0f);
+				material.Diffuse = finalColor;
+				SetMaterial(material);
+			}
+			else if (!hasMaterialMaps)
 			{
 				roughness = 0.81f * 0.6f + mesh.roughnessFactor * 0.4f;
 				metallic = 0.0f;
@@ -3106,6 +3581,10 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 		}
 
 		ID3D11ShaderResourceView* pSRV = mesh.pTextureSRV ? mesh.pTextureSRV : m_pWhiteTexture;
+		if (m_MirrorEnv && m_pWhiteTexture)
+		{
+			pSRV = m_pWhiteTexture;
+		}
 		pContext->PSSetShaderResources(0, 1, &pSRV);
 		if (m_EnablePreparedPbr)
 		{
@@ -3130,6 +3609,40 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 			mesh.pShadowIndexBuffer &&
 			mesh.shadowIndexCount > 0)
 		{
+			unsigned int rangeCount = 0;
+			bool inRange = false;
+			for (const GlbShadowCell& cell : mesh.shadowCells)
+			{
+				const bool visible =
+					cell.indexCount > 0 &&
+					IsSphereVisibleFromCamera(
+						cell.worldCenter,
+						cell.worldRadius,
+						pCamera);
+				if (!visible)
+				{
+					inRange = false;
+					continue;
+				}
+				if (!inRange)
+				{
+					rangeCount += 1;
+					inRange = true;
+				}
+			}
+			if (rangeCount == 0)
+			{
+				continue;
+			}
+			if (rangeCount > GLB_MAX_CELL_DRAW_INDEXED)
+			{
+				pContext->IASetIndexBuffer(
+					mesh.pIndexBuffer,
+					DXGI_FORMAT_R32_UINT,
+					0);
+				DrawIndexed(mesh.indexCount, 0, 0);
+				continue;
+			}
 			pContext->IASetIndexBuffer(
 				mesh.pShadowIndexBuffer,
 				DXGI_FORMAT_R32_UINT,
@@ -3141,7 +3654,7 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 			{
 				if (hasDrawRange && drawCount > 0)
 				{
-					pContext->DrawIndexed(drawCount, drawOffset, 0);
+					DrawIndexed(drawCount, drawOffset, 0);
 				}
 				hasDrawRange = false;
 				drawOffset = 0;
@@ -3171,51 +3684,63 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 			}
 			flushDrawRange();
 		}
+		else if (!m_HiddenBatchIds.empty() &&
+			mesh.pVisibleIndexBuffer &&
+			mesh.visibleIndexCount > 0)
+		{
+			pContext->IASetIndexBuffer(
+				mesh.pVisibleIndexBuffer,
+				DXGI_FORMAT_R32_UINT,
+				0);
+			DrawIndexed(mesh.visibleIndexCount, 0, 0);
+		}
+		else if (!m_HiddenBatchIds.empty() && !mesh.sourceIndices.empty())
+		{
+			continue;
+		}
+		else if (!m_HiddenBatchIds.empty() && !mesh.batchRanges.empty())
+		{
+			pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+			unsigned int drawOffset = 0;
+			unsigned int drawCount = 0;
+			bool hasDrawRange = false;
+			auto flushDrawRange = [&]()
+			{
+				if (hasDrawRange && drawCount > 0)
+				{
+					DrawIndexed(drawCount, drawOffset, 0);
+				}
+				hasDrawRange = false;
+				drawOffset = 0;
+				drawCount = 0;
+			};
+			for (const GlbBatchRange& range : mesh.batchRanges)
+			{
+				if (range.indexCount == 0 ||
+					(range.batchId >= 0 &&
+						m_HiddenBatchIds.find(range.batchId) !=
+							m_HiddenBatchIds.end()))
+				{
+					flushDrawRange();
+					continue;
+				}
+				const bool isAdjacent =
+					hasDrawRange &&
+					range.indexOffset == drawOffset + drawCount;
+				if (!isAdjacent)
+				{
+					flushDrawRange();
+					drawOffset = range.indexOffset;
+					hasDrawRange = true;
+				}
+				drawCount += range.indexCount;
+			}
+			flushDrawRange();
+		}
 		else
 		{
 			pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-			if (mesh.batchRanges.empty())
-			{
-				pContext->DrawIndexed(mesh.indexCount, 0, 0);
-			}
-			else
-			{
-				unsigned int drawOffset = 0;
-				unsigned int drawCount = 0;
-				bool hasDrawRange = false;
-				auto flushDrawRange = [&]()
-				{
-					if (hasDrawRange && drawCount > 0)
-					{
-						pContext->DrawIndexed(drawCount, drawOffset, 0);
-					}
-					hasDrawRange = false;
-					drawOffset = 0;
-					drawCount = 0;
-				};
-				for (const GlbBatchRange& range : mesh.batchRanges)
-				{
-					if (range.indexCount == 0 ||
-						(range.batchId >= 0 &&
-							m_HiddenBatchIds.find(range.batchId) !=
-								m_HiddenBatchIds.end()))
-					{
-						flushDrawRange();
-						continue;
-					}
-					const bool isAdjacent =
-						hasDrawRange &&
-						range.indexOffset == drawOffset + drawCount;
-					if (!isAdjacent)
-					{
-						flushDrawRange();
-						drawOffset = range.indexOffset;
-						hasDrawRange = true;
-					}
-					drawCount += range.indexCount;
-				}
-				flushDrawRange();
-			}
+			DrawIndexed(mesh.indexCount, 0, 0);
 		}
 	}
 
@@ -3257,6 +3782,29 @@ void GlbModel::DrawShadowMap(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 sc
 		focus.x + radius, focus.y + radius, focus.z + radius
 	};
 
+	if (m_pCombinedShadowVertexBuffer &&
+		m_pCombinedShadowIndexBuffer &&
+		m_CombinedShadowIndexCount > 0)
+	{
+		XMFLOAT3 worldMin = {};
+		XMFLOAT3 worldMax = {};
+		TransformAabb(m_BoundsMin, m_BoundsMax, World, &worldMin, &worldMax);
+		if (!WorldAabbOverlaps(worldMin, worldMax, cullMin, cullMax))
+		{
+			return;
+		}
+		UINT stride = sizeof(Vertex3D);
+		UINT offset = 0;
+		pContext->IASetVertexBuffers(
+			0, 1, &m_pCombinedShadowVertexBuffer, &stride, &offset);
+		pContext->IASetIndexBuffer(
+			m_pCombinedShadowIndexBuffer,
+			DXGI_FORMAT_R32_UINT,
+			0);
+		DrawIndexed(m_CombinedShadowIndexCount, 0, 0);
+		return;
+	}
+
 	for (unsigned int m = 0; m < (unsigned int)m_Meshes.size(); m++)
 	{
 		GlbMesh& mesh = m_Meshes[m];
@@ -3278,60 +3826,7 @@ void GlbModel::DrawShadowMap(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 sc
 		UINT stride = sizeof(Vertex3D);
 		UINT offset = 0;
 		pContext->IASetVertexBuffers(0, 1, &mesh.pVertexBuffer, &stride, &offset);
-		if (!mesh.shadowCells.empty() &&
-			mesh.pShadowIndexBuffer &&
-			mesh.shadowIndexCount > 0)
-		{
-			pContext->IASetIndexBuffer(
-				mesh.pShadowIndexBuffer,
-				DXGI_FORMAT_R32_UINT,
-				0);
-			unsigned int drawOffset = 0;
-			unsigned int drawCount = 0;
-			bool hasDrawRange = false;
-			auto flushDrawRange = [&]()
-			{
-				if (hasDrawRange && drawCount > 0)
-				{
-					pContext->DrawIndexed(drawCount, drawOffset, 0);
-				}
-				hasDrawRange = false;
-				drawOffset = 0;
-				drawCount = 0;
-			};
-			for (const GlbShadowCell& cell : mesh.shadowCells)
-			{
-				if (cell.indexCount == 0)
-				{
-					continue;
-				}
-				if (!WorldAabbOverlaps(
-					cell.worldAabbMin,
-					cell.worldAabbMax,
-					cullMin,
-					cullMax))
-				{
-					flushDrawRange();
-					continue;
-				}
-				const bool isAdjacent =
-					hasDrawRange &&
-					cell.indexOffset == drawOffset + drawCount;
-				if (!isAdjacent)
-				{
-					flushDrawRange();
-					drawOffset = cell.indexOffset;
-					hasDrawRange = true;
-				}
-				drawCount += cell.indexCount;
-			}
-			flushDrawRange();
-		}
-		else
-		{
-			// 汎用GLBなどセルを持たないモデルは全メッシュを投影する。
-			pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-			pContext->DrawIndexed(mesh.indexCount, 0, 0);
-		}
+		pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+		DrawIndexed(mesh.indexCount, 0, 0);
 	}
 }

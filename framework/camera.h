@@ -88,8 +88,21 @@ public:
 	XMFLOAT3 GetLookTarget(void) const { return m_targetPos; }
 	XMMATRIX GetView(void) const { return m_View; }
 	XMMATRIX GetProjection(void) const { return m_Projection; }
+	XMFLOAT3 GetUpVec(void) const { return m_UpVec; }
+	void SetUpVec(XMFLOAT3 upvec) { m_UpVec = upvec; }
+	float GetFov(void) const { return m_Fov; }
+	float GetAspect(void) const { return m_Aspect; }
 	float GetNear(void) const { return m_Near; }
 	float GetFar(void) const { return m_Far; }
+	void SetNear(float near_)
+	{
+		if (near_ <= 0.0f)
+		{
+			return;
+		}
+		m_Near = near_;
+		SetAspect(m_Aspect);
+	}
 	void SetAspect(float aspect)
 	{
 		if (aspect <= 0.0f)

@@ -207,6 +207,7 @@
     <ClCompile Include="SCENE_GAME\playercamera.cpp" />
     <ClCompile Include="SCENE_GAME\collision.cpp" />
     <ClCompile Include="SCENE_GAME\sunlight.cpp" />
+    <ClCompile Include="SCENE_GAME\envprobe.cpp" />
     <ClCompile Include="SCENE_GAME\course.cpp" />
     <ClCompile Include="SCENE_RESULT\result.cpp" />
     <ClCompile Include="app\scene.cpp" />
@@ -273,6 +274,7 @@
     <ClInclude Include="SCENE_GAME\playercamera.h" />
     <ClInclude Include="SCENE_GAME\collision.h" />
     <ClInclude Include="SCENE_GAME\sunlight.h" />
+    <ClInclude Include="SCENE_GAME\envprobe.h" />
     <ClInclude Include="SCENE_GAME\course.h" />
     <ClInclude Include="app\scene.h" />
     <ClInclude Include="SCENE_RESULT\result.h" />

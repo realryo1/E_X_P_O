@@ -11,6 +11,8 @@ void Field_PumpAfterPresent(double lastDrawMs, float lastGpuMs);
 bool Field_IsLoadComplete(void);
 float Field_GetInitialLoadProgress(void);
 void Field_Draw(void);
+void Field_DrawProbeScene(void);
+bool Field_TryGetNull2ProbeCenter(DirectX::XMFLOAT3* outCenter);
 void Field_DrawLocalShadow(
 	const DirectX::XMMATRIX& lightView,
 	const DirectX::XMMATRIX& lightProjection,

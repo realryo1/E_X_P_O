@@ -1,11 +1,6 @@
 ﻿#include "collision.h"
 #include "glb_model.h"
 
-#include "assimp/cimport.h"
-#include "assimp/scene.h"
-#include "assimp/postprocess.h"
-#pragma comment(lib, "assimp-vc143-mt.lib")
-
 #include <cmath>
 #include <cfloat>
 #include <cstring>
@@ -339,39 +334,22 @@ namespace
 			return tris;
 		}
 
-		aiPropertyStore* props = aiCreatePropertyStore();
-		aiSetImportPropertyFloat(props, AI_CONFIG_GLOBAL_SCALE_FACTOR_KEY, ASSIMP_GLOBAL_SCALE);
-		const unsigned int flags =
-			aiProcess_Triangulate |
-			aiProcess_ConvertToLeftHanded |
-			aiProcess_GlobalScale;
-		std::lock_guard<std::mutex> assimpLock(Glb_GetAssimpMutex());
-		const aiScene* scene = aiImportFileExWithProperties(path, flags, nullptr, props);
-		aiReleasePropertyStore(props);
-		if (!scene || !scene->mRootNode)
+		std::vector<XMFLOAT3> vertices;
+		if (!GlbModel::ImportCollisionTriangles(path, &vertices) ||
+			vertices.size() < 3)
 		{
 			return tris;
 		}
 
-		for (unsigned int m = 0; m < scene->mNumMeshes; ++m)
+		tris.reserve(vertices.size() / 3);
+		for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
 		{
-			const aiMesh* aiM = scene->mMeshes[m];
-			if (!aiM) continue;
-			for (unsigned int f = 0; f < aiM->mNumFaces; ++f)
-			{
-				const aiFace& face = aiM->mFaces[f];
-				if (face.mNumIndices != 3) continue;
-				CollisionTriangle tri;
-				const aiVector3D& va = aiM->mVertices[face.mIndices[0]];
-				const aiVector3D& vb = aiM->mVertices[face.mIndices[1]];
-				const aiVector3D& vc = aiM->mVertices[face.mIndices[2]];
-				tri.a = { va.x, va.y, va.z };
-				tri.b = { vb.x, vb.y, vb.z };
-				tri.c = { vc.x, vc.y, vc.z };
-				tris.push_back(tri);
-			}
+			CollisionTriangle tri;
+			tri.a = vertices[i + 0];
+			tri.b = vertices[i + 1];
+			tri.c = vertices[i + 2];
+			tris.push_back(tri);
 		}
-		aiReleaseImport(scene);
 		return tris;
 	}
 

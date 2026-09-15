@@ -84,6 +84,8 @@ static XMMATRIX g_LastProjectionMatrix = {};
 static MATERIAL g_LastMaterial = {};
 static LIGHT g_LastLight = {};
 static XMFLOAT4 g_LastCameraPosition = {};
+static XMFLOAT3 g_CameraPositionValue = {};
+static float g_ShaderTime = 0.0f;
 static XMFLOAT4 g_LastParameter = {};
 static FOG_CONSTANT g_Fog = {};
 static bool g_HasLastWorldMatrix = false;
@@ -112,6 +114,16 @@ static ID3D11DepthStencilView* g_FaceShadowDSV[NUM_SHADOW_SLICES] = {};
 static ID3D11ShaderResourceView* g_FaceShadowSRV = NULL;
 static ID3D11Buffer* g_FaceShadowBuffer = NULL; // b9: 4面分の行列＋濃さ
 static ID3D11Buffer* g_FogBuffer = NULL; // b11: 距離・高度フォグ
+static ID3D11Buffer* g_Null2Buffer = nullptr; // b12: null2 膜
+static XMFLOAT4 g_LastNull2Param = {};
+static bool g_HasLastNull2Param = false;
+
+static UINT g_EnvCubeSize = ENV_CUBE_SIZE_DEFAULT;
+static ID3D11Texture2D* g_EnvCubeTexture = nullptr;
+static ID3D11RenderTargetView* g_EnvCubeFaceViews[ENV_CUBE_FACE_COUNT] = {};
+static ID3D11Texture2D* g_EnvCubeDepthTexture = nullptr;
+static ID3D11DepthStencilView* g_EnvCubeDepthView = nullptr;
+static ID3D11ShaderResourceView* g_EnvCubeShaderView = nullptr;
 
 // ウィンドウクライアントサイズ（ビューポート計算用）
 static float g_ClientWidth  = DRAW_SCREEN_X;
@@ -161,6 +173,7 @@ static float g_LastGpuFrameMs = -1.0f;
 
 #if defined(_DEBUG)
 static unsigned long long g_DebugMapCount = 0;
+static unsigned long long g_DebugDrawIndexedCount = 0;
 static double g_DebugMapMs = 0.0;
 static std::chrono::steady_clock::time_point
 	g_DebugStageStarts[DIRECT3D_DEBUG_STAGE_COUNT] = {};
@@ -418,6 +431,8 @@ static void ResetRendererStateCache(void)
 	g_HasLastLight = false;
 	g_HasLastCameraPosition = false;
 	g_HasLastParameter = false;
+	g_HasLastFog = false;
+	g_HasLastNull2Param = false;
 }
 
 
@@ -691,6 +706,20 @@ ID3D11DeviceContext* GetDeviceContext( void )
 	return g_ImmediateContext;
 }
 
+void DrawIndexed(UINT indexCount, UINT startIndexLocation, INT baseVertexLocation)
+{
+#if defined(_DEBUG)
+	++g_DebugDrawIndexedCount;
+#endif
+	if (g_ImmediateContext)
+	{
+		g_ImmediateContext->DrawIndexed(
+			indexCount,
+			startIndexLocation,
+			baseVertexLocation);
+	}
+}
+
 void SetDefaultSampler(void)
 {
 	if (g_ImmediateContext && g_DefaultSampler)
@@ -812,7 +841,30 @@ void SetMaterial( MATERIAL Material )
 
 void SetCameraPosition(XMFLOAT3 CameraPosition)
 {
-	XMFLOAT4	temp = XMFLOAT4(CameraPosition.x, CameraPosition.y, CameraPosition.z, 0.0f);
+	g_CameraPositionValue = CameraPosition;
+	XMFLOAT4 temp = XMFLOAT4(
+		CameraPosition.x,
+		CameraPosition.y,
+		CameraPosition.z,
+		g_ShaderTime);
+	if (g_HasLastCameraPosition &&
+		std::memcmp(&g_LastCameraPosition, &temp, sizeof(temp)) == 0)
+	{
+		return;
+	}
+	UpdateDynamicConstantBuffer(g_CameraBuffer, &temp, sizeof(temp));
+	g_LastCameraPosition = temp;
+	g_HasLastCameraPosition = true;
+}
+
+void SetShaderTime(float seconds)
+{
+	g_ShaderTime = seconds;
+	XMFLOAT4 temp = XMFLOAT4(
+		g_CameraPositionValue.x,
+		g_CameraPositionValue.y,
+		g_CameraPositionValue.z,
+		g_ShaderTime);
 	if (g_HasLastCameraPosition &&
 		std::memcmp(&g_LastCameraPosition, &temp, sizeof(temp)) == 0)
 	{
@@ -833,6 +885,18 @@ void SetFog(FOG_CONSTANT Fog)
 	g_Fog = Fog;
 	UpdateDynamicConstantBuffer(g_FogBuffer, &g_Fog, sizeof(g_Fog));
 	g_HasLastFog = true;
+}
+
+void SetNull2Membrane(XMFLOAT4 param)
+{
+	if (g_HasLastNull2Param &&
+		std::memcmp(&g_LastNull2Param, &param, sizeof(param)) == 0)
+	{
+		return;
+	}
+	UpdateDynamicConstantBuffer(g_Null2Buffer, &param, sizeof(param));
+	g_LastNull2Param = param;
+	g_HasLastNull2Param = true;
 }
 
 void SetParameter(XMFLOAT4 Parameter)
@@ -1032,6 +1096,243 @@ void EndFaceShadowMap(void)
 	// 受け手が4面ShadowMap配列を読めるように、t6へセット（サンプラーはs1を流用）。
 	g_ImmediateContext->PSSetShaderResources(6, 1, &g_FaceShadowSRV);
 	g_ImmediateContext->PSSetSamplers(1, 1, &g_ShadowMapSampler);
+}
+
+static UINT CountEnvCubeMips(UINT size)
+{
+	UINT mips = 1;
+	while (size > 1)
+	{
+		size >>= 1;
+		++mips;
+	}
+	return mips;
+}
+
+static UINT SanitizeEnvCubeSize(int size)
+{
+	static const UINT kSizes[] = {
+		ENV_CUBE_SIZE_MIN,
+		256,
+		ENV_CUBE_SIZE_DEFAULT,
+		ENV_CUBE_SIZE_MAX
+	};
+	UINT best = ENV_CUBE_SIZE_DEFAULT;
+	int bestDiff = 0x7fffffff;
+	for (UINT candidate : kSizes)
+	{
+		const int diff = size - static_cast<int>(candidate);
+		const int absDiff = (diff < 0) ? -diff : diff;
+		if (absDiff < bestDiff)
+		{
+			bestDiff = absDiff;
+			best = candidate;
+		}
+	}
+	return best;
+}
+
+static void ReleaseEnvCubeResources(void)
+{
+	UnbindEnvCube();
+	SAFE_RELEASE(g_EnvCubeShaderView);
+	for (int i = 0; i < ENV_CUBE_FACE_COUNT; ++i)
+	{
+		SAFE_RELEASE(g_EnvCubeFaceViews[i]);
+	}
+	SAFE_RELEASE(g_EnvCubeDepthView);
+	SAFE_RELEASE(g_EnvCubeDepthTexture);
+	SAFE_RELEASE(g_EnvCubeTexture);
+}
+
+static void CreateEnvCubeResources(void)
+{
+	if (!g_D3DDevice || !g_ImmediateContext)
+	{
+		return;
+	}
+
+	const UINT mipCount = CountEnvCubeMips(g_EnvCubeSize);
+	D3D11_TEXTURE2D_DESC cubeDesc = {};
+	cubeDesc.Width = g_EnvCubeSize;
+	cubeDesc.Height = g_EnvCubeSize;
+	cubeDesc.MipLevels = mipCount;
+	cubeDesc.ArraySize = ENV_CUBE_FACE_COUNT;
+	cubeDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	cubeDesc.SampleDesc.Count = 1;
+	cubeDesc.Usage = D3D11_USAGE_DEFAULT;
+	cubeDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	cubeDesc.MiscFlags =
+		D3D11_RESOURCE_MISC_TEXTURECUBE | D3D11_RESOURCE_MISC_GENERATE_MIPS;
+	g_D3DDevice->CreateTexture2D(&cubeDesc, nullptr, &g_EnvCubeTexture);
+	if (g_EnvCubeTexture)
+	{
+		for (UINT i = 0; i < ENV_CUBE_FACE_COUNT; ++i)
+		{
+			D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+			rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+			rtvDesc.Texture2DArray.MipSlice = 0;
+			rtvDesc.Texture2DArray.FirstArraySlice = i;
+			rtvDesc.Texture2DArray.ArraySize = 1;
+			g_D3DDevice->CreateRenderTargetView(
+				g_EnvCubeTexture,
+				&rtvDesc,
+				&g_EnvCubeFaceViews[i]);
+		}
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+		srvDesc.TextureCube.MostDetailedMip = 0;
+		srvDesc.TextureCube.MipLevels = mipCount;
+		g_D3DDevice->CreateShaderResourceView(
+			g_EnvCubeTexture,
+			&srvDesc,
+			&g_EnvCubeShaderView);
+		const float envClear[4] = { 0.702f, 0.780f, 0.902f, 1.0f };
+		for (UINT i = 0; i < ENV_CUBE_FACE_COUNT; ++i)
+		{
+			if (g_EnvCubeFaceViews[i])
+			{
+				g_ImmediateContext->ClearRenderTargetView(
+					g_EnvCubeFaceViews[i],
+					envClear);
+			}
+		}
+	}
+
+	D3D11_TEXTURE2D_DESC depthDesc = {};
+	depthDesc.Width = g_EnvCubeSize;
+	depthDesc.Height = g_EnvCubeSize;
+	depthDesc.MipLevels = 1;
+	depthDesc.ArraySize = 1;
+	depthDesc.Format = DXGI_FORMAT_D16_UNORM;
+	depthDesc.SampleDesc.Count = 1;
+	depthDesc.Usage = D3D11_USAGE_DEFAULT;
+	depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	g_D3DDevice->CreateTexture2D(&depthDesc, nullptr, &g_EnvCubeDepthTexture);
+	if (g_EnvCubeDepthTexture)
+	{
+		g_D3DDevice->CreateDepthStencilView(
+			g_EnvCubeDepthTexture,
+			nullptr,
+			&g_EnvCubeDepthView);
+	}
+}
+
+int GetEnvCubeSize(void)
+{
+	return static_cast<int>(g_EnvCubeSize);
+}
+
+bool SetEnvCubeSize(int size)
+{
+	const UINT next = SanitizeEnvCubeSize(size);
+	if (next == g_EnvCubeSize && g_EnvCubeTexture && g_EnvCubeDepthView)
+	{
+		return false;
+	}
+	g_EnvCubeSize = next;
+	if (!g_D3DDevice || !g_ImmediateContext)
+	{
+		return true;
+	}
+	ReleaseEnvCubeResources();
+	CreateEnvCubeResources();
+	return true;
+}
+
+bool BeginEnvCubeFace(int face)
+{
+	if (face < 0 || face >= ENV_CUBE_FACE_COUNT ||
+		!g_EnvCubeFaceViews[face] ||
+		!g_EnvCubeDepthView)
+	{
+		return false;
+	}
+
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	g_ImmediateContext->PSSetShaderResources(6, 1, &nullSRV);
+
+	SetDepthEnable(true);
+	g_ImmediateContext->OMSetRenderTargets(
+		1,
+		&g_EnvCubeFaceViews[face],
+		g_EnvCubeDepthView);
+
+	D3D11_VIEWPORT vp = {};
+	vp.Width = static_cast<FLOAT>(g_EnvCubeSize);
+	vp.Height = static_cast<FLOAT>(g_EnvCubeSize);
+	vp.MinDepth = 0.0f;
+	vp.MaxDepth = 1.0f;
+	g_ImmediateContext->RSSetViewports(1, &vp);
+
+	const float clearColor[4] = { 0.702f, 0.780f, 0.902f, 1.0f };
+	g_ImmediateContext->ClearRenderTargetView(
+		g_EnvCubeFaceViews[face],
+		clearColor);
+	g_ImmediateContext->ClearDepthStencilView(
+		g_EnvCubeDepthView,
+		D3D11_CLEAR_DEPTH,
+		1.0f,
+		0);
+
+	if (g_ShadowMapShaderView)
+	{
+		g_ImmediateContext->PSSetShaderResources(1, 1, &g_ShadowMapShaderView);
+		g_ImmediateContext->PSSetSamplers(1, 1, &g_ShadowMapSampler);
+	}
+	return true;
+}
+
+void EndEnvCubeFace(void)
+{
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	g_ImmediateContext->PSSetShaderResources(6, 1, &nullSRV);
+	if (g_IsTakingScreenshot)
+	{
+		g_ImmediateContext->OMSetRenderTargets(1, &g_SSTargetView, g_SSDepthView);
+	}
+	else
+	{
+		BindSceneTarget();
+	}
+	SetDepthEnable(true);
+	if (g_ShadowMapShaderView)
+	{
+		g_ImmediateContext->PSSetShaderResources(1, 1, &g_ShadowMapShaderView);
+		g_ImmediateContext->PSSetSamplers(1, 1, &g_ShadowMapSampler);
+	}
+}
+
+void BindEnvCube(void)
+{
+	if (!g_ImmediateContext || !g_EnvCubeShaderView)
+	{
+		return;
+	}
+	g_ImmediateContext->PSSetShaderResources(6, 1, &g_EnvCubeShaderView);
+}
+
+void UnbindEnvCube(void)
+{
+	if (!g_ImmediateContext)
+	{
+		return;
+	}
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	g_ImmediateContext->PSSetShaderResources(6, 1, &nullSRV);
+}
+
+void GenerateEnvCubeMips(void)
+{
+	if (!g_ImmediateContext || !g_EnvCubeShaderView)
+	{
+		return;
+	}
+	ID3D11ShaderResourceView* nullSRV = nullptr;
+	g_ImmediateContext->PSSetShaderResources(6, 1, &nullSRV);
+	g_ImmediateContext->GenerateMips(g_EnvCubeShaderView);
 }
 
 
@@ -1379,6 +1680,8 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	g_D3DDevice->CreateSamplerState(&shadowSamplerDesc, &g_ShadowMapSampler);
 	g_ImmediateContext->PSSetSamplers(1, 1, &g_ShadowMapSampler);
 
+	CreateEnvCubeResources();
+
 	// --- 4面ShadowMap（Texture2DArray 4スライス）---
 	{
 		D3D11_TEXTURE2D_DESC td;
@@ -1475,6 +1778,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 
 	hBufferDesc.ByteWidth = sizeof(XMFLOAT4);
 	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_CameraBuffer);
+	g_ImmediateContext->VSSetConstantBuffers(5, 1, &g_CameraBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(5, 1, &g_CameraBuffer);
 
 	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_ParameterBuffer);
@@ -1499,6 +1803,12 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		XMFLOAT4(0.70f, 0.78f, 0.90f, 1.0f),
 		XMFLOAT4(80.0f, 500.0f, 0.0f, 60.0f)
 	});
+
+	hBufferDesc.ByteWidth = sizeof(XMFLOAT4);
+	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_Null2Buffer);
+	g_ImmediateContext->VSSetConstantBuffers(12, 1, &g_Null2Buffer);
+	g_ImmediateContext->PSSetConstantBuffers(12, 1, &g_Null2Buffer);
+	SetNull2Membrane(XMFLOAT4(0.05f, 2.5f, 0.02f, 0.05f));
 
 	hBufferDesc.ByteWidth = sizeof(SSAO_CONSTANT);
 	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_SsaoBuffer);
@@ -1531,6 +1841,7 @@ void FinalizeRenderer(void)
 	SAFE_RELEASE(g_SsaoQuadVertexBuffer);
 	SAFE_RELEASE(g_FaceShadowBuffer);
 	SAFE_RELEASE(g_FogBuffer);
+	SAFE_RELEASE(g_Null2Buffer);
 	SAFE_RELEASE(g_FaceShadowSRV);
 	for (int i = 0; i < NUM_SHADOW_SLICES; i++) SAFE_RELEASE(g_FaceShadowDSV[i]);
 	SAFE_RELEASE(g_FaceShadowTexture);
@@ -1543,6 +1854,7 @@ void FinalizeRenderer(void)
 		SAFE_RELEASE(g_ShadowMapDepthViews[i]);
 	}
 	SAFE_RELEASE(g_ShadowMapTexture);
+	ReleaseEnvCubeResources();
 	for (int i = 0; i < CULLSTATE_MAX; i++)
 	{
 		SAFE_RELEASE(rState[i]);
@@ -1600,6 +1912,7 @@ void Clear(void)
 	g_ImmediateContext->PSSetConstantBuffers(3, 1, &g_MaterialBuffer);
 	g_ImmediateContext->VSSetConstantBuffers(4, 1, &g_LightBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(4, 1, &g_LightBuffer);
+	g_ImmediateContext->VSSetConstantBuffers(5, 1, &g_CameraBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(5, 1, &g_CameraBuffer);
 	g_ImmediateContext->VSSetConstantBuffers(6, 1, &g_ParameterBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(6, 1, &g_ParameterBuffer);
@@ -1610,6 +1923,8 @@ void Clear(void)
 	g_ImmediateContext->PSSetConstantBuffers(9, 1, &g_FaceShadowBuffer);
 	g_ImmediateContext->VSSetConstantBuffers(11, 1, &g_FogBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(11, 1, &g_FogBuffer);
+	g_ImmediateContext->VSSetConstantBuffers(12, 1, &g_Null2Buffer);
+	g_ImmediateContext->PSSetConstantBuffers(12, 1, &g_Null2Buffer);
 	SetDefaultSampler();
 }
 
@@ -2125,6 +2440,7 @@ float Direct3D_GetLastGpuFrameMs(void)
 void Direct3D_DebugResetFrameCounters(void)
 {
 	g_DebugMapCount = 0;
+	g_DebugDrawIndexedCount = 0;
 	g_DebugMapMs = 0.0;
 	for (int i = 0; i < DIRECT3D_DEBUG_STAGE_COUNT; ++i)
 	{
@@ -2173,6 +2489,11 @@ unsigned long long Direct3D_DebugGetMapCount(void)
 double Direct3D_DebugGetMapMs(void)
 {
 	return g_DebugMapMs;
+}
+
+unsigned long long Direct3D_DebugGetDrawIndexedCount(void)
+{
+	return g_DebugDrawIndexedCount;
 }
 #endif
 

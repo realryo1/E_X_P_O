@@ -150,6 +150,8 @@ void Player_WarpTo(XMFLOAT3 pos)
 	g_Pos = pos;
 	g_ForwardSpeed = 0.0f;
 	g_VerticalSpeed = 0.0f;
+	g_DashTimer = 0.0f;
+	g_DashVelocity = 0.0f;
 	if (g_PlayerModel)
 	{
 		g_PlayerModel->SetPos(g_Pos);

@@ -5,6 +5,7 @@ Texture2D g_NormalMap : register(t2);
 Texture2D g_MetallicMap : register(t3);
 Texture2D g_RoughnessMap : register(t4);
 Texture2D g_EmissiveMap : register(t5);
+TextureCube g_EnvCube : register(t6);
 SamplerState g_SamplerState : register(s0);
 
 static const float PI = 3.14159265f;
@@ -109,7 +110,13 @@ void main(in PS_IN In, out float4 outDiffuse : SV_Target)
 	// < 1.5: 独立マップ（metallic/roughness は .r）。
 	// >= 1.5: glTF packed ORM（G=roughness, B=metallic）。xy は factor。
 	[branch]
-	if (Parameter.z < 0.5f)
+	if (Parameter.z >= 2.5f)
+	{
+		metallic = saturate(Parameter.y);
+		roughness = max(saturate(Parameter.x), 0.04f);
+		N = normalize(In.Normal.xyz);
+	}
+	else if (Parameter.z < 0.5f)
 	{
 		metallic = saturate(Parameter.y);
 		roughness = max(saturate(Parameter.x), 0.04f);
@@ -165,14 +172,26 @@ void main(in PS_IN In, out float4 outDiffuse : SV_Target)
 	// 単一ライトへフォールバック時は Light.Ambient を使う。
 	// これにより Player と Field(Phong) の環境光を独立して設定できる。
 	float3 ambientColor = anyPlayerLight ? PlayerLights[0].Ambient.rgb : Light.Ambient.rgb;
-	// 環境光は 1 を超えてよい。saturate すると Ambient Scale を上げても影側が沈んだままになる。
 	float3 ambient = albedo * max(ambientColor, 0.0f);
 	float shadow = 1.0f;
 	if (Parameter.w > 0.5f)
 	{
 		shadow = CalcCascadedShadow(In.WorldPosition.xyz);
 	}
-	float3 hdr = ambient + direct * shadow + emissive;
+	float3 envSpecular = float3(0.0f, 0.0f, 0.0f);
+	if (Parameter.z >= 2.5f)
+	{
+		float3 R = reflect(
+			-V,
+			Null2MembraneNormal(N, In.WorldPosition.xyz, CameraPosition.w));
+		float3 env = g_EnvCube.SampleLevel(g_SamplerState, R, 0.0f).rgb;
+		float3 F0 = lerp(0.04f.xxx, albedo, metallic);
+		float NdotV = max(dot(N, V), 0.001f);
+		float3 F = F0 + (1.0f - F0) * pow(1.0f - NdotV, 5.0f);
+		envSpecular = env * F;
+		ambient = float3(0.0f, 0.0f, 0.0f);
+	}
+	float3 hdr = ambient + envSpecular + direct * shadow + emissive;
 	// LDRへ出す前に、1を超えた画素だけピークを畳む。
 	float peak = max(max(hdr.r, hdr.g), hdr.b);
 	if (peak > 1.0f)

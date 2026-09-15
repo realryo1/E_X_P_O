@@ -63,11 +63,14 @@ struct GlbMesh
 	ID3D11Buffer* pVertexBuffer = nullptr;
 	ID3D11Buffer* pIndexBuffer = nullptr;
 	ID3D11Buffer* pShadowIndexBuffer = nullptr;
+	ID3D11Buffer* pVisibleIndexBuffer = nullptr;
 	unsigned int  indexCount = 0;
 	unsigned int  shadowIndexCount = 0;
+	unsigned int  visibleIndexCount = 0;
 	std::size_t vertexUploadOffset = 0;
 	std::size_t indexUploadOffset = 0;
 	std::size_t shadowIndexUploadOffset = 0;
+	std::vector<std::uint32_t> sourceIndices;
 	std::vector<GlbShadowCell> shadowCells;
 	XMFLOAT3 boundsMin = { 0.0f, 0.0f, 0.0f };
 	XMFLOAT3 boundsMax = { 0.0f, 0.0f, 0.0f };
@@ -111,9 +114,18 @@ public:
 
 	// 万博の静的GLBを、Accessor/BufferViewを直接解釈してCPUデータへ展開する。
 	// 返されたデータの所有権は呼び出し側が持ち、AttachPreparedDataへ渡す。
-	static GlbPreparedData* ImportPreparedFile(const char* filePath);
+	static GlbPreparedData* ImportPreparedFile(
+		const char* filePath,
+		bool skipTextures = false);
+
+	// 衝突用に、左手系・100倍スケール済みの三角形頂点を3個単位で返す。
+	static bool ImportCollisionTriangles(
+		const char* filePath,
+		std::vector<XMFLOAT3>* outTriangleVertices);
 	bool AttachPreparedData(GlbPreparedData* data);
 	void MergePreparedMeshesByMaterial(void);
+	// テクスチャが違っても最大 maxMeshes 本へ潰す。遠景LOD2向け。ワーカーから呼ぶ。
+	void CollapsePreparedMeshes(unsigned int maxMeshes);
 
 	// 影パス用に、準備済み頂点をモデル空間の XZ セルへ分割する。ワーカーから呼ぶ。
 	void PrepareShadowCells(float modelSpaceCellSize);
@@ -146,11 +158,14 @@ public:
 	void SetReceiveShadow(bool enable) { m_ReceiveShadow = enable; }
 	bool GetReceiveShadow(void) const { return m_ReceiveShadow; }
 	void SetPhotoAlbedo(bool enable) { m_PhotoAlbedo = enable; }
+	void SetMirrorEnv(bool enable) { m_MirrorEnv = enable; }
 	void SetMainPassCellCulling(bool enable) { m_MainPassCellCulling = enable; }
+	void SetShadowUseCells(bool enable) { m_ShadowUseCells = enable; }
 
 	// 遠景補完など、GLB内のバッチ単位で描画を一時的に抑制する。
 	void ClearHiddenBatchIds(void);
 	void HideBatchId(int batchId);
+	void SetHiddenBatchIds(const std::unordered_set<int>& batchIds);
 
 	// メッシュ数を取得
 	unsigned int GetMeshCount() const { return (unsigned int)m_Meshes.size(); }
@@ -174,12 +189,17 @@ private:
 	// マテリアルからテクスチャパスを取得し、埋め込みテクスチャとマッピング
 	void SetupMeshMaterials(const aiScene* pScene);
 	void SetupPreparedMeshMaterials(void);
+	void RebuildVisibleIndexBuffer(GlbMesh& mesh);
+	void BuildCombinedShadowGeometry(void);
+	int PumpCombinedShadow(ID3D11Device* pDevice);
 
 private:
 	bool m_IsLoaded = false;
 	bool m_ReceiveShadow = false;
 	bool m_PhotoAlbedo = false;
+	bool m_MirrorEnv = false;
 	bool m_MainPassCellCulling = false;
+	bool m_ShadowUseCells = true;
 	const aiScene* m_pScene = nullptr;
 	std::unique_ptr<GlbPreparedData> m_pPreparedData;
 	int m_GpuPhase = 0;
@@ -199,6 +219,11 @@ private:
 	ID3D11ShaderResourceView* m_pBlackTexture = nullptr;
 	ID3D11ShaderResourceView* m_pFlatNormalTexture = nullptr;
 	bool m_EnablePreparedPbr = false;
+	ID3D11Buffer* m_pCombinedShadowVertexBuffer = nullptr;
+	ID3D11Buffer* m_pCombinedShadowIndexBuffer = nullptr;
+	unsigned int m_CombinedShadowIndexCount = 0;
+	std::size_t m_CombinedShadowVertexUploadOffset = 0;
+	std::size_t m_CombinedShadowIndexUploadOffset = 0;
 
 	// 視錐台カリング用のモデル空間境界ボックス。
 	XMFLOAT3 m_BoundsMin = XMFLOAT3(0.0f, 0.0f, 0.0f);

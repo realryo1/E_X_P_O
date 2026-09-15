@@ -143,6 +143,7 @@ void Present(void);
 
 ID3D11Device *GetDevice( void );
 ID3D11DeviceContext *GetDeviceContext( void );
+void DrawIndexed(UINT indexCount, UINT startIndexLocation, INT baseVertexLocation);
 void SetDefaultSampler(void);
 
 void SetDepthEnable( bool Enable );
@@ -157,7 +158,9 @@ void SetViewMatrix(XMMATRIX ViewMatrix );
 void SetProjectionMatrix(XMMATRIX ProjectionMatrix );
 
 void SetCameraPosition(XMFLOAT3 CameraPosition);
+void SetShaderTime(float seconds);
 void SetFog(FOG_CONSTANT Fog);
+void SetNull2Membrane(XMFLOAT4 param);
 
 void SetParameter(XMFLOAT4 Parameter);
 XMFLOAT4 GetParameter(void);
@@ -187,6 +190,17 @@ void BeginFaceShadowMap(int slice);
 // 4面ShadowMapへの描画を終えて、通常描画へ戻し、配列を受け手へ読ませる。
 void EndFaceShadowMap(void);
 
+#define ENV_CUBE_FACE_COUNT 6
+#define ENV_CUBE_SIZE_DEFAULT 512
+#define ENV_CUBE_SIZE_MIN 128
+#define ENV_CUBE_SIZE_MAX 1024
+int GetEnvCubeSize(void);
+bool SetEnvCubeSize(int size);
+bool BeginEnvCubeFace(int face);
+void EndEnvCubeFace(void);
+void BindEnvCube(void);
+void UnbindEnvCube(void);
+void GenerateEnvCubeMips(void);
 
 void SetMaterial( MATERIAL Material );
 
@@ -231,5 +245,6 @@ void Direct3D_DebugStageEnd(Direct3D_DebugStage stage);
 double Direct3D_DebugGetStageMs(Direct3D_DebugStage stage);
 unsigned long long Direct3D_DebugGetMapCount(void);
 double Direct3D_DebugGetMapMs(void);
+unsigned long long Direct3D_DebugGetDrawIndexedCount(void);
 #endif
 

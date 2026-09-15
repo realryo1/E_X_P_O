@@ -4,7 +4,9 @@
       "input": "asset/expomodel/expo_pavilion_better_co_being.glb",
       "output": "asset/expomodel/expo_pavilion_better_co_being.glb",
       "ratio": 0.43,
-      "error": 0.01
+      "error": 0.01,
+      "uvWeight": 1,
+      "uvSeam": 0.01
     }
   ]
 }

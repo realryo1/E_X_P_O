@@ -72,11 +72,38 @@ cbuffer LightBuffer : register(b4)
 	LIGHT Light;
 };
 
-//カメラ座標
+//カメラ座標。w はシェーダー用経過秒（null2 膜の揺れなど）。
 cbuffer CameraBuffer : register(b5)
 {
 	float4 CameraPosition;
 };
+
+cbuffer Null2Buffer : register(b12)
+{
+	float4 Null2Param;
+};
+
+float Null2MembraneOffset(float3 worldPos, float timeSeconds)
+{
+	float phase = dot(worldPos, float3(19.7f, 8.3f, 14.1f));
+	float t = timeSeconds * Null2Param.y;
+	float shake = sin(t * 44.0f + phase);
+	shake += 0.40f * sin(t * 63.0f + phase * 1.63f);
+	shake += 0.22f * sin(t * 29.5f + worldPos.y * 31.0f);
+	return shake * Null2Param.x;
+}
+
+float3 Null2MembraneNormal(float3 baseNormal, float3 worldPos, float timeSeconds)
+{
+	float3 N = normalize(baseNormal);
+	float3 axis = (abs(N.y) < 0.94f) ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+	float3 T = normalize(cross(axis, N));
+	float3 B = cross(N, T);
+	float n0 = Null2MembraneOffset(worldPos, timeSeconds);
+	float nx = Null2MembraneOffset(worldPos + T * 0.045f, timeSeconds);
+	float nz = Null2MembraneOffset(worldPos + B * 0.045f, timeSeconds);
+	return normalize(N + T * ((nx - n0) * Null2Param.w) + B * ((nz - n0) * Null2Param.w));
+}
 
 //3点照明(PBR専用)。キー/フィル/リムの3灯。
 #define NUM_PLAYER_LIGHTS 3

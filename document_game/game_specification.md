@@ -32,7 +32,7 @@ BGM / SE のパスと発火地点は
 
 進捗と次の作業は [task_list.md](task_list.md)。当たり判定は [collision.md](../document_framework/collision.md)。会場モデルは [plateau.md](plateau.md)。描画詳細は [rendering_and_lighting.md](rendering_and_lighting.md)。
 
-起動時は `SCENE_GAME`（`SCENE_TITLE` から決定入力で遷移した場合も同様）。オルソ床、パンチ済みLOD2葉タイル、未パンチLOD2遠景補完、大屋根リング、LOD3の全名前付き近景パビリオンを重ね、空飛ぶタクシーのホバー移動と床・リング・LOD2建物衝突まで利用できる。未パンチLOD2遠景はLOD3がGPU化されるまで表示し、対応するLOD3が常駐した棟のバッチ単位で排他表示するが、衝突メッシュは常時保持する。LOD3パビリオンは原則描画専用で、建物の衝突形状はLOD2を使う。ただし東西ゲート本体は高精細モデルを使い、ゲートのワールドAABB内では重複するLOD2衝突を無効にする。プレイヤーは `asset/model/flytaxi.glb` を表示長辺約0.8に調整する。スカイドーム以外のモデルは共通の `S_PBR` で描画し、glTFのPBRマテリアルを適用する。スカイドームはワールド方向からHDRの正距円筒UVを計算する `S_SKYBOX`。床、パンチ済みLOD2、リング、タクシーがShadowMapへ投影し、LOD3パビリオン・プレースホルダーを含む全対象モデルが影を受ける。遠景LOD2は影パスから除外する。LOD3表示中も建物の影はパンチ済みLOD2を投影元にする。3D描画後には半解像度SSAOをシーン色へ合成し、柱の隙間や入れ組みの淵を補助的に暗くする。Player用ImGui「スロープへ」でリング上へワープできる。描画GLBはAccessor直接デコードを並列実行し、衝突は `asset/collision/*.bin` を優先し、無い場合はGLBフォールバックをワーカーでベイクする。`null2` は全面グレーのままで、見た目の実装は止めている。
+起動時は `SCENE_GAME`（`SCENE_TITLE` から決定入力で遷移した場合も同様）。オルソ床、パンチ済みLOD2葉タイル、未パンチLOD2遠景補完、大屋根リング、LOD3の全名前付き近景パビリオンを重ね、空飛ぶタクシーのホバー移動と床・リング・LOD2建物衝突まで利用できる。未パンチLOD2遠景はLOD3がGPU化されるまで表示し、対応するLOD3が常駐した棟のバッチ単位で排他表示するが、衝突メッシュは常時保持する。LOD3パビリオンは原則描画専用で、建物の衝突形状はLOD2を使う。ただし東西ゲート本体は高精細モデルを使い、ゲートのワールドAABB内では重複するLOD2衝突を無効にする。プレイヤーは `asset/model/flytaxi.glb` を表示長辺約0.8に調整する。スカイドーム以外のモデルは共通の `S_PBR` で描画し、glTFのPBRマテリアルを適用する。スカイドームはワールド方向からHDRの正距円筒UVを計算する `S_SKYBOX`。床、パンチ済みLOD2、リング、タクシーがShadowMapへ投影し、LOD3パビリオン・プレースホルダーを含む全対象モデルが影を受ける。遠景LOD2は影パスから除外する。LOD3表示中も建物の影はパンチ済みLOD2を投影元にする。3D描画後には半解像度SSAOをシーン色へ合成し、柱の隙間や入れ組みの淵を補助的に暗くする。Player用ImGui「スロープへ」でリング上へワープできる。描画GLBはAccessor直接デコードを並列実行し、衝突は `asset/collision/*.bin` を優先し、無い場合はGLBフォールバックをワーカーでベイクする。`null2` は動的キューブマップで鏡面反射する。
 
 ### できること
 
@@ -40,7 +40,7 @@ BGM / SE のパスと発火地点は
 - 空飛ぶタクシー `asset/model/flytaxi.glb`。ロード完了後に `Player_Update` が出現させる。
 - カメラヨー基準のW / 左スティック上による前進、マウス左右にゆっくり追従する機体旋回、旋回中のロール傾斜、Space / Shiftによる徐々に変化する上下移動。上昇・下降の速度ベクトルは前進速度と合成する（前進中は斜め、停止中は垂直移動）。三人称視点は `playercamera.cpp`（Far 2000）。
 - 当たり判定は床・リング・LOD2建物・東西ゲート本体。東西ゲートだけは高精細モデルを使い、そのワールドAABB内ではパンチ済みLOD2／遠景LOD2の重複判定を止める。それ以外のLOD3パビリオンは描画専用で、衝突はパンチ済みLOD2と遠景LOD2の形状へ行う。
-- Courseメニュー：`Esc` / パッドSTARTで開くゲーム内メニューから、レース開始・コース編集・追加を選び、一番下の「戻る」で閉じる。レース開始は `コース1`、`コース2`…、空行、`戻る` の一覧。コース編集・追加は `コース追加`、既存コース、空行、`戻る`。マウスクリックまたは上下キーで選ぶ。左右キーでのコース切替は使わない。飛行に使う`W` / `Space` / 左スティックはメニュー決定・カーソル移動に使わない。メニューを開いた直後、およびページ遷移直後は押しっぱなしのキー・スティック・マウスボタンが離れるまで入力を無視する。サブページの`Esc` / 「戻る」はルートへ戻る。コース作成中は`P`で現在位置を追加し、`U`で最後の座標を取り消す。保存時の名前は`course_YYYYMMDD_HHMMSS`形式で自動生成する。1つ目の座標と2つ目以降の輪はいずれも `asset/texture/makulogo.png` のビルボード（スタートだけ色と大きさを変える）。`cube.fbx` は LOD3 プレースホルダー専用。
+- Courseメニュー：`Esc` / パッドSTARTで開くゲーム内メニューから、レース開始・コース編集・追加・スタート地点へ戻る を選び、一番下の「戻る」で閉じる。スタート地点へ戻るは出現位置へワープし、速度を止めてメニューを閉じる（積み防止）。レース開始は `コース1`、`コース2`…、空行、`戻る` の一覧。コース編集・追加は `コース追加`、既存コース、空行、`戻る`。マウスクリックまたは上下キーで選ぶ。左右キーでのコース切替は使わない。飛行に使う`W` / `Space` / 左スティックはメニュー決定・カーソル移動に使わない。メニューを開いた直後、およびページ遷移直後は押しっぱなしのキー・スティック・マウスボタンが離れるまで入力を無視する。サブページの`Esc` / 「戻る」はルートへ戻る。コース作成中は`P`で現在位置を追加し、`U`で最後の座標を取り消す。保存時の名前は`course_YYYYMMDD_HHMMSS`形式で自動生成する。1つ目の座標と2つ目以降の輪はいずれも `asset/texture/makulogo.png` のビルボード（スタートだけ色と大きさを変える）。`cube.fbx` は LOD3 プレースホルダー専用。
 - レースモード：コースの1つ目の座標へ移動し、3秒のカウントダウン後に計測を開始する。2つ目以降の輪を座標順に通過し、左上へ`00:00:00`（分:秒:センチ秒）形式で表示する。ゴール時はタイムスタンプとタイムを`asset/course/*.yml`の`logs`へ追記し、リザルトにタイム昇順のTOP5を表示する。今回の記録には`★`を付け、過去ベストより速ければ`更新！`を出す。ゴール中は`Esc` / パッドSTARTでメニューを出さない。
 - プレイヤーの通常移動速度は`0.12`。レース中にゴール以外の輪を通過すると、通常の前進速度へ`0.30`の速度を0.4秒間加算する。時間終了後も通常の減速幅で加算成分が滑らかに減衰し、急停止しない。次の輪を通過すると持続時間を更新する。
 - Debugビルド用ImGui（`Expo Player` / `Expo Sunlight` / `Expo Debug Camera`）：速度・ワープ操作、太陽・シャドウ・SSAO調整、およびフリーカメラ切替を行う。Releaseビルドでは表示しない。スカイドーム以外のモデルは `S_PBR` とglTF PBRマテリアルを使用し、全対象モデルが影を受ける。影の投影元は床、パンチ済みLOD2、リング、タクシーで、LOD3表示時も建物影はLOD2ベースとする。遠景LOD2は影パスに載せない。スカイドームは `S_SKYBOX`。起動既定は方位 `-170.0°`、仰角・色はHDR抽出値、強度 `2.0`、環境光倍率 `0.8`、ヨーオフセット `0`、粗さ `0.81`、金属度 `0`、シャドウ範囲 `0–20m / 20–70m / 70–160m`、バイアス `0.0005`、影の明るさ `0.25`、SSAOはON・強度 `0.85`・半径 `1.25m`・バイアス `0.04m`・Power `1.20`。
@@ -69,6 +69,7 @@ BGM / SE のパスと発火地点は
 | [`SCENE_GAME/gameaudio.cpp`](../SCENE_GAME/gameaudio.cpp) | BGM 切替と SE 再生。`LoadMP3` / `PlaySound`。欠損ファイルは無音 |
 | [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | 空飛ぶタクシーの出現、ホバー移動、描画、ホバー／ヒット／着地 SE、`Player_DrawDebug`（速度・ワープ・`スロープへ`） |
 | [`SCENE_GAME/playercamera.cpp`](../SCENE_GAME/playercamera.cpp) | 三人称、Far 2000、`Camera_Initialize`、`SetCameraPosition`、Debugビルド用 `PlayerCamera_DrawDebug`（窓名 `Expo Debug Camera`） |
+| [`SCENE_GAME/envprobe.cpp`](../SCENE_GAME/envprobe.cpp) | null2 の動的キューブマップ撮影（起動既定 512²） |
 | [`SCENE_GAME/sunlight.cpp`](../SCENE_GAME/sunlight.cpp) | 平行太陽、連動環境光、スカイドームヨー連動、`Sunlight_DrawDebug`（窓名 `Expo Sunlight`） |
 | [`SCENE_GAME/ui.cpp`](../SCENE_GAME/ui.cpp) | DrawFont HUD。タイトル、操作案内、ロード状況、メモリ |
 | [`SCENE_GAME/collision.cpp`](../SCENE_GAME/collision.cpp) | bin 読込、ワーカーベイク、格子、AABB |
@@ -90,7 +91,7 @@ BGM / SE のパスと発火地点は
 - 全LOD3常駐の解除: 全LOD3常駐は解除し、RAM／VRAM使用量を抑制。DXGI予算照会とHUDへのRAM/VRAMおよびキュー状況表示（`LOADING IMPORT ... IN n READY n GPU ...`）を行う。
 - Accessor直接デコード: 万博GLB（GLB 2.0）はワーカーでAccessor/BufferViewを直接展開し、埋め込みテクスチャ（WebP等）のCPUデコードも最大2ワーカーで並列処理する。
 - 6msタイムスライス予算: 初期ロード中の GPU化（SRV / VB / IB転送）およびリソース破棄はメインスレッドで1フレーム6ms（フェード中は最大40ms）の予算内に進める。初期完了後の GPU 転送は Present 後 3ms。頂点・インデックス・テクスチャの大きな転送はチャンク化する。
-- マテリアル結合: ワーカーが `MergePreparedMeshesByMaterial` で同一マテリアルのプリミティブを結合し、`expo_batch_id` は描画時の範囲として残す。遠景LOD2の分割プリミティブによる数百回の `DrawIndexed` を、NVIDIA dGPU の発行コスト向けに削減する。詳細は [rendering_and_lighting.md](rendering_and_lighting.md) の 5.6。
+- マテリアル結合: ワーカーが `MergePreparedMeshesByMaterial` で同一アルベドのプリミティブを結合し、遠景LOD2はさらに `CollapsePreparedMeshes(1)` でタイル1メッシュにする。`expo_batch_id` は描画時の範囲として残す。詳細は [rendering_and_lighting.md](rendering_and_lighting.md) の 5.6。
 - 停止スパイク対策（先読みとプレースホルダー）: カメラの視線方向と移動方向へ先読みしてジョブを追加し、ロード中およびGPU化中はサイズ調整済みの `cube.fbx` プレースホルダーを表示することで、新規建物ロード時の約5秒停止を解消。視線方向の棟は開始順も優先する。
 - 近接時の欠落防止: 破棄半径内のREADY状態モデルを優先してGPU化し新規インポート枠を空ける。カメラ距離判定（ロード半径 48、破棄半径 72）にはモデルXZ半径を加算する。
 - 外周ランドマークの近景補完: 日本館、パナソニック、住友館、三菱未来館などリング外側の8棟は `expo_pavilion_west_outer.glb` へ統合し、GLB内の重心を基準にLOD3を先読みする。NTT Pavilionもランドマーク半径を適用する。LOD2遠景の対応バッチは維持し、影パスへは追加しない。
@@ -129,13 +130,13 @@ BGM / SE のパスと発火地点は
 
 床、LOD2建物、未パンチLOD2遠景、近景パビリオン、大屋根リングの接続と、空飛ぶタクシーのホバー移動確認およびレースモードを目的とする。オービットカメラは使わない。
 3D Tiles の `boundingVolume.region` によるタイル単位カリングを描画時に行う。LOD3はカメラ距離でロード・破棄し、各 `Sprite3D` の描画時にはモデル単位の視錐台カリングも働く。タイル境界カリングはストリーミング判定とは分離する。
-`null2` の見た目修正はリサーチ復帰後。モデルと座標は [plateau.md](plateau.md)。
+`null2` は動的キューブマップ鏡面。モデルと座標は [plateau.md](plateau.md)。描画は [rendering_and_lighting.md](rendering_and_lighting.md)。
 
-- `Game_Initialize`: `PlayerCamera_Initialize`、`Field_Initialize`、`GameAudio_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。`GameAudio_Initialize` で散策 BGM を開始する。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
+- `Game_Initialize`: `PlayerCamera_Initialize`、`Field_Initialize`、`GameAudio_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`EnvProbe_Initialize`、`Ui_Initialize` を呼ぶ。`GameAudio_Initialize` で散策 BGM を開始する。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
 - `Game_Update`: `Field_PumpLoad`、マウスロック切替、`PlayerCamera_UpdateInput`、`Player_Update`、`Course_Update`、`PlayerCamera_Update`、`Ui_Update`、`Sunlight_Update` の順。初期完了後の `Field_PumpLoad` はインポート開始のみ。カメラ入力を先に更新し、プレイヤーが最新のヨーを使用する。メニュー開閉とコース操作は`Course_Update`で処理し、メニュー中は操作を停止する。ロック中は `game.cpp` が `Mouse_GetState` しない（相対移動量は視点側が一度だけ読む）。
-- `Game_Draw`: `Direct3D_BeginScene` でシーン色RTへ切り替え、`PlayerCamera_Draw` のあと、深度ありで `Sunlight_Apply`、注視点周辺の局所 ShadowMap（床・パンチ済みLOD2・リング・タクシーを投影。遠景LOD2は省略）、場とプレイヤーの描画を行う。続いて `Direct3D_ApplySsao` で半解像度AOをバックバッファへ合成し、マテリアルを白へ戻してから `Ui_Draw`、HUD、ゲーム内メニュー、Debugビルド用の`Player_DrawDebug` / `Sunlight_DrawDebug` / `PlayerCamera_DrawDebug`を描画する。SSAOは3D色だけを対象とし、UIには適用しない。
-- 初期ロード制御: フェードが不透明なあいだも `Field_PumpLoad` を実行し、コア初期ロード完了まで明転を保留する。描画が終わるまで同じフレームでは再ポンプしない。初期完了後の GPU ポンプは `Present` 後。
-- プレイヤー出現: `asset/model/flytaxi.glb`。読み込み後に表示長辺約0.8へ一様スケールし、`Field_GetSpawnPos()` の高度でホバーを開始する。出現時にマウスロックする。
+- `Game_Draw`: 初期ロード中は場の3DとSSAOを描かず、フェードとHUDだけにする。完了後は `Direct3D_BeginScene` でシーン色RTへ切り替え、`PlayerCamera_Draw` のあと、深度ありで `Sunlight_Apply`、注視点周辺の局所 ShadowMap（床・パンチ済みLOD2・遠景LOD2・リング・タクシーを投影。遠景はセル無しのメッシュ単位）、null2 の環境キューブ1面、場とプレイヤーの描画を行う。続いて `Direct3D_ApplySsao` で半解像度AOをバックバッファへ合成し、マテリアルを白へ戻してから `Ui_Draw`、HUD、ゲーム内メニュー、Debugビルド用の`Player_DrawDebug` / `Sunlight_DrawDebug` / `PlayerCamera_DrawDebug`を描画する。SSAOは3D色だけを対象とし、UIには適用しない。
+- 初期ロード制御: フェードが不透明なあいだも `Field_PumpLoad` を実行し、コア初期ロード完了まで明転を保留する。スカイドーム FBX は完了フラグを立てる直前（まだ3Dを描かないフレーム）に読む。描画が終わるまで同じフレームでは再ポンプしない。初期完了後の GPU ポンプは `Present` 後。
+- プレイヤー出現: `asset/model/flytaxi.glb`。読み込み後に表示長辺約0.8へ一様スケールし、`Field_GetSpawnPos()`（`-16.2099, -7.95906, -59.6799`）でホバーを開始する。出現時にマウスロックする。メニューの「スタート地点へ戻る」も同じ座標。
 - レース処理: `Course_Draw` は1つ目の座標へスタート用ビルボード、2つ目以降へカメラ方向を向く両面ビルボードを描く。マーカーは `cube.fbx` を使わない（レース開始フレームで Assimp を走らせない）。リングオブジェクトは再利用し、通過済みと遠いゲートは描画しない。スタート付近にいるときはワープしない。レースではプレイヤーの前フレーム位置から現フレーム位置への線分が、次の輪の平面を半径内で通過した場合だけ次の輪へ進む。コースの点は1つ目をスタート位置、2つ目以降を配列順の輪として使用する。レースのカウントダウン中は`Player_SetControlEnabled(false)`で移動を停止する。ゴール時は `logs` からタイムを読み、TOP5ランキングと自己ベスト更新表示を HUD に出す。BGM はモードに合わせて `gameaudio.cpp` が切り替える。 SE の一覧は [audio_needs.md](audio_needs.md)。
 - コースYAML入出力: `Course` のYAMLは`name`、`points`、`logs`で構成する。保存時に`asset/course`を作成し、新規コース名とファイル名を自動生成する。
 - 画面再描画: `PlayerCamera_Update` が毎フレーム `RequestRedraw` する。通常シーンのPresent間引きと両立させるためである。
@@ -190,7 +191,6 @@ asset/
 
 - 会場全体の`boundingVolume.region`によるタイル単位カリングは描画時のみ実装済み。未パンチLOD2遠景はタイル4枚の常駐とLOD3とのバッチ単位排他、マテリアル結合による発行削減まで実装済み。カメラ距離によるLOD3ストリーミング、範囲外破棄、近くても始まらない欠落の修正、Present後GPUポンプ、RAM／VRAM表示も実装済み。詳細は [plateau.md](plateau.md) と [rendering_and_lighting.md](rendering_and_lighting.md)。
 - 新規建物のCPUデコードはワーカーへ移す。初期ロード中のGPU／破棄は1フレーム6ms、完了後は Present 後3ms。カメラの視線方向と移動方向への先読みと、`cube.fbx` のプレースホルダー表示も実装済みである。直接デコードのUVはglTFのままとする。
-- `null2` の全面グレー問題は原因リサーチ復帰まで修正を見送る。
 - 公式データのZIPや元の`b3dm`、テクスチャは配布物へ含めない。
 - 利用条件と出典表記は [plateau.md](plateau.md) に従う。
 
@@ -198,9 +198,8 @@ asset/
 
 チェックリストおよび詳細なタスク項目は [task_list.md](task_list.md) を参照する。
 
-1. `null2` の見た目問題の調査・修正（原因リサーチ復帰後）
-2. 衝突メッシュの間引き（必要に応じて検討。詳細は [collision.md](../document_framework/collision.md)）
-3. 機体アニメーション接続（`flytaxi.glb` の旋回・加速・プロペラ等）
-4. 残りのPBR・環境拡張（IBL、昼夜サイクル、プレイヤー環境マッピング）。距離＋高度フォグは実装済み
-5. タイトル画面・リザルト画面の本実装
-6. 会場全体の調整・配布準備
+1. 衝突メッシュの間引き（必要に応じて検討。詳細は [collision.md](../document_framework/collision.md)）
+2. 機体アニメーション接続（`flytaxi.glb` の旋回・加速・プロペラ等）
+3. 残りのPBR・環境拡張（会場全体のIBL、昼夜サイクル、プレイヤー環境マッピング）。距離＋高度フォグと null2 鏡面は実装済み
+4. タイトル画面・リザルト画面の本実装
+5. 会場全体の調整・配布準備

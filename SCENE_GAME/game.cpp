@@ -6,12 +6,14 @@
 #include "playercamera.h"
 #include "renderer.h"
 #include "sunlight.h"
+#include "envprobe.h"
 #include "ui.h"
 #include "mouse.h"
 #include "fade.h"
 #include "keyboard.h"
 #include "../framework/debug_ostream.h"
 #include "imgui/imgui.h"
+#include <chrono>
 
 static bool g_PrevLeftButton = false;
 static bool g_InitialLoadNotified = false;
@@ -76,6 +78,7 @@ void Game_Initialize(void)
 	GameAudio_Initialize();
 	Course_Initialize();
 	Sunlight_Initialize();
+	EnvProbe_Initialize();
 	Ui_Initialize();
 	g_PrevLeftButton = false;
 	g_InitialLoadNotified = false;
@@ -91,10 +94,15 @@ void Game_Update(void)
 #if defined(_DEBUG)
 	Game_UpdateDebugRenderToggles();
 #endif
+	static const auto shaderTimeOrigin = std::chrono::steady_clock::now();
+	const float shaderSeconds = std::chrono::duration<float>(
+		std::chrono::steady_clock::now() - shaderTimeOrigin).count();
+	SetShaderTime(shaderSeconds);
 #if defined(_DEBUG)
 	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_PUMP);
 #endif
 	Field_PumpLoad();
+	GameAudio_Pump();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_PUMP);
 #endif
@@ -141,13 +149,13 @@ void Game_PumpAfterPresent(double lastDrawMs, float lastGpuMs)
 
 void Game_Draw(void)
 {
-	Direct3D_BeginScene();
 	if (!Field_IsLoadComplete())
 	{
 		Field_Draw();
-		Direct3D_ApplySsao();
 		return;
 	}
+
+	Direct3D_BeginScene();
 
 	PlayerCamera_Draw();
 
@@ -201,6 +209,7 @@ void Game_Draw(void)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_SHADOW);
 	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_FIELD);
 #endif
+	EnvProbe_CaptureOneFace();
 	Field_Draw();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_FIELD);
@@ -234,6 +243,7 @@ void Game_Finalize(void)
 	GameAudio_Finalize();
 	PlayerCamera_Finalize();
 	Sunlight_Finalize();
+	EnvProbe_Finalize();
 	Field_Finalize();
 	Ui_Finalize();
 }

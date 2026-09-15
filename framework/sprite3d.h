@@ -32,6 +32,8 @@ protected:
 	bool m_ReceiveShadow;
 	bool m_PhotoAlbedo;
 	bool m_MainPassCellCulling;
+	bool m_ShadowUseCells;
+	bool m_MirrorEnv;
 public:
 	Sprite3D() : Transform3D(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(1.0f, 1.0f, 1.0f)), m_Model(nullptr), m_GlbModel(nullptr), m_IsGlb(false),
 		  m_ModelSize(0.0f, 0.0f, 0.0f), m_ModelCenter(0.0f, 0.0f, 0.0f),
@@ -39,7 +41,7 @@ public:
 		  m_OriginalColor(1.0f, 1.0f, 1.0f, 1.0f), m_UseOriginalColor(true), m_ShaderType(S_UNLIT), m_CustomTexture(nullptr),
 		  m_HasRotationMatrix(false), m_RotationMatrix(XMMatrixIdentity()),
 		  m_CastShadow(false), m_ReceiveShadow(false), m_PhotoAlbedo(false),
-		  m_MainPassCellCulling(false)
+		  m_MainPassCellCulling(false), m_ShadowUseCells(true), m_MirrorEnv(false)
 	{
 	}
 
@@ -50,7 +52,7 @@ public:
 		  m_OriginalColor(1.0f, 1.0f, 1.0f, 1.0f), m_UseOriginalColor(true), m_ShaderType(st), m_CustomTexture(nullptr),
 		  m_HasRotationMatrix(false), m_RotationMatrix(XMMatrixIdentity()),
 		  m_CastShadow(false), m_ReceiveShadow(false), m_PhotoAlbedo(false),
-		  m_MainPassCellCulling(false)
+		  m_MainPassCellCulling(false), m_ShadowUseCells(true), m_MirrorEnv(false)
 	{
 		// 拡張子で読み込みを分岐
 		if (IsGlbFile(pass))
@@ -208,6 +210,41 @@ public:
 			m_GlbModel->SetMainPassCellCulling(enable);
 		}
 	}
+	void SetShadowUseCells(bool enable)
+	{
+		m_ShadowUseCells = enable;
+		if (m_GlbModel)
+		{
+			m_GlbModel->SetShadowUseCells(enable);
+		}
+	}
+	void SetMirrorEnv(bool enable)
+	{
+		m_MirrorEnv = enable;
+		if (m_GlbModel)
+		{
+			m_GlbModel->SetMirrorEnv(enable);
+		}
+	}
+	bool GetMirrorEnv(void) const { return m_MirrorEnv; }
+
+	XMFLOAT3 GetWorldCenter(void) const
+	{
+		const XMMATRIX rotation = m_HasRotationMatrix
+			? m_RotationMatrix
+			: XMMatrixRotationRollPitchYaw(
+				XMConvertToRadians(m_Rotation.x),
+				XMConvertToRadians(m_Rotation.y),
+				XMConvertToRadians(m_Rotation.z));
+		const XMMATRIX world = XMMatrixScaling(m_Scale.x, m_Scale.y, m_Scale.z)
+			* rotation
+			* XMMatrixTranslation(m_Position.x, m_Position.y, m_Position.z);
+		XMFLOAT3 worldCenter = m_Position;
+		XMStoreFloat3(
+			&worldCenter,
+			XMVector3TransformCoord(XMLoadFloat3(&m_ModelCenter), world));
+		return worldCenter;
+	}
 
 	// ShadowMapへ影(深度)を描く。静的モデル用。
 	// スキニングモデルは AnimSprite3D 側でオーバーライドする。
@@ -279,6 +316,7 @@ public:
 			{
 				m_GlbModel->SetReceiveShadow(m_ReceiveShadow);
 				m_GlbModel->SetPhotoAlbedo(m_PhotoAlbedo);
+				m_GlbModel->SetMirrorEnv(m_MirrorEnv);
 				// GlbModel::Load() 内で aiProcess_GlobalScale (100倍) 適用済みなので追加スケール不要
 				if (m_HasRotationMatrix)
 				{
@@ -346,6 +384,14 @@ public:
 		if (m_GlbModel)
 		{
 			m_GlbModel->HideBatchId(batchId);
+		}
+	}
+
+	void SetHiddenGlbBatchIds(const std::unordered_set<int>& batchIds)
+	{
+		if (m_GlbModel)
+		{
+			m_GlbModel->SetHiddenBatchIds(batchIds);
 		}
 	}
 
@@ -440,6 +486,8 @@ public:
 			m_GlbModel->SetPhotoAlbedo(m_PhotoAlbedo);
 			m_GlbModel->SetReceiveShadow(m_ReceiveShadow);
 			m_GlbModel->SetMainPassCellCulling(m_MainPassCellCulling);
+			m_GlbModel->SetShadowUseCells(m_ShadowUseCells);
+			m_GlbModel->SetMirrorEnv(m_MirrorEnv);
 		}
 		if (m_GlbModel && m_GlbModel->IsLoaded())
 		{

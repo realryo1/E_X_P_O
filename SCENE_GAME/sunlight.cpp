@@ -1,4 +1,5 @@
 ﻿#include "sunlight.h"
+#include "envprobe.h"
 #include "field.h"
 #include "main.h"
 #include "renderer.h"
@@ -51,6 +52,11 @@ static const float FOG_END_DEFAULT = 500.0f;
 static const float FOG_HEIGHT_MIN_DEFAULT = 0.0f;
 static const float FOG_HEIGHT_RANGE_DEFAULT = 60.0f;
 static const float FOG_DENSITY_DEFAULT = 2.01f;
+static const float NULL2_AMOUNT_DEFAULT = 0.05f;
+static const float NULL2_SPEED_DEFAULT = 2.5f;
+static const float NULL2_DISPLACE_DEFAULT = 0.02f;
+static const float NULL2_NORMAL_DEFAULT = 0.05f;
+static const int NULL2_CUBE_SIZE_DEFAULT = ENV_CUBE_SIZE_DEFAULT;
 // renderer.cppのShadowMap実体と同じ解像度に合わせる。
 static const float SUN_SHADOW_MAP_SIZE = 2048.0f;
 static const float SUN_SHADOW_NEAR_PROJECTION_PADDING = 8.0f;
@@ -100,6 +106,11 @@ static float g_FogEnd = FOG_END_DEFAULT;
 static float g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
 static float g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
 static float g_FogDensity = FOG_DENSITY_DEFAULT;
+static float g_Null2Amount = NULL2_AMOUNT_DEFAULT;
+static float g_Null2Speed = NULL2_SPEED_DEFAULT;
+static float g_Null2Displace = NULL2_DISPLACE_DEFAULT;
+static float g_Null2Normal = NULL2_NORMAL_DEFAULT;
+static int g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
 
 static float Saturate(float value)
 {
@@ -414,6 +425,16 @@ static void ApplySunlightState(void)
 		XMFLOAT4(g_FogColor.x, g_FogColor.y, g_FogColor.z, g_FogDensity),
 		XMFLOAT4(g_FogStart, g_FogEnd, g_FogHeightMin, g_FogHeightRange)
 	});
+	SetNull2Membrane(XMFLOAT4(
+		g_Null2Amount,
+		g_Null2Speed,
+		g_Null2Displace,
+		g_Null2Normal));
+	if (SetEnvCubeSize(g_Null2CubeSize))
+	{
+		g_Null2CubeSize = GetEnvCubeSize();
+		EnvProbe_Initialize();
+	}
 	Direct3D_SetSsaoParameters(
 		g_SsaoEnabled,
 		g_SsaoIntensity,
@@ -456,6 +477,11 @@ void Sunlight_Initialize(void)
 	g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
 	g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
 	g_FogDensity = FOG_DENSITY_DEFAULT;
+	g_Null2Amount = NULL2_AMOUNT_DEFAULT;
+	g_Null2Speed = NULL2_SPEED_DEFAULT;
+	g_Null2Displace = NULL2_DISPLACE_DEFAULT;
+	g_Null2Normal = NULL2_NORMAL_DEFAULT;
+	g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
 
 	HDRImageData hdrImage;
 	ID3D11ShaderResourceView* skyTexture = nullptr;
@@ -779,6 +805,35 @@ void Sunlight_DrawDebug(void)
 	changed |= ImGui::SliderFloat("Fog Height Min", &g_FogHeightMin, -100.0f, 200.0f, "%.1f m");
 	changed |= ImGui::SliderFloat("Fog Height Range", &g_FogHeightRange, 1.0f, 300.0f, "%.1f m");
 	changed |= ImGui::SliderFloat("Fog Density", &g_FogDensity, 0.0f, 4.0f, "%.2f");
+	ImGui::Separator();
+	ImGui::TextUnformatted("null2 Membrane");
+	changed |= ImGui::SliderFloat("null2 Amount", &g_Null2Amount, 0.0f, 0.60f, "%.3f");
+	changed |= ImGui::SliderFloat("null2 Speed", &g_Null2Speed, 0.0f, 3.0f, "%.2f");
+	changed |= ImGui::SliderFloat("null2 Displace", &g_Null2Displace, 0.0f, 0.020f, "%.4f");
+	changed |= ImGui::SliderFloat("null2 Normal", &g_Null2Normal, 0.0f, 1.00f, "%.3f");
+	{
+		static const int kCubeSizes[] = {
+			ENV_CUBE_SIZE_MIN,
+			256,
+			ENV_CUBE_SIZE_DEFAULT,
+			ENV_CUBE_SIZE_MAX
+		};
+		int cubeIndex = 2;
+		for (int i = 0; i < 4; ++i)
+		{
+			if (kCubeSizes[i] == g_Null2CubeSize)
+			{
+				cubeIndex = i;
+				break;
+			}
+		}
+		const char* cubeLabels[] = { "128", "256", "512", "1024" };
+		if (ImGui::Combo("null2 Cube Size", &cubeIndex, cubeLabels, 4))
+		{
+			g_Null2CubeSize = kCubeSizes[cubeIndex];
+			changed = true;
+		}
+	}
 	if (g_FogEnd <= g_FogStart)
 	{
 		g_FogEnd = g_FogStart + 0.1f;
@@ -867,6 +922,11 @@ void Sunlight_DrawDebug(void)
 		g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
 		g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
 		g_FogDensity = FOG_DENSITY_DEFAULT;
+		g_Null2Amount = NULL2_AMOUNT_DEFAULT;
+		g_Null2Speed = NULL2_SPEED_DEFAULT;
+		g_Null2Displace = NULL2_DISPLACE_DEFAULT;
+		g_Null2Normal = NULL2_NORMAL_DEFAULT;
+		g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
 		changed = true;
 	}
 	ImGui::End();

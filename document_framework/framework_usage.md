@@ -850,7 +850,7 @@ Releaseビルドには `SCENE_DEBUG` が含まれない。
 | `framework/main.h` | Win32 / D3D / DirectXTex 共通 include、`SAFE_DELETE`、`SetFPS` |
 | `shader/renderer.h` | 描画エンジン API、`SAFE_RELEASE`。Debug では `Direct3D_DebugStageBegin` と Map 回数 |
 
-Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。`F5` は局所影パスのオン／オフ。
+Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Idx` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` と `idx` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。`F5` は局所影パスのオン／オフ。
 
 サードパーティ（直接触らない）: `assimp/`・`freetype/`・`imgui/`・`nlohmann/`・`DirectXTex.h`・`stb_truetype.h`。
 

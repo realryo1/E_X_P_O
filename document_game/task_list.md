@@ -13,16 +13,15 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、半解像度SSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA dGPU 向けの `DrawIndexed` 削減と Present 後ストリーミングまで実装完了。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
-現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・昼夜サイクルである。距離＋高度フォグは実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
+現在保留・未着手の主要項目は、衝突メッシュ間引き、機体アニメーション、会場全体のIBL・昼夜サイクルである。距離＋高度フォグは実装済み。`null2` は動的キューブマップ鏡面を実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
 ---
 
 ## やらない／後回し
 
 - 衝突メッシュの間引きは未着手（必要に応じて検討）。
-- `null2` の全面グレー問題は原因リサーチ復帰まで触らない。
 - 機体アニメーション（`flytaxi.glb` のアニメーション接続）は未着手。
-- IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手。距離＋高度フォグは実装済み。
+- IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手。距離＋高度フォグと null2 の動的キューブマップ鏡面は実装済み。
 - `SCENE_TITLE` と `SCENE_RESULT` はプレースホルダーのまま。
 
 ---
@@ -42,13 +41,13 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `rtc-transform`: `CESIUM_RTC`と座標系・方位変換を適用する
 - [x] `near-assets`: 大屋根リングとオルソ床を近景として置く（主要パビリオンの差し替えは残す）
 - [x] `height-tune`: 建物Y `-9.010`、リングY `-1.550` で床に合わせた
-- [x] `near-pavilions`: LOD2から対象建物を面ごと除き、LOD3の全`gml:name`を英単語名の近景GLBとして重ねる。`null2` の見た目は未解決
+- [x] `near-pavilions`: LOD2から対象建物を面ごと除き、LOD3の全`gml:name`を英単語名の近景GLBとして重ねる。`null2` は動的キューブマップ鏡面
 - [x] `near-pavilions-all-names`: LOD3葉タイル63枚から124種、タイル単位で約162件を切り出し、ゲームのマニフェストへ追加した
 - [x] `near-pavilions-missing-structures`: 名前付き建物のUV無し面を保持し、ルクセンブルクの天井とオーストリアの木製モニュメントを復元した
 - [x] `near-pavilions-far-lod2`: 未パンチLOD2原本からタイル4枚の遠景補完を生成し、LOD3とバッチ単位で排他表示する
 - [x] `near-ring-texture`: CityGML `frn` の公式appearance画像とUVを大屋根リングへ結合し、複数マテリアルの埋め込みテクスチャGLBを生成した
 - [x] `hdr-sunlight`: `pizzo_pernice_puresky_4k.hdr` を輝度しきい値・4連結セグメンテーションで前処理し、抽出した太陽を平行光へ接続。`basic_skybox_3d.fbx` へ表示用HDRテクスチャを適用した
-- [ ] `near-pavilions-null2-research`: `null2` が全面グレーな原因（シグネチャー階層、別バッチ／別タイル、共有アトラスの読込）をリサーチ中。実装は止めている
+- [x] `near-pavilions-null2-research`: `null2` を金属・低粗さに上書きし、512² 動的キューブマップと膜の揺れでミラーメンブレンにする
 - [x] `player-controller`: 空飛ぶタクシー（`flytaxi.glb`）のホバー移動・視点。`Input_GetMoveVector` の前方向だけをカメラヨー基準で使用し、マウス左右で機体旋回とロール傾斜、Wの前進加減速、Space/Shiftの上下加減速とベクトル合成に対応。A/Dの横移動とSの後退は使わない。三人称は `playercamera.cpp`
 - [x] `collision-mesh`: 床・リング・LOD2建物・東西ゲート本体の CPU 三角形 AABB。リングは細い桟を除外し、ゲートは高精細形状を正としてゲートAABB内のLOD2重複判定を止め、全対象を XZ フラット格子で近傍判定
 - [x] `game-async-load`: Title→Game の初期ロード。描画GLBの直接デコード並列、GPUはチャンク転送、衝突はbinワーカー。会場全体のストリーミングとは別
@@ -61,7 +60,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `tile-streaming-cache`: 非同期ロード、キャッシュ、GPUアップロード、破棄を追加する
 - [x] `streaming-stall`: 新規建物ロード時の約5秒停止をなくす（直接GLBデコード、CPU/GPU待ち分離、GPU転送チャンク化、6ms予算、先読み、プレースホルダー）
 - [x] `streaming-nearby-miss`: 破棄半径内のREADYをGPU化し、モデルXZ半径を距離に足して近くても始まらない欠落を防ぐ
-- [x] `nvidia-d3d11-drawcall`: ハイブリッドGPUで NVIDIA だけ数fpsになる問題。原因は塗りではなく `DrawIndexed` 発行。マテリアル結合、Present後GPUポンプ、遠景LOD2の影パス除外、レース開始の `cube.fbx` 廃止。780M 互換は維持。計測はキャプションと `debug-frame-perf.log`
+- [x] `nvidia-d3d11-drawcall`: ハイブリッドGPUで NVIDIA だけ数fpsになる問題。原因は塗りではなく `DrawIndexed` 発行。マテリアル結合、遠景の1メッシュ化、Present後GPUポンプ、影はモデル結合バッファで1発行（1メッシュでも作成）、hidden 連続IB、セル分裂時は全メッシュ1発行、初期ロード中のSSAO省略。780M 互換は維持。計測はキャプションの `Idx` と `debug-frame-perf.log`
 - [x] `glb-vertex-validation`: カタール／中国を含む万博GLBのAccessor境界、インデックス上限、有限値、参照頂点AABBを検証する
 - [x] `glb-uv-coordinate-contract`: 直接デコードのUVをglTFの値のまま使用し、不要なV反転によるテクスチャずれを修正する
 - [x] `flight-hover`: `flytaxi.glb` の静的表示、カメラヨー基準の前進、マウス追従旋回、旋回時のロール傾斜、Wの前進加減速、Space/Shiftのピッチ付き上下移動を実装する

@@ -451,7 +451,7 @@ python tool/prepare_expo_pavilion.py --all-names
   保存し、タイル境界を使った描画時の視錐台カリングへ利用する
 - 実行時マニフェスト: `asset/expomodel/expo_field.txt` の `pavilion` 行（実行のたびに置き換え）
 - 当たり判定はLOD2ベースで行う。床、大屋根リング、パンチ済みLOD2、遠景LOD2を `Collision_StartAdd` へ渡す。ただし東西ゲート本体だけは高精細LOD3モデルも `Collision_StartAdd` へ渡し、プレイヤーAABBがゲートのワールドAABB内にある間は重複するLOD2判定をスキップする。それ以外のLOD3近景は描画専用とする。`asset/collision/*.bin` があれば優先して使い、無ければGLBからワーカーでベイクする
-- 現状: `null2` は全面グレーのまま。ミラーメンブレンの見た目は別リサーチとして残す
+- 現状: `null2` は写真アルベドのグレーを使わず、起動既定 512² の動的キューブマップと膜の揺れでミラーメンブレンとして描画する（解像度は Debug の ImGui で変更できる）
 - セルビア館（`gml:name`「セルビア共和国パビリオン」、`075_Serbia.jpg`）の実行時GLBは 3D Tiles アトラスの UV と埋め込み WebP アルベド、glTF の `metallicFactor` / `roughnessFactor` を持つ。metallic-roughness / normal テクスチャは公式LOD3に含まれない。写真アルベドでは金属度を 0 とし、粗さだけ会場既定と混ぜる。単体再生成は `python tool/prepare_expo_pavilion.py --name セルビア共和国パビリオン` だが、`--all-names` と同様に `expo_field.txt` の pavilion 行と LOD2 パンチを書き換えるため、マップ追加が無い限り再パックしない
 - LOD3近景はカメラ周辺、視線方向、移動方向の先読み範囲を距離ストリーミングする。開始はロード半径、GPU化は破棄半径まで進め、視線方向（半頂角60°）は半径を32足して先行する。ヒステリシス帯のREADYが新規インポートを止めない。距離判定には既知のモデルXZ半径を足す。視線先の棟は開始・GPU化の優先度を上げる。万博GLBはワーカーでGLB 2.0のAccessor/BufferViewを直接展開し、埋め込みテクスチャのCPUデコードもワーカーで行う。CPU側では同一マテリアルのプリミティブを結合し、実行時の `DrawIndexed` を減らす。初期ロード中のGPU化と破棄は1フレーム6ms、完了後は `Present` 後3ms。頂点・インデックス・テクスチャの転送はチャンク化する。GPU化中は`cube.fbx`のプレースホルダーを表示する
 - 大屋根リング外側のランドマーク（日本館、パナソニック、住友、三菱、電力館、迎賓館、ウーマンズパビリオン、JAPANマルシェ）は、同一LOD3葉タイル内のバッチを1本の `expo_pavilion_west_outer.glb` に統合する。配置RTCは元タイルRTCのまま保持し、GLBから求めたECEF重心とXZ半径をマニフェストへ別記して、リング付近からもLOD3が開始されるようにする。NTT Pavilionは個別GLBのままランドマーク半径を適用する。統合後も `MergePreparedMeshesByMaterial` とバッチ範囲描画を使い、棟数分の `DrawIndexed` を発行しない。
@@ -479,14 +479,22 @@ tool\download_expo_assets.bat
 
 この処理は公式3D Tiles、CityGML、GeoTIFFを`data_original/`へ保存し、
 LOD1/LOD2、床、大屋根リング、LOD3パビリオンをローカル生成する。
+ゲーム起動時に `asset/expomodel/` が無い、または空なら確認ウィンドウを出し、
+「はい」でゲームを終了して同じバッチを起動する。
+変換完了後は `data_*` の実測サイズ（GB）を出し、一時フォルダを消すか確認する。
 `data_original/`、`data_converted/`、`asset/expomodel/`、万博用の衝突バイナリは
 公開リポジトリへ含めない。配布ZIPにもモデル本体は含めず、変換ツールだけを同梱する。
 
-`expo_pavilion_better_co_being.glb`はBlenderのDecimateで約40%の三角形数へ
-削減されていたため、公開環境ではBlenderを要求せず、`meshoptimizer`を使う
-`tool/simplify_glb.cjs`で`tool/expo_simplify.json`の比率（`0.43`）を再現する。
-位置共有化後の出力は約21.97万面となり、現行の約21.92万面に合わせている。
-BlenderのDecimateとアルゴリズムは同一ではないため、同じ視覚結果を保証するものではない。
+`prepare_expo_pavilion.py`が書いた`expo_pavilion_better_co_being.glb`へ、
+公開環境ではBlenderを要求せず、`meshoptimizer`を使う`tool/simplify_glb.cjs`が
+`tool/expo_simplify.json`の島内比率（`0.43`）で上書きする。
+このモデルは三角形ごとに頂点が分かれており、位置だけで全頂点を共有すると
+同じ座標の別UVが混ざる。UV差が小さい隣接点だけを島としてつなぎ、中実な島だけ削減する。
+ほぼ全頂点が穴の縁である網目は面を減らさず、位置とUVが同じ頂点だけ結合する。
+穴の縁は`LockBorder`で固定する。
+全体の面数は網目を残すため変換直後に近く、旧来の約40%削減とは一致しない。
+BlenderのDecimateとアルゴリズムは同一ではない。
+ゲームのマニフェストは`expo_pavilion_better_co_being.glb`を参照する。
 
 ## 7. 実行時アセットと配置
 
@@ -561,7 +569,7 @@ ENUなしだと地面が傾き、`Y_UP_TO_Z_UP`なしだと建物が横倒しに
 
 - `tileset.json`のLOD選択と、LOD3ストリーミングへの`boundingVolume`連携
 - CityGML `dem` による起伏
-- `null2` の見た目（リサーチ中。実装は止めている）
+- `null2` のミラーメンブレン（起動既定 512² 動的キューブマップと膜の揺れ。実装済み）
 
 複数タイルの相対配置とENU水平化は実装済みである。読み込み済みの各 `Sprite3D` には
 モデルサイズから求めた境界球による保守的な視錐台カリングを適用する。

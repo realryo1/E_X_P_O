@@ -2,6 +2,7 @@
 
 void GameAudio_Initialize(void);
 void GameAudio_Finalize(void);
+void GameAudio_Pump(void);
 void GameAudio_SetBgmExplore(void);
 void GameAudio_SetBgmRace(void);
 void GameAudio_SetBgmGoal(void);
