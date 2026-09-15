@@ -55,7 +55,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `collision-bin`: 描画と衝突の分離（`asset/collision/*.bin`）。仕様は [collision.md](../document_framework/collision.md)
 - [x] `model-frustum-culling`: `Sprite3D` でモデルサイズから境界球を作り、カメラの Near / Far と視錐台外のモデルを描画しない
 - [x] `memory-budget-profiling`: モデル、メッシュ、テクスチャ、RAM／VRAM使用量とロードキューを計測する（HUDとDXGI予算照会を追加）
-- [ ] `collision-simplify`: LOD2建物の衝突メッシュ間引きは未（リングの桟除外は実装済み）
+- [-] ~~`collision-simplify`: LOD2建物の衝突メッシュ間引きは未~~（やらない）
 - [x] `tile-culling`: 3D Tiles の`boundingVolume.region`による描画時のタイル単位カリングを追加（LOD2本体と遠景LOD2。ストリーミング判定とは分離）
 - [x] `runtime-lod`: 距離ベースのLOD3選択と範囲外破棄を追加する（`geometricError`切り替えは未実装）
 - [x] `tile-streaming-cache`: 非同期ロード、キャッシュ、GPUアップロード、破棄を追加する
@@ -65,13 +65,13 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `glb-vertex-validation`: カタール／中国を含む万博GLBのAccessor境界、インデックス上限、有限値、参照頂点AABBを検証する
 - [x] `glb-uv-coordinate-contract`: 直接デコードのUVをglTFの値のまま使用し、不要なV反転によるテクスチャずれを修正する
 - [x] `flight-hover`: `flytaxi.glb` の静的表示、カメラヨー基準の前進、マウス追従旋回、旋回時のロール傾斜、Wの前進加減速、Space/Shiftのピッチ付き上下移動を実装する
-- [ ] `world-tuning`: 遠景LODと近景アセットを組み合わせて会場全体を調整する
+- [x] `world-tuning`: 遠景LODと近景アセットを組み合わせて会場全体を調整する
 - [x] skydome
 - [x] `pbr-sun-directional`: HDR輝度抽出による平行太陽と連動環境光。場のモデル・プレースホルダ・タクシーを `S_PBR` 化。スカイドームはHDRを表示用変換した `S_SKYBOX`。方位既定値は `-170.0°` で、HDR抽出方位との差分により見た目の太陽位置を維持する。DebugビルドのみImGui `Expo Sunlight`
-- [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–10m / 10–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーはメッシュ全体を使う
+- [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–20m / 20–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーはメッシュ全体を使う
 - [x] `ssao-crevice`: シーン色を中間RTへ描き、サンプル可能な深度から半解像度SSAOと深度依存ぼかしを生成して3D色へ合成。`Expo Sunlight` から強度・半径・バイアス・カーブを調整でき、UIはAO対象外
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
-- [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手
+- [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能
 - [x] `billboard-course-race`: `SCENE_GAME` 内にフリー飛行・コース作成・レースを追加。`P`配置、`asset/course/*.yml`保存、`asset/texture/makulogo.png`のビルボード輪、カウントダウン、タイマー、通過判定、ゴールログに対応
 - [x] `game-menu-input`: `SCENE_GAME` のコース操作をImGuiからゲーム内メニューへ移行。`Esc` / パッドSTARTで開閉し、ClickFont・矢印キー・決定入力でフリー飛行、レース、コース作成を操作。新規コース名は自動生成し、ReleaseビルドではPlayer/SunlightのDebug ImGuiを表示しない
@@ -79,8 +79,8 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `separate-expo-assets`: 万博モデルを`asset/expomodel`へ分離し、規約同意付き`tool/download_expo_assets.bat`でローカル生成する
 - [x] 大屋根リング外側の日本館や企業館のモデルがしょぼい問題の修正（外周8棟のLOD3統合、重心基準ストリーミング、NTTランドマーク半径。DrawIndexed増加を抑制）
 - [ ] GLB直接読み込み失敗の謎に迫る
-- [ ] タイトル、リザルトをまともに
-- [ ] アプリアイコン差し替え（手動）
+- [x] タイトル、リザルトをまともに
+- [x] アプリアイコン差し替え（手動）
 - [x] 諸々整備してgithubへ上げる（手動）
 
 ---
@@ -96,4 +96,4 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 | [collision.md](../document_framework/collision.md) | 当たり判定と衝突バイナリ |
 | [framework_usage.md](../document_framework/framework_usage.md) | フレームワーク API、起動、ループ |
 | [input.md](../document_framework/input.md) | 入力アクション |
-| [copylight.md](../document_framework/copylight.md) | 素材の権利表記 |
+| [copylight.md](../document_game/copylight.md) | 素材の権利表記 |

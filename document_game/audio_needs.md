@@ -2,7 +2,7 @@
 
 再生は `SCENE_GAME/gameaudio.cpp` が行い、決定入力の SE だけはフレームワーク側でも鳴る。
 `LoadMP3` が失敗したパスは無音のまま進む。
-権利は [copylight.md](../document_framework/copylight.md)、再生 API は [framework_usage.md](../document_framework/framework_usage.md) の Sound 節。
+権利は [copylight.md](../document_game/copylight.md)、再生 API は [framework_usage.md](../document_framework/framework_usage.md) の Sound 節。
 パスに `bgm` を含むファイルは BGM 扱いになる。
 
 ## 役割分担

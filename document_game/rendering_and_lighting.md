@@ -2,7 +2,7 @@
 
 ## 1. この資料の目的
 
-この資料は、`expogame` における万博会場（`SCENE_GAME`）の3D描画パイプライン、HDR画像のプリプロセスから抽出する平行太陽光、連動環境光、GGXベースのPBRシェーディング、全モデルが受影し建物はLOD2を投影元とする近傍シャドウマップ、HDRを表示用に変換したスカイドーム、および ImGui によるリアルタイム調整の設計と実装仕様を整理する。
+この資料は、`expogame` における万博会場（`SCENE_GAME`）の3D描画パイプライン、HDR画像のプリプロセスから抽出する平行太陽光、連動環境光、GGXベースのPBRシェーディング、全モデルが受影し建物はLOD2を投影元とする近傍シャドウマップ、半解像度SSAO、HDRを表示用に変換したスカイドーム、および ImGui によるリアルタイム調整の設計と実装仕様を整理する。
 
 全体仕様は [game_specification.md](game_specification.md)、タスク進捗は [task_list.md](task_list.md)、会場都市モデルは [plateau.md](plateau.md)、フレームワーク仕様は [../document_framework/framework_usage.md](../document_framework/framework_usage.md) を参照する。
 
@@ -49,7 +49,7 @@ flowchart TD
 2. **`SetDepthEnable(true)`**: 3D 用深度ステンシルステートおよびフル解像度ビューポート（3840×2160）を適用。
 3. **`Sunlight_Apply`**: 起動時の方位 `-170.0°`、HDRから抽出した仰角・色、既定強度 `2.00`（いずれもImGuiで変更可能）から平行光定数バッファ（`g_LightBuffer` / `b4`）およびマテリアルパラメータ（`g_ParameterBuffer` / `b6`）を設定し、スカイドームの回転角度を更新。
 4. **近傍シャドウマップ作成パス**:
-   - `Sunlight_BeginLocalShadow`: カメラ視錐台を3段（既定 `0–10m / 10–70m / 70–160m`）に分け、各段の直交投影ライトカメラを構築。テクセル整列スナップを行い、カスケード0の深度ビューへ切り替える。アクネ防止のため `CULLSTATE_FRONT`（前面カリング＝裏面深度書き込み）を設定。
+   - `Sunlight_BeginLocalShadow`: カメラ視錐台を3段（既定 `0–20m / 20–70m / 70–160m`）に分け、各段の直交投影ライトカメラを構築。テクセル整列スナップを行い、カスケード0の深度ビューへ切り替える。アクネ防止のため `CULLSTATE_FRONT`（前面カリング＝裏面深度書き込み）を設定。
    - `Field_DrawLocalShadow` と `Player_DrawLocalShadow`: 床、パンチ済みLOD2、大屋根リング、空飛ぶタクシーをカスケードごとに `S_SHADOW_MAP` で深度バッファへ描画する。遠景LOD2は画面上の影への寄与が小さく、プリミティブ分割による `DrawIndexed` が増えるため影パスでは省略する。LOD3パビリオンとプレースホルダーは影を受けるが投影しない。会場GLBは近傍XZセルでカリングし、タクシーはメッシュ全体を投影する。
    - `Sunlight_EndLocalShadow`: 通常の画面レンダーターゲットへ復帰し、カリングを `CULLSTATE_NONE` に戻す。3スライスの深度テクスチャ配列をピクセルシェーダーの `t1`、サンプラーを `s1` にバインド。
 5. **メイン描画パス**:
@@ -184,22 +184,22 @@ GLBはモデルごとの glTF `metallicFactor` / `roughnessFactor` と、存在�
 
 ```mermaid
 flowchart LR
-  focus["カメラの視錐台"] --> lightCam["3段直交ライトカメラ<br>(0–10m / 10–70m / 70–160m)"]
+  focus["カメラの視錐台"] --> lightCam["3段直交ライトカメラ<br>(0–20m / 20–70m / 70–160m)"]
   subgraph snap ["テクセル整列スナップ"]
-    lightCam --> texelCalc["テクセルサイズ計算<br>(投影幅 ÷ 4096px)"]
+    lightCam --> texelCalc["テクセルサイズ計算<br>(投影幅 ÷ 2048px)"]
     texelCalc --> snapPos["ライト座標系で丸め込み<br>(影のちらつき・ジッター解消)"]
   end
   subgraph cellCull ["LOD2会場GLB XZ セルカリング"]
     snapPos --> aabbOverlap["各カスケードの影範囲と<br>LOD2各セルの交差判定"]
     aabbOverlap --> drawCells["重なるセルのみ DrawIndexed<br>(描画負荷を数万ポリゴン以下に抑制)"]
   end
-  drawCells --> shadowTex["g_ShadowMap (4096×4096×3 深度)"]
+  drawCells --> shadowTex["g_ShadowMap (2048×2048×3 深度)"]
   shadowTex --> pcf["カメラ深度で段を選択<br>→ 3x3 PCF"]
 ```
 
 ### 5.1 直交ライトカメラとテクセル整列スナップ
 
-- **カスケード分割**: カメラ視錐台の深度を `0–10m / 10–70m / 70–160m` に分割する。各段を同じ `4096×4096` で描くため、近距離ほどワールド単位のテクセル密度が高くなる。
+- **カスケード分割**: カメラ視錐台の深度を `0–20m / 20–70m / 70–160m` に分割する。各段を同じ `2048×2048` で描くため、近距離ほどワールド単位のテクセル密度が高くなる。
 - **第1段の高精度化**: 第1カスケードだけ投影余白を `8m` に制限し、第2・第3段の `24m` より狭い投影範囲で10m以内を描画する。会場モデルの影投射元を取りこぼさないよう、セルカリング用の余白は別に `24m` を確保する。
 - **投影範囲**: 各カスケードの視錐台スライスをライト空間へ変換し、必要な範囲を正方形の直交投影へ収める。最終段の終端距離（既定 `160m`）より遠い場所は影なしとする。
 - **テクセルスナップ（Subpixel Shimmering 対策）**:
@@ -228,8 +228,8 @@ flowchart LR
 - **シャドウパラメータ (`ShadowParam` / `b8`)**:
   - `ShadowParam.x`: 深度バイアス（`g_ShadowBias` = 0.0005）。
   - `ShadowParam.y`: 影部分の最小明るさ（`g_ShadowBrightness` = 0.25）。0.0で完全な黒、1.0で影なし。
-  - `CascadeSplits.xyz`: カメラ深度による各カスケードの終端距離（既定 `10m / 70m / 160m`）。
-  - `CascadeTexelSize.xyz`: 各カスケードの1テクセル分の UV サイズ（`1.0 / 4096.0`）。
+  - `CascadeSplits.xyz`: カメラ深度による各カスケードの終端距離（既定 `20m / 70m / 160m`）。
+  - `CascadeTexelSize.xyz`: 各カスケードの1テクセル分の UV サイズ（`1.0 / 2048.0`）。
 - **境界外処理**: サンプラー `g_ShadowSampler` のアドレッシングモードは `BORDER`（境界色 1.0f）。また UV 範囲外（0～1 外）および投影深度外の画素は自動的に `1.0f`（影なし）を返すため、近傍シャドウの境界外へ移動しても破綻や不自然な黒帯が発生しない。
 
 ### 5.4 `Parameter.w` による受信の排他制御
@@ -310,19 +310,23 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 | **b6** | `g_ParameterBuffer` | `XMFLOAT4` | `ParameterBuffer` | x: Roughness（または packed 時の roughnessFactor）, y: Metallic（または metallicFactor）, z: TexMode, **w: ReceiveShadow** |
 | **b7** | `g_PlayerLightBuffer` | `LIGHT[3]` | `PlayerLightBuffer` | PBR 3点照明（現在は未使用・単一ライトフォールバック） |
 | **b8** | `g_ShadowBuffer` | `SHADOW_CONSTANT` | `ShadowBuffer` | 3段分のライト行列 `LightViewProjection[3]`、カスケード境界、深度バイアス、影輝度 |
+| **b10** | `g_SsaoBuffer` | `SSAO_CONSTANT` | `SsaoBuffer` | 逆射影行列、AOサンプルのテクセルサイズ・半径・バイアス、強度・カーブ |
 
 ### シェーダーリソースビュー (SRV) & サンプラー
 
 | スロット | リソース種別 | 変数名 | 用途 |
 | :--- | :--- | :--- | :--- |
 | **t0** | `Texture2D` | `g_Texture` | モデルのベースカラーテクスチャ（未設定時は白テクスチャ） |
-| **t1** | `Texture2DArray` | `g_ShadowMap` | 4096×4096×3 カスケードシャドウマップ深度テクスチャ |
+| **t1** | `Texture2DArray` | `g_ShadowMap` | 2048×2048×3 カスケードシャドウマップ深度テクスチャ |
 | **t2** | `Texture2D` | `g_NormalMap` | 法線マップ（TexMode >= 0.5） |
 | **t3** | `Texture2D` | `g_MetallicMap` | メタリック（独立 .r、または packed ORM の同一テクスチャ） |
 | **t4** | `Texture2D` | `g_RoughnessMap` | ラフネス（独立 .r。packed 時は t3 と同じ SRV） |
 | **t5** | `Texture2D` | `g_EmissiveMap` | エミッシブ（TexMode >= 0.5。未設定時は黒） |
 | **s0** | `SamplerState` | `g_SamplerState` | 通常テクスチャサンプラー（リニア・ラップ） |
 | **s1** | `SamplerState` | `g_ShadowSampler` | シャドウマップ専用サンプラー（ポイント・ボーダー色 白） |
+
+SSAOの後処理シェーダーでは `t0` / `t1` を後処理用に再利用する。
+`SsaoPS` は深度SRV、`SsaoBlurPS` はAOと深度、`SsaoCompositePS` はシーン色とAOを読む。
 
 ---
 
@@ -351,6 +355,11 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 | **Shadow Cascade 3 End (Draw Distance)** | `g_ShadowRadius` | 16.0 ～ 320.0 | `160.0` | 第3カスケードの終端距離。これより遠い場所は影なし |
 | **Shadow Bias** | `g_ShadowBias` | 0.0005 ～ 0.0200 | `0.0005` | シャドウアクネ防止用深度バイアス |
 | **Shadow Brightness** | `g_ShadowBrightness` | 0.00 ～ 1.00 | `0.25` | 影内部の直接光最小輝度（値が小さいほど濃い影） |
+| **SSAO** | `g_SsaoEnabled` | ON / OFF | ON | 画面空間AOの有効・無効 |
+| **SSAO Intensity** | `g_SsaoIntensity` | 0.00 ～ 1.00 | `0.85` | AOの合成強度 |
+| **SSAO Radius** | `g_SsaoRadius` | 0.10 ～ 4.00 m | `1.25 m` | 深度サンプルを探すワールド半径 |
+| **SSAO Bias** | `g_SsaoBias` | 0.001 ～ 0.200 m | `0.04 m` | 同一面を遮蔽とみなさない深度差 |
+| **SSAO Power** | `g_SsaoPower` | 0.50 ～ 3.00 | `1.20` | AOカーブ。大きいほど暗部を強調 |
 | **Reset ボタン** | - | - | - | 上記全パラメータを起動既定値に復元 |
 
 ※ `F2` スクリーンショット撮影中はデバッグ表示が自動的に抑止される。
@@ -361,8 +370,8 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 
 | ファイルパス | 役割 |
 | :--- | :--- |
-| [`SCENE_GAME/sunlight.h`](../SCENE_GAME/sunlight.h) / [`.cpp`](../SCENE_GAME/sunlight.cpp) | HDR輝度しきい値・4連結セグメンテーションによる太陽抽出、太陽光・環境光パラメータ管理、3段CSMの直交ライトカメラ構築、テクセルスナップ、デバッグ ImGui |
-| [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | `Game_Draw` 内での3段シャドウ深度パス実行とメインシーン描画の制御。`Game_PumpAfterPresent`。Debug の `F5` で影パス切替 |
+| [`SCENE_GAME/sunlight.h`](../SCENE_GAME/sunlight.h) / [`.cpp`](../SCENE_GAME/sunlight.cpp) | HDR輝度しきい値・4連結セグメンテーションによる太陽抽出、太陽光・環境光・SSAOパラメータ管理、3段CSMの直交ライトカメラ構築、テクセルスナップ、デバッグ ImGui |
+| [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | `Game_Draw` 内での3段シャドウ深度パス、シーン色RTへの3D描画、SSAO合成、UI描画の制御。`Game_PumpAfterPresent`。Debug の `F5` で影パス切替 |
 | [`SCENE_GAME/field.h`](../SCENE_GAME/field.h) / [`.cpp`](../SCENE_GAME/field.cpp) | 各モデルのシェーダー・シャドウ受発信フラグ、`Field_PumpLoad` / `Field_PumpAfterPresent`、マテリアル結合の呼び出し、`Field_SetSkyboxTexture` / `Field_SetSkyboxYaw`、影パス描画（遠景LOD2省略） |
 | [`SCENE_GAME/course.cpp`](../SCENE_GAME/course.cpp) | レース輪とスタートマーカーのビルボード再利用、距離カリング |
 | [`framework/glb_model.h`](../framework/glb_model.h) / [`.cpp`](../framework/glb_model.cpp) | 万博 GLB のマテリアル結合（`MergePreparedMeshesByMaterial`）、XZ セル空間分割（`PrepareShadowCells`）、バッチ範囲描画、シャドウカリング描画（`DrawShadowMap`）、`Parameter.w` 設定 |
@@ -372,7 +381,10 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 | [`shader/PBRShaderPS.hlsl`](../shader/PBRShaderPS.hlsl) | GGX 反射計算、直接光への影乗算、環境光との加算合成、距離＋高度フォグ。床とリングで式は共通 |
 | [`shader/SkyboxTextureVS.hlsl`](../shader/SkyboxTextureVS.hlsl) / [`shader/SkyboxTexturePS.hlsl`](../shader/SkyboxTexturePS.hlsl) | スカイドーム専用。ワールド方向から正距円筒UVを計算してHDR表示テクスチャをサンプル |
 | [`shader/Common.hlsl`](../shader/Common.hlsl) | `CalcShadow`（3×3 PCF、深度バイアス、ボーダー処理）、`ApplyFog`（距離＋高度フォグ） |
-| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | `BeginShadowMap`, `EndShadowMap`, `SetShadowMatrix`, `SetParameterW`, `SetFog`、定数バッファ管理 |
+| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | `BeginShadowMap`, `EndShadowMap`, `SetShadowMatrix`, `SetParameterW`, `SetFog`, `Direct3D_BeginScene`, `Direct3D_ApplySsao`、中間RT・深度SRV・定数バッファ管理 |
+| [`shader/SsaoVS.hlsl`](../shader/SsaoVS.hlsl)、[`shader/SsaoPS.hlsl`](../shader/SsaoPS.hlsl) | 半解像度の深度サンプリングと近傍遮蔽の推定 |
+| [`shader/SsaoBlurVS.hlsl`](../shader/SsaoBlurVS.hlsl)、[`shader/SsaoBlurPS.hlsl`](../shader/SsaoBlurPS.hlsl) | 深度差を重みにしたAOの近傍ぼかし |
+| [`shader/SsaoCompositeVS.hlsl`](../shader/SsaoCompositeVS.hlsl)、[`shader/SsaoCompositePS.hlsl`](../shader/SsaoCompositePS.hlsl) | シーン色へのAO合成。2D UIは対象外 |
 | [`framework/texture.h`](../framework/texture.h) / [`.cpp`](../framework/texture.cpp) | DirectXTexのHDR読み込み、解析用float画素の提供、Reinhard表示用SRV生成 |
 | [`tool/prepare_expo_floor.py`](../tool/prepare_expo_floor.py) | オルソ床 GLB 生成。法線は ECEF 三角形 |
 | [`tool/expo_glb_util.py`](../tool/expo_glb_util.py) | `bake_ecef_triangle_normals_gltf` / `rewrite_glb_normals_from_triangles` |
