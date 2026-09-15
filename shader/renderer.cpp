@@ -131,9 +131,7 @@ static float g_ClientHeight = DRAW_SCREEN_Y;
 
 // バックバッファ情報（リサイズ時に参照）
 static D3D11_TEXTURE2D_DESC g_BackBufferDesc;
-// 3Dシーンはウィンドウ実サイズから分離し、4Kでも1080p相当で描いて最後に拡大する。
-static const UINT kInternal3DMaxWidth = 1920;
-static const UINT kInternal3DMaxHeight = 1080;
+// 3Dシーン色・深度はバックバッファと同じ解像度（ドットバイドット）。
 static UINT g_SceneWidth = 1;
 static UINT g_SceneHeight = 1;
 
@@ -622,20 +620,8 @@ static void CreateSsaoQuad(void)
 
 static void UpdateInternalSceneSize(void)
 {
-	const UINT backWidth = (std::max)(1u, g_BackBufferDesc.Width);
-	const UINT backHeight = (std::max)(1u, g_BackBufferDesc.Height);
-	if (backWidth <= kInternal3DMaxWidth && backHeight <= kInternal3DMaxHeight)
-	{
-		g_SceneWidth = backWidth;
-		g_SceneHeight = backHeight;
-		return;
-	}
-
-	const float scale = (std::min)(
-		static_cast<float>(kInternal3DMaxWidth) / static_cast<float>(backWidth),
-		static_cast<float>(kInternal3DMaxHeight) / static_cast<float>(backHeight));
-	g_SceneWidth = (std::max)(1u, static_cast<UINT>(backWidth * scale + 0.5f));
-	g_SceneHeight = (std::max)(1u, static_cast<UINT>(backHeight * scale + 0.5f));
+	g_SceneWidth = (std::max)(1u, g_BackBufferDesc.Width);
+	g_SceneHeight = (std::max)(1u, g_BackBufferDesc.Height);
 }
 
 static UINT GetSsaoWidth(void)

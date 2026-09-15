@@ -625,10 +625,10 @@ SCENE_DEBUG
 `--gpu=high` は同じ高性能選択を明示する。D3D11 デバイスと
 `CreateSwapChainForHwnd()` による Flip モデルのスワップチェーンを作成する。スワップチェーンは
 2 枚のバックバッファ（`DXGI_SWAP_EFFECT_FLIP_DISCARD`）を持ち、`configureBackBuffer()` が
-各バックバッファの RTV、最大 1920×1080 のシーン色中間RT、シーンの 1/4 解像度 AO RT、および
+各バックバッファの RTV、バックバッファと同じ解像度のシーン色中間RT、シーンの 1/4 解像度 AO RT、および
 シーン解像度の `R24G8_TYPELESS` 深度バッファを生成する。深度バッファは
 `D24_UNORM_S8_UINT` のDSVと `R24_UNORM_X8_TYPELESS` のSRVを同じリソースから作る。
-バックバッファと深度のサイズが違うため、Present 後はバックバッファだけをバインドする。
+Present 後はバックバッファだけをバインドする。
 
 ウィンドウサイズ変更時は `Direct3D_ResizeWindow()` でクライアントサイズを記録した後、
 `Direct3D_Resize()` が `ResizeBuffers()` とバックバッファ／深度バッファの再生成を行う。
@@ -674,7 +674,7 @@ PumpAfterPresent(lastDrawMs, lastGpuMs);
 静止した通常シーンは `NeedsPresent` が偽なら `Clear` / `Present` を間引く。動いたフレームは `RequestRedraw`。
 処理順の詳細は [起動とメインループ](#起動とメインループ)。
 
-`Direct3D_ApplySsao()` は3D描画色へだけ画面空間AOを合成する。AOは既定オフで、オン時はシーンの 1/4 解像度。オフ時は生成を省略し内部RTをバックバッファへ拡大するだけである。
+`Direct3D_ApplySsao()` は3D描画色へだけ画面空間AOを合成する。AOは既定オフで、オン時はシーンの 1/4 解像度。オフ時は生成を省略し内部RTをバックバッファへコピーするだけである。
 `SsaoPS` の近傍遮蔽、`SsaoBlurPS` の深度依存ぼかし、`SsaoCompositePS` の
 色合成を順に行い、2D HUD / Font / ImGuiはAOの影響を受けない。
 調整値は `Direct3D_SetSsaoParameters()` で設定し、ゲーム側では

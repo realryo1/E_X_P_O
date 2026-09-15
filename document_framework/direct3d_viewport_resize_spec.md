@@ -86,11 +86,11 @@
 - 2 枚すべてのバックバッファ用 `RenderTargetView`
 - 現在のバックバッファインデックス（`IDXGISwapChain3::GetCurrentBackBufferIndex()`）
 - `g_BackBufferDesc`
-- バックバッファ実サイズを上限 1920×1080 に収めた内部シーン幅・高さ
-- 内部シーンサイズの深度ステンシルバッファ / ビューとシーン色 RT
-- バックバッファ全体を覆う 2D 用ビューポート。3D は内部シーンサイズ
+- バックバッファ実サイズと一致する内部シーン幅・高さ
+- シーンサイズの深度ステンシルバッファ / ビューとシーン色 RT
+- バックバッファ全体を覆う 2D 用ビューポート。3D もシーン＝バックバッファサイズ
 
-したがって、`DRAW_SCREEN_X` × `DRAW_SCREEN_Y`（3840 × 2160）は論理的な基準アスペクトであり、バックバッファの固定サイズではない。3D の塗りは内部解像度、UI はウィンドウ実サイズである。
+したがって、`DRAW_SCREEN_X` × `DRAW_SCREEN_Y`（3840 × 2160）は論理的な基準アスペクトであり、バックバッファの固定サイズではない。3D と UI はいずれもウィンドウ実サイズでドットバイドットに描く。
 
 ### 3.2 `Direct3D_Resize(UINT width, UINT height)`（公開）
 
@@ -113,7 +113,7 @@
 
 `g_RenderTargetView` は現在描画するバックバッファ 1 枚を指すエイリアスである。`Present()` が成功すると
 `GetCurrentBackBufferIndex()` の値を読み直し、次の描画先へ `OMSetRenderTargets()` で切り替える。
-バックバッファと深度の解像度は一致しない。Present 後および 2D はバックバッファ RTV のみをバインドし、サイズの違う RT+DSV を同時に付けない。3D は `Direct3D_BeginScene()` で内部シーン色とシーン深度へ切り替える。
+Present 後および 2D はバックバッファ RTV のみをバインドする。3D は `Direct3D_BeginScene()` でシーン色とシーン深度へ切り替える。シーン色・深度はバックバッファと同じ解像度である。
 
 ## 4. ウィンドウサイズ変更時の流れ
 
@@ -139,7 +139,7 @@
 
 ### 3D
 - `SetDepthEnable(true)` → 内部で `Direct3D_SetViewport3D()`
-- 内部シーン解像度（最大 1920×1080）へ描画し、カメラ Projection でターゲットアスペクトのカバー表示を行う
+- バックバッファと同じ解像度へ描画し、カメラ Projection でターゲットアスペクトのカバー表示を行う
 
 ※ 旧ドキュメントの `SetDepthTest` は現行では `SetDepthEnable`。
 

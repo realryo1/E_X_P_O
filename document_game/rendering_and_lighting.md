@@ -34,7 +34,7 @@ flowchart TD
     taxiDraw["空飛ぶタクシー (S_PBR, Cast/Receive=ON)"]
     skyboxDraw --> floorDraw --> tileDraw --> ringDraw --> taxiDraw
   end
-  ssaoPass["7. 内部解像度のシーン色をバックバッファへ合成<br>(SSAOは既定オフ。オン時は1/4解像度AO)"]
+  ssaoPass["7. シーン色をバックバッファへ合成<br>(SSAOは既定オフ。オン時は1/4解像度AO)"]
   subgraph uiPass ["8. UI & デバッグ描画"]
     uiReset["Ui_ResetMaterial"]
     depthDisable["SetDepthEnable(false)"]
@@ -59,9 +59,9 @@ flowchart TD
 6. **メイン描画パス**:
    - `Field_Draw`: スカイドーム、床、LOD2タイル、遠景LOD2、LOD3パビリオン、プレースホルダー、リングの順で描画する。各モデルは `S_PBR` でglTF PBRマテリアルを処理し、最終色へ距離＋高度フォグを適用する。null2 は `TexMode >= 2.5` で t6 のキューブを反射サンプルする。
    - `Player_Draw`: 空飛ぶタクシー（`flytaxi.glb`）を描画。
-7. **内部解像度と画面空間アンビエントオクルージョン（SSAO）**:
-   - スワップチェーンはウィンドウ実サイズ。3Dのシーン色と深度は最大 1920×1080 に抑え、最後にバックバッファへ拡大する。UI は実ウィンドウ解像度。
-   - SSAO の起動既定はオフ。オフ時は AO 生成とぼかしを走らせず、合成パスだけを拡大に使う。オン時の AO はシーンの 1/4 解像度。
+7. **画面空間アンビエントオクルージョン（SSAO）**:
+   - スワップチェーンはウィンドウ実サイズ。3Dのシーン色と深度も同じ解像度でドットバイドットに描き、合成パスでバックバッファへコピーする。UI も実ウィンドウ解像度。
+   - SSAO の起動既定はオフ。オフ時は AO 生成とぼかしを走らせず、合成パスだけをコピーに使う。オン時の AO はシーンの 1/4 解像度。
    - `Expo Sunlight` の `SSAO`、`SSAO Intensity`、`SSAO Radius`、`SSAO Bias`、`SSAO Power` で調整できる。AOは3D色だけに適用し、HUD / ImGuiは対象外とする。
 8. **2D・UI・デバッグパス**:
    - `Ui_ResetMaterial`: マテリアル色を白（ディフューズ 1.0）へ戻す。
@@ -401,7 +401,7 @@ SSAOの後処理シェーダーでは `t0` / `t1` を後処理用に再利用す
 | [`framework/sprite3d.h`](../framework/sprite3d.h) | `SetCastShadow` / `SetReceiveShadow` フラグ管理、シャドウパス分岐 |
 | [`shader/PBRShaderVS.hlsl`](../shader/PBRShaderVS.hlsl) | `Parameter.w` に応じたライト空間座標計算。null2 は膜の頂点変位 |
 | [`shader/PBRShaderPS.hlsl`](../shader/PBRShaderPS.hlsl) | GGX 反射計算、直接光への影乗算、環境光との加算合成、距離＋高度フォグ。`TexMode >= 2.5` でキューブ鏡面。床とリングで式は共通 |
-| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | GPU アダプタ選択、内部 3D 解像度、`BeginShadowMap`, `EndShadowMap`, `BeginEnvCubeFace`, `EndEnvCubeFace`, `SetShadowMatrix`, `SetParameterW`, `SetFog`, `Direct3D_BeginScene`, `Direct3D_ApplySsao`、中間RT・深度SRV・定数バッファ管理。GPU タイムスタンプは Release でも有効 |
+| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | GPU アダプタ選択、シーンRT（バックバッファと同解像度）、`BeginShadowMap`, `EndShadowMap`, `BeginEnvCubeFace`, `EndEnvCubeFace`, `SetShadowMatrix`, `SetParameterW`, `SetFog`, `Direct3D_BeginScene`, `Direct3D_ApplySsao`、中間RT・深度SRV・定数バッファ管理。GPU タイムスタンプは Release でも有効 |
 | [`shader/SkyboxTextureVS.hlsl`](../shader/SkyboxTextureVS.hlsl) / [`shader/SkyboxTexturePS.hlsl`](../shader/SkyboxTexturePS.hlsl) | スカイドーム専用。ワールド方向から正距円筒UVを計算してHDR表示テクスチャをサンプル |
 | [`shader/Common.hlsl`](../shader/Common.hlsl) | `CalcShadow`（3×3 PCF、深度バイアス、ボーダー処理）、`ApplyFog`（距離＋高度フォグ） |
 | [`shader/SsaoVS.hlsl`](../shader/SsaoVS.hlsl)、[`shader/SsaoPS.hlsl`](../shader/SsaoPS.hlsl) | シーンの 1/4 解像度で深度をサンプリングし近傍遮蔽を推定する |
