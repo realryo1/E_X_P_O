@@ -27,6 +27,9 @@
 using namespace DirectX;
 
 static const int EXPO_TILE_MAX = 8;
+static const int EXPO_GATE_COLLISION_COUNT = 2;
+static const int EXPO_COLLISION_TARGET_MAX =
+	2 + EXPO_TILE_MAX * 2 + EXPO_GATE_COLLISION_COUNT;
 static const char* EXPO_TILE_SET_LOD2_PATH = "asset\\expomodel\\expo_tiles_lod2.txt";
 static const char* EXPO_FIELD_PATH = "asset\\expomodel\\expo_field.txt";
 static const char* EXPO_MODEL_LOD2_PATH = "asset\\expomodel\\expo_tile_lod2.glb";
@@ -177,7 +180,7 @@ static bool g_TriedFallbackLod1 = false;
 static bool g_CollisionFinished = false;
 static int g_CollisionSlot = 0;
 static int g_CollisionTargetCount = 0;
-static int* g_CollisionTargets[2] = {};
+static int* g_CollisionTargets[EXPO_COLLISION_TARGET_MAX] = {};
 static XMFLOAT3 g_PreviousCameraPos = { 0.0f, 0.0f, 0.0f };
 static bool g_HasPreviousCameraPos = false;
 static XMFLOAT3 g_PrefetchPosition = { 0.0f, 0.0f, 0.0f };
@@ -987,6 +990,13 @@ static XMMATRIX MakeWorldAt(const XMFLOAT3& position, const XMMATRIX& rotation)
 	return XMMatrixScaling(EXPO_MODEL_SCALE, EXPO_MODEL_SCALE, EXPO_MODEL_SCALE)
 		* rotation
 		* XMMatrixTranslation(position.x, position.y, position.z);
+}
+
+static bool IsHighDetailGatePath(const char* path)
+{
+	return path &&
+		(strstr(path, "expo_pavilion_east_gate.glb") != nullptr ||
+		 strstr(path, "expo_pavilion_west_gate.glb") != nullptr);
 }
 
 static void ApplyFixedYOffsets(void)
@@ -1840,13 +1850,35 @@ static void KickoffLoad(void)
 	g_CollisionSlot = 0;
 	g_CollisionTargetCount = 0;
 	g_CollisionFinished = false;
+	auto QueueCollision = [](const ExpoTileDesc& desc, int* target) -> bool
+	{
+		if (!FileExists(desc.path) ||
+			g_CollisionTargetCount >= EXPO_COLLISION_TARGET_MAX)
+		{
+			return false;
+		}
+		XMFLOAT3 position = RtcToWorldPosition(g_TileSet, desc, g_EcefToEnu);
+		position.y += EXPO_BUILDING_Y_OFFSET;
+		if (!Collision_StartAdd(
+			desc.path,
+			MakeWorldAt(position, g_MeshRotation),
+			false))
+		{
+			return false;
+		}
+		g_CollisionTargets[g_CollisionTargetCount++] = target;
+		return true;
+	};
 	if (g_HasEcefToEnu && g_HasMeshRotation)
 	{
 		if (g_TileSet.hasFloor && FileExists(g_TileSet.floor.path))
 		{
 			XMFLOAT3 position = RtcToWorldPosition(g_TileSet, g_TileSet.floor, g_EcefToEnu);
 			position.y -= EXPO_FLOOR_SINK;
-			if (Collision_StartAdd(g_TileSet.floor.path, MakeWorldAt(position, g_MeshRotation)))
+			if (Collision_StartAdd(
+				g_TileSet.floor.path,
+				MakeWorldAt(position, g_MeshRotation),
+				false))
 			{
 				g_CollisionTargets[g_CollisionTargetCount++] = &g_FloorCollisionId;
 			}
@@ -1854,9 +1886,30 @@ static void KickoffLoad(void)
 		if (g_TileSet.hasRing && FileExists(g_TileSet.ring.path))
 		{
 			const XMFLOAT3 position = RtcToWorldPosition(g_TileSet, g_TileSet.ring, g_EcefToEnu);
-			if (Collision_StartAdd(g_TileSet.ring.path, MakeWorldAt(position, g_MeshRotation)))
+			if (Collision_StartAdd(
+				g_TileSet.ring.path,
+				MakeWorldAt(position, g_MeshRotation),
+				true))
 			{
 				g_CollisionTargets[g_CollisionTargetCount++] = &g_RingCollisionId;
+			}
+		}
+		if (g_HasLod2)
+		{
+			for (int i = 0; i < g_TileSet.count; ++i)
+			{
+				QueueCollision(g_TileSet.tiles[i], nullptr);
+			}
+		}
+		for (int i = 0; i < g_TileSet.farCount; ++i)
+		{
+			QueueCollision(g_TileSet.farTiles[i], nullptr);
+		}
+		for (const ExpoTileDesc& pavilion : g_TileSet.pavilions)
+		{
+			if (IsHighDetailGatePath(pavilion.path))
+			{
+				QueueCollision(pavilion, nullptr);
 			}
 		}
 	}
@@ -2015,6 +2068,8 @@ void Field_GetLoadStatus(char* out, size_t outSize)
 			strcpy_s(col, " 衝突");
 		}
 	}
+	char collisionSource[512] = {};
+	Collision_GetSourceStatus(collisionSource, sizeof(collisionSource));
 
 	char failure[128] = {};
 	if (failedJob)
@@ -2036,6 +2091,15 @@ void Field_GetLoadStatus(char* out, size_t outSize)
 		ready,
 		extra,
 		col);
+	if (collisionSource[0] != '\0')
+	{
+		const size_t used = strlen(out);
+		if (used + strlen(collisionSource) + 2 < outSize)
+		{
+			strcat_s(out, outSize, " ");
+			strcat_s(out, outSize, collisionSource);
+		}
+	}
 	if (failure[0] != '\0')
 	{
 		const size_t used = strlen(out);
@@ -2055,10 +2119,12 @@ void Field_GetFinishedStatus(char* out, size_t outSize)
 
 	if (g_HasEcefToEnu && HasAnyModel())
 	{
+		char collisionSource[512] = {};
+		Collision_GetSourceStatus(collisionSource, sizeof(collisionSource));
 		sprintf_s(
 			out,
 			outSize,
-			"PLATEAU 万博 / 床 %s / LOD2 %d/%d / 遠景 %d/%d / パビリオン %d/%d / リング %s",
+			"PLATEAU / 床 %s / LOD2 %d/%d / 遠 %d/%d / パビ %d/%d / 輪 %s / %s",
 			g_ExpoFloor ? "あり" : "なし",
 			g_LoadedTiles,
 			g_ExpectedTiles,
@@ -2066,7 +2132,8 @@ void Field_GetFinishedStatus(char* out, size_t outSize)
 			g_ExpectedFarTiles,
 			g_LoadedPavilions,
 			g_ExpectedPavilions,
-			g_ExpoRing ? "あり" : "なし");
+			g_ExpoRing ? "あり" : "なし",
+			collisionSource);
 		return;
 	}
 	if (g_FallbackLod == 2)
@@ -2432,7 +2499,15 @@ void Field_DrawLocalShadow(
 			model->DrawShadowMap(lightView, lightProjection, focus, radius);
 		}
 	}
-	// 遠景LOD2は画面上の影への寄与が小さいため、影パスでは省略する。
+	// パンチ済みLOD2から抜けたパビリオン・企業館は、未パンチ遠景LOD2が影を落とす。
+	// DrawShadowMap は hidden batch を無視するため、LOD3表示中もLOD2影を維持する。
+	for (Sprite3D* model : g_ExpoFarTiles)
+	{
+		if (model)
+		{
+			model->DrawShadowMap(lightView, lightProjection, focus, radius);
+		}
+	}
 	if (g_ExpoRing)
 	{
 		g_ExpoRing->DrawShadowMap(lightView, lightProjection, focus, radius);

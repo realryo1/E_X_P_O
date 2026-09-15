@@ -128,6 +128,15 @@ public:
 		m_Far = far_;
 		SetAspect(m_Aspect);
 	}
+	void SetFov(float fov)
+	{
+		if (fov <= 0.0f)
+		{
+			return;
+		}
+		m_Fov = fov;
+		SetAspect(m_Aspect);
+	}
 	void SkipNextInput(int frames = 2) { m_skipInputFrames = frames; }
 };
 
@@ -150,4 +159,5 @@ float Camera_GetSensitivity();
 // カメラ距離設定
 void Camera_SetDistance(float dist);
 void Camera_SetFar(float far_);
+void Camera_SetFov(float fov);
 void Camera_SetAspect(float aspect);

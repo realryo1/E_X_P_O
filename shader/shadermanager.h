@@ -28,6 +28,9 @@ enum SHADERTYPE {
 	S_TOON1,
 	S_TOON2,
 	S_SKYBOX,		// ワールド方向からHDR正距円筒UVを計算するスカイドーム用。
+	S_SSAO,
+	S_SSAO_BLUR,
+	S_SSAO_COMPOSITE,
 	S_MAX,
 };
 
@@ -53,7 +56,10 @@ const std::string filenames[S_MAX] = {
 	"SpotLighting",
 	"Toon1",
 	"Toon2",
-	"SkyboxTexture"
+	"SkyboxTexture",
+	"Ssao",
+	"SsaoBlur",
+	"SsaoComposite"
 };
 
 class ShaderManager

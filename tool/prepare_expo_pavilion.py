@@ -26,6 +26,7 @@ TOOL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOL_DIR))
 
 import prepare_expo_model as expo_model  # noqa: E402
+from prepare_collision import export_collision_bin  # noqa: E402
 from expo_glb_util import write_field_manifest, write_glb  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -674,6 +675,11 @@ def strip_names_from_lod2(names: list[str], node_command: str) -> list[dict[str,
             split_batch=True,
         )
         far_runtime_glb.write_bytes(far_converted_glb.read_bytes())
+        try:
+            export_collision_bin(runtime_glb)
+            export_collision_bin(far_runtime_glb)
+        except (OSError, KeyError, ValueError, struct.error) as exc:
+            print(f"LOD2衝突binの生成をスキップ: {exc}")
         rtc = expo_model.parse_rtc_center(
             (meta.get("extracted") or {}).get("rtc_center")
         ) or [0.0, 0.0, 0.0]
@@ -923,6 +929,17 @@ def main() -> int:
     if not written:
         print("一致するバッチを切り出せませんでした")
         return 1
+
+    for runtime_rel, _rtc, _mode, file_name, _name, _stream_center, _stream_radius in written:
+        if file_name not in {
+            "expo_pavilion_east_gate.glb",
+            "expo_pavilion_west_gate.glb",
+        }:
+            continue
+        try:
+            export_collision_bin(PROJECT_ROOT / runtime_rel)
+        except (OSError, KeyError, ValueError, struct.error) as exc:
+            print(f"{file_name} 衝突binの生成をスキップ: {exc}")
 
     first_rtc = written[0][1]
     lod2_far = [

@@ -19,5 +19,6 @@ void Player_SetMoveSpeed(float speed);
 void Player_ResetMoveSpeed(void);
 void Player_WarpToStart(void);
 void Player_WarpTo(DirectX::XMFLOAT3 pos);
+void Player_SetFacingYaw(float yaw);
 void Player_SetControlEnabled(bool enabled);
 void Player_ActivateDash(void);

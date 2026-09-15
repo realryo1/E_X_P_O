@@ -10,13 +10,13 @@
 
 ## 1. いまできること
 
-- 当たる対象は床と大屋根リングだけ。建物・パビリオンには当たらない。
-- 実行時は描画GLBを Assimp で再インポートしない。`asset/collision/*.bin` を fread し、ワーカーでワールド変換と XZ 格子を一括構築する。
+- 当たる対象は床、大屋根リング、LOD2建物、東西ゲート本体。東西ゲートだけは `expo_pavilion_east_gate.glb` / `expo_pavilion_west_gate.glb` の高精細形状を使い、そのワールドAABB内では重複するLOD2衝突を無効にする。それ以外のLOD3パビリオンは衝突対象にせずLOD2形状へ当てる。
+- 実行時は `asset/collision/*.bin` を優先して fread し、bin が無いときだけ対応する描画GLBを Assimp で読み込む。どちらもワーカーでワールド変換と XZ 格子を一括構築する。
 - 実動作の近傍判定は格子参照だけで、計測ではおよそ 300us。
 - リングの確定 Y オフセット `-1.550` は、ロード完了時の `Collision_SetWorld` が `yBias` だけずらす。実行時の高さスライダーは無い。
 - bin が無いときだけ描画GLBへフォールバックする（Assimp は三角形化・左手化・GlobalScale のみ。頂点結合はしない）。
 
-間引きによる簡略メッシュは未導入。bin の三角形数は描画GLBと同じ（リングは約 90.6 万）。
+LOD2建物の間引きによる簡略メッシュは未導入。リングだけ細い桟を除外する。bin の三角形数は元GLBと同じ（リングは約 90.6 万）。
 
 ゲームのできることと操作は [game_specification.md](../document_game/game_specification.md)。
 次の作業は [task_list.md](../document_game/task_list.md)。
@@ -31,12 +31,15 @@
 フェード明け
   ├─ Collision_StartAdd(floor)  沈み込み済みのワールド行列
   ├─ Collision_StartAdd(ring)   RTC 位置のワールド行列
+  ├─ Collision_StartAdd(LOD2)   建物Yオフセット込み
+  ├─ Collision_StartAdd(LOD2 far) パビリオン穴の遠景補完
+  └─ Collision_StartAdd(東西ゲート) 高精細形状
   └─ 描画GLBは別ワーカーで直接デコード
         │
         ▼
 ワーカー（1本、キュー順）
-  bin fread → ローカル三角形化 → ワールド変換
-  → リングなら格子桟を捨てる → XZ フラット格子
+  bin fread（無ければ Assimp）→ ローカル三角形化 → ワールド変換
+  → リングだけ格子桟を捨てる → XZ フラット格子
         │
         ▼
 Collision_Pump が完成メッシュを g_Meshes へ移す
@@ -47,16 +50,21 @@ Collision_Pump が完成メッシュを g_Meshes へ移す
         │
         ▼
 Player_Update が出現したあと Collision_MoveAABB
+  高精細ゲートのAABB内ではLOD2をスキップ
 ```
 
 パス規約: `asset\model\X.glb` または `asset\expomodel\X.glb` →
 `asset\collision\X.bin`。
-現行ファイルは次の2つ。
+現行ファイルは床、リング、LOD2タイル、LOD2遠景タイル、東西ゲート高精細メッシュ。
 
 | 描画 | 衝突 |
 | :--- | :--- |
 | `asset/expomodel/expo_floor.glb` | `asset/collision/expo_floor.bin` |
 | `asset/expomodel/expo_ring.glb` | `asset/collision/expo_ring.bin` |
+| `asset/expomodel/expo_tile_lod2_dataN.glb` | `asset/collision/expo_tile_lod2_dataN.bin` |
+| `asset/expomodel/expo_tile_lod2_far_dataN.glb` | `asset/collision/expo_tile_lod2_far_dataN.bin` |
+| `asset/expomodel/expo_pavilion_east_gate.glb` | `asset/collision/expo_pavilion_east_gate.bin` |
+| `asset/expomodel/expo_pavilion_west_gate.glb` | `asset/collision/expo_pavilion_west_gate.bin` |
 
 床はロード時に `EXPO_FLOOR_SINK`（0.08）を位置へ含めて焼く。
 リングは RTC 位置で焼き、確定オフセット `-1.550` は完了後の `yBias`。
@@ -66,9 +74,11 @@ Player_Update が出現したあと Collision_MoveAABB
 ## 3. API
 
 ```cpp
-bool Collision_StartAdd(const char* glbPath, const XMMATRIX& world);
+bool Collision_StartAdd(
+    const char* glbPath, const XMMATRIX& world, bool filterLattice);
 CollisionPumpResult Collision_Pump(int* outMeshId);
 void Collision_GetPumpProgress(size_t* done, size_t* total, int* stage);
+void Collision_GetSourceStatus(char* out, size_t outSize);
 void Collision_SetWorld(int meshId, const XMMATRIX& world);
 void Collision_Clear(void);
 bool Collision_GetBounds(int meshId, XMFLOAT3* bmin, XMFLOAT3* bmax);
@@ -77,12 +87,19 @@ bool Collision_MoveAABB(
     XMFLOAT3* outCenter, bool* grounded);
 ```
 
-`Collision_StartAdd` は複数回呼べる。ワーカーはキューを順に処理する。
+`Collision_StartAdd` は複数回呼べる。第3引数 `filterLattice` はリングだけ `true` にし、ワーカーはキューを順に処理する。
 `Collision_Pump` は完成したメッシュを1つ取り出す。戻り値は `IDLE` / `BUSY` / `DONE` / `FAILED`。
 進捗の `stage` は `LOAD` / `TRANSFORM` / `GRID`。
 
 `Collision_SetWorld` は線形部分と XZ が同じなら Y 差分だけ `yBias` に足す。
 それ以外はメインスレッドで再ベイクする。固定リングオフセットはこの Y 専用経路を一度使う。
+
+`Collision_MoveAABB` は高精細ゲートのワールドAABBとプレイヤーAABBが重なる間、
+通常LOD2および遠景LOD2の三角形を判定対象から外す。これにより、ゲートの通過口で
+LOD2の同一形状が高精細ゲートへ重なって通行を阻害することを防ぐ。ゲートAABB外では
+LOD2の衝突を通常どおり維持する。
+
+HUD の `衝突 AABB 床:BIN リング:BIN` 表示で、各メッシュが bin と GLB のどちらから読み込まれたかを確認できる。
 
 `Collision_Clear` はワーカーを合流してから全メッシュを捨てる。シーン終了で呼ぶ。
 
@@ -106,7 +123,7 @@ Y 正方向へ戻したときだけ接地として扱う。プレイヤー側で
 
 ## 5. リングの格子除外
 
-三角形数が 64 以上のメッシュ（現行はリングだけ）は、ワールド変換のあと `KeepRingCollisionTriangle` で残す。
+リングだけ、三角形数に関係なくワールド変換のあと `KeepRingCollisionTriangle` で残す。LOD2建物・床にはこのフィルタを適用しない。
 
 | 条件 | 残す面 |
 | :--- | :--- |
@@ -123,7 +140,7 @@ Y 正方向へ戻したときだけ接地として扱う。プレイヤー側で
 64 三角形未満は全走査。それ以上は XZ の密配列（CSR）にする。
 
 - セル辺は 0.4 から始め、総セルが 200 万を超えたら辺を倍にしてやり直す。
-- 1 三角形が 64 セルを超えると `largeTris` へ逃がし、毎フレーム見る。
+- リングは 64 セル、LOD2建物・床は 256 セルを超えると `largeTris` へ逃がし、毎フレーム見る。
 - セル内は `cellStart` / `cellItems`。ハッシュマップは使わない。
 - 参照時はプレイヤー AABB が重なるセルと `largeTris` だけを見る。同一三角形は `visitStamp` で一度だけ。
 
@@ -154,7 +171,7 @@ Y 平行移動は格子を作り直さない。
 | 20 | `float3 × 頂点数` | POSITION |
 | 続く | `uint32 × 三角形数 × 3` | インデックス |
 
-現行サイズの目安: リング約 28MB、床 92 バイト。
+現行サイズの目安: リング約 28MB、床 92 バイト。LOD2はタイルごとに生成される。
 
 ---
 
@@ -163,7 +180,7 @@ Y 平行移動は格子を作り直さない。
 ツールは [`tool/prepare_collision.py`](../tool/prepare_collision.py)（標準ライブラリのみ）。
 GLB の JSON / BIN を直接読み、ノード行列を累積して `mode == 4` のプリミティブから POSITION と indices を出す。
 
-既定（リングと床）:
+既定（リング、床、存在するLOD2タイル／遠景タイル、東西ゲート）:
 
 ```powershell
 python tool/prepare_collision.py
@@ -177,8 +194,8 @@ python tool/prepare_collision.py asset/model/foo.glb
 
 出力先は既定で `asset/collision/<stem>.bin`。`--output-dir` で変えられる。
 
-`prepare_expo_ring.py` と `prepare_expo_floor.py` の末尾からも同じ関数を呼ぶ。
-描画GLBを作り直したら bin も更新される。
+`prepare_expo_ring.py` と `prepare_expo_floor.py` の末尾からも同じ関数を呼ぶ。`prepare_expo_pavilion.py` はパンチ済みLOD2と遠景LOD2を生成したあと、それぞれのbinも生成する。
+描画GLBを作り直したら bin も更新される。bin が無くてもゲームはGLBフォールバックで動く。
 
 リング／床の描画GLBには `NORMAL` を焼いてある。衝突 bin には法線を入れない。
 リングのテクスチャは衝突と無関係で、描画GLBを更新したときだけ同じGLBからbinを再生成する。
@@ -190,7 +207,7 @@ python tool/prepare_collision.py asset/model/foo.glb
 | ファイル | 役割 |
 | :--- | :--- |
 | [`SCENE_GAME/collision.h`](../SCENE_GAME/collision.h) | API |
-| [`SCENE_GAME/collision.cpp`](../SCENE_GAME/collision.cpp) | 読込、ベイク、格子、AABB |
+| [`SCENE_GAME/collision.cpp`](../SCENE_GAME/collision.cpp) | bin/GLB読込、ベイク、格子、AABB |
 | [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | ホバー移動、衝突押し出し、ImGui `スロープへ` |
 | [`SCENE_GAME/field.cpp`](../SCENE_GAME/field.cpp) | ロード時の `StartAdd`、固定Yオフセット |
 | [`tool/prepare_collision.py`](../tool/prepare_collision.py) | GLB → EXCL |
@@ -200,6 +217,5 @@ python tool/prepare_collision.py asset/model/foo.glb
 ## 10. まだやらないこと
 
 - 衝突メッシュの間引き
-- 建物・パビリオンへの当たり
 - 物理エンジン
 - 会場ストリーミング用の動的コリジョン

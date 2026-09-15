@@ -11,7 +11,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 ## いまここ
 
-会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA dGPU 向けの `DrawIndexed` 削減と Present 後ストリーミングまで実装完了。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、半解像度SSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA dGPU 向けの `DrawIndexed` 削減と Present 後ストリーミングまで実装完了。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
 現在保留・未着手の主要項目は、`null2` の見た目リサーチ、衝突メッシュ間引き、機体アニメーション、IBL・昼夜サイクルである。距離＋高度フォグは実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
@@ -50,12 +50,12 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `hdr-sunlight`: `pizzo_pernice_puresky_4k.hdr` を輝度しきい値・4連結セグメンテーションで前処理し、抽出した太陽を平行光へ接続。`basic_skybox_3d.fbx` へ表示用HDRテクスチャを適用した
 - [ ] `near-pavilions-null2-research`: `null2` が全面グレーな原因（シグネチャー階層、別バッチ／別タイル、共有アトラスの読込）をリサーチ中。実装は止めている
 - [x] `player-controller`: 空飛ぶタクシー（`flytaxi.glb`）のホバー移動・視点。`Input_GetMoveVector` の前方向だけをカメラヨー基準で使用し、マウス左右で機体旋回とロール傾斜、Wの前進加減速、Space/Shiftの上下加減速とベクトル合成に対応。A/Dの横移動とSの後退は使わない。三人称は `playercamera.cpp`
-- [x] `collision-mesh`: 床とリングの CPU 三角形 AABB。リングは XZ フラット格子で近傍のみ
+- [x] `collision-mesh`: 床・リング・LOD2建物・東西ゲート本体の CPU 三角形 AABB。リングは細い桟を除外し、ゲートは高精細形状を正としてゲートAABB内のLOD2重複判定を止め、全対象を XZ フラット格子で近傍判定
 - [x] `game-async-load`: Title→Game の初期ロード。描画GLBの直接デコード並列、GPUはチャンク転送、衝突はbinワーカー。会場全体のストリーミングとは別
 - [x] `collision-bin`: 描画と衝突の分離（`asset/collision/*.bin`）。仕様は [collision.md](../document_framework/collision.md)
 - [x] `model-frustum-culling`: `Sprite3D` でモデルサイズから境界球を作り、カメラの Near / Far と視錐台外のモデルを描画しない
 - [x] `memory-budget-profiling`: モデル、メッシュ、テクスチャ、RAM／VRAM使用量とロードキューを計測する（HUDとDXGI予算照会を追加）
-- [ ] `collision-simplify`: 衝突メッシュの間引きは未
+- [ ] `collision-simplify`: LOD2建物の衝突メッシュ間引きは未（リングの桟除外は実装済み）
 - [x] `tile-culling`: 3D Tiles の`boundingVolume.region`による描画時のタイル単位カリングを追加（LOD2本体と遠景LOD2。ストリーミング判定とは分離）
 - [x] `runtime-lod`: 距離ベースのLOD3選択と範囲外破棄を追加する（`geometricError`切り替えは未実装）
 - [x] `tile-streaming-cache`: 非同期ロード、キャッシュ、GPUアップロード、破棄を追加する
@@ -69,6 +69,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] skydome
 - [x] `pbr-sun-directional`: HDR輝度抽出による平行太陽と連動環境光。場のモデル・プレースホルダ・タクシーを `S_PBR` 化。スカイドームはHDRを表示用変換した `S_SKYBOX`。方位既定値は `-170.0°` で、HDR抽出方位との差分により見た目の太陽位置を維持する。DebugビルドのみImGui `Expo Sunlight`
 - [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–10m / 10–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーはメッシュ全体を使う
+- [x] `ssao-crevice`: シーン色を中間RTへ描き、サンプル可能な深度から半解像度SSAOと深度依存ぼかしを生成して3D色へ合成。`Expo Sunlight` から強度・半径・バイアス・カーブを調整でき、UIはAO対象外
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
 - [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手
 - [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能

@@ -1,11 +1,13 @@
 ﻿#include "course.h"
 #include "gameaudio.h"
 #include "player.h"
+#include "playercamera.h"
 #include "billboard.h"
 #include "sprite2d.h"
 #include "font.h"
 #include "camera.h"
 #include "MultiLineClickFont.h"
+#include "MultiLineDrawFont.h"
 #include "define.h"
 #include "keyboard.h"
 #include "input_manager.h"
@@ -82,7 +84,11 @@ namespace
 	DrawFont* g_pTimerText = nullptr;
 	DrawFont* g_pCountdownText = nullptr;
 	DrawFont* g_pGoalText = nullptr;
+	DrawFont* g_pGoalUpdateText = nullptr;
+	MultiLineDrawFont* g_pGoalRankingText = nullptr;
 	DrawFont* g_pGoalHintText = nullptr;
+	Sprite2D* g_pGoalBackground = nullptr;
+	bool g_GoalRecordUpdated = false;
 	DrawFont* g_pCourseHintText = nullptr;
 	DrawFont* g_pMenuTitleText = nullptr;
 	DrawFont* g_pMenuHintText = nullptr;
@@ -531,6 +537,114 @@ namespace
 		return text;
 	}
 
+	bool ParseLogCentiseconds(const std::string& log, int& outCentiseconds)
+	{
+		const size_t space = log.rfind(' ');
+		if (space == std::string::npos || space + 1 >= log.size())
+		{
+			return false;
+		}
+
+		int minutes = 0;
+		int seconds = 0;
+		int centiseconds = 0;
+		if (sscanf_s(
+			log.c_str() + space + 1,
+			"%d:%d:%d",
+			&minutes,
+			&seconds,
+			&centiseconds) != 3)
+		{
+			return false;
+		}
+		if (minutes < 0 || seconds < 0 || centiseconds < 0)
+		{
+			return false;
+		}
+
+		outCentiseconds = minutes * 6000 + seconds * 100 + centiseconds;
+		return true;
+	}
+
+	void RefreshGoalRanking(void)
+	{
+		g_GoalRecordUpdated = false;
+		if (!g_pGoalRankingText)
+		{
+			return;
+		}
+
+		struct RankEntry
+		{
+			int centiseconds;
+			size_t logIndex;
+		};
+
+		std::vector<RankEntry> entries;
+		entries.reserve(g_RaceCourse.logs.size());
+		for (size_t i = 0; i < g_RaceCourse.logs.size(); ++i)
+		{
+			int centiseconds = 0;
+			if (!ParseLogCentiseconds(g_RaceCourse.logs[i], centiseconds))
+			{
+				continue;
+			}
+			entries.push_back({ centiseconds, i });
+		}
+
+		int previousBest = -1;
+		const size_t currentIndex =
+			g_RaceCourse.logs.empty() ? 0 : g_RaceCourse.logs.size() - 1;
+		int currentCentiseconds = 0;
+		const bool hasCurrent = ParseLogCentiseconds(
+			g_RaceCourse.logs.empty() ? std::string() : g_RaceCourse.logs.back(),
+			currentCentiseconds);
+		for (const RankEntry& entry : entries)
+		{
+			if (entry.logIndex == currentIndex)
+			{
+				continue;
+			}
+			if (previousBest < 0 || entry.centiseconds < previousBest)
+			{
+				previousBest = entry.centiseconds;
+			}
+		}
+		g_GoalRecordUpdated =
+			hasCurrent &&
+			(previousBest < 0 || currentCentiseconds < previousBest);
+
+		std::sort(
+			entries.begin(),
+			entries.end(),
+			[](const RankEntry& a, const RankEntry& b)
+			{
+				if (a.centiseconds != b.centiseconds)
+				{
+					return a.centiseconds < b.centiseconds;
+				}
+				return a.logIndex < b.logIndex;
+			});
+
+		std::ostringstream ranking;
+		ranking << "ランキング TOP5";
+		const int showCount = (std::min)(5, static_cast<int>(entries.size()));
+		for (int i = 0; i < showCount; ++i)
+		{
+			ranking << "\n" << (i + 1) << "位  "
+				<< FormatRaceTime(entries[i].centiseconds / 100.0);
+			if (hasCurrent && entries[i].logIndex == currentIndex)
+			{
+				ranking << "  ★";
+			}
+		}
+		if (showCount == 0)
+		{
+			ranking << "\n記録なし";
+		}
+		g_pGoalRankingText->SetText(ranking.str());
+	}
+
 	std::string GetTimestamp(void)
 	{
 		const std::time_t currentTime = std::time(nullptr);
@@ -600,6 +714,7 @@ namespace
 			g_Courses[g_SelectedCourse].logs = g_RaceCourse.logs;
 		}
 
+		RefreshGoalRanking();
 		Player_SetControlEnabled(true);
 		g_Mode = CourseMode::RaceGoal;
 		GameAudio_PlayGoal();
@@ -632,6 +747,17 @@ namespace
 			Player_WarpTo(startPosition);
 			GameAudio_PlayWarp();
 		}
+
+		const XMFLOAT3 firstRing = g_RaceCourse.points[1];
+		const float faceDx = firstRing.x - startPosition.x;
+		const float faceDz = firstRing.z - startPosition.z;
+		if (faceDx * faceDx + faceDz * faceDz > 0.0001f)
+		{
+			const float faceYaw = XMConvertToDegrees(atan2f(faceDx, faceDz));
+			PlayerCamera_SetLookAngles(faceYaw, 20.0f);
+			Player_SetFacingYaw(faceYaw);
+		}
+
 		Player_SetControlEnabled(false);
 		g_LastPlayerPos = startPosition;
 		g_CountdownStarted = std::chrono::steady_clock::now();
@@ -1137,20 +1263,43 @@ void Course_Initialize(void)
 		{ 1.0f, 0.9f, 0.3f, 1.0f },
 		"",
 		TA_MIDDLE);
+	g_pGoalBackground = new Sprite2D(
+		{ SCREEN_X * 0.5f, 370.0f },
+		{ 520.0f, 490.0f },
+		0.0f,
+		{ 0.0f, 0.0f, 0.0f, 0.55f },
+		BLENDSTATE_ALFA,
+		L"asset\\texture\\fade.png");
 	g_pGoalText = new DrawFont(
-		{ SCREEN_X * 0.5f, SCREEN_Y * 0.35f },
-		72.0f,
+		{ SCREEN_X * 0.5f, 200.0f },
+		64.0f,
 		0.0f,
 		{ 1.0f, 0.9f, 0.3f, 1.0f },
 		"ゴール",
 		TA_MIDDLE);
+	g_pGoalUpdateText = new DrawFont(
+		{ SCREEN_X * 0.5f, 248.0f },
+		40.0f,
+		0.0f,
+		{ 1.0f, 0.35f, 0.2f, 1.0f },
+		"更新！",
+		TA_MIDDLE);
+	g_pGoalRankingText = new MultiLineDrawFont(
+		{ SCREEN_X * 0.5f, 295.0f },
+		28.0f,
+		0.0f,
+		{ 1.0f, 1.0f, 1.0f, 1.0f },
+		"",
+		1.35f,
+		TA_MIDDLE);
 	g_pGoalHintText = new DrawFont(
-		{ SCREEN_X * 0.5f, SCREEN_Y * 0.48f },
+		{ SCREEN_X * 0.5f, 575.0f },
 		28.0f,
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
 		"決定で散策に戻る",
 		TA_MIDDLE);
+	g_GoalRecordUpdated = false;
 	g_pCourseHintText = new DrawFont(
 		{ SCREEN_X * 0.5f, 25.0f },
 		22.0f,
@@ -1198,8 +1347,12 @@ void Course_Finalize(void)
 	SAFE_DELETE(g_StartMarker);
 	SAFE_DELETE(g_pTimerText);
 	SAFE_DELETE(g_pCountdownText);
+	SAFE_DELETE(g_pGoalBackground);
 	SAFE_DELETE(g_pGoalText);
+	SAFE_DELETE(g_pGoalUpdateText);
+	SAFE_DELETE(g_pGoalRankingText);
 	SAFE_DELETE(g_pGoalHintText);
+	g_GoalRecordUpdated = false;
 	SAFE_DELETE(g_pCourseHintText);
 	SAFE_DELETE(g_pMenuTitleText);
 	SAFE_DELETE(g_pMenuHintText);
@@ -1212,7 +1365,8 @@ void Course_Finalize(void)
 
 void Course_Update(void)
 {
-	if (Input_IsActionTrigger(INPUT_ACTION_PAUSE))
+	if (Input_IsActionTrigger(INPUT_ACTION_PAUSE) &&
+		!(g_Mode == CourseMode::RaceGoal && !g_MenuOpen))
 	{
 		if (g_MenuOpen &&
 			g_Mode == CourseMode::FreeFlight &&
@@ -1401,9 +1555,23 @@ void Course_DrawHud(void)
 				g_pCountdownText->Draw();
 			}
 		}
+		if (g_Mode == CourseMode::RaceGoal && g_pGoalBackground)
+		{
+			g_pGoalBackground->Draw();
+		}
 		if (g_Mode == CourseMode::RaceGoal && g_pGoalText)
 		{
 			g_pGoalText->Draw();
+		}
+		if (g_Mode == CourseMode::RaceGoal &&
+			g_GoalRecordUpdated &&
+			g_pGoalUpdateText)
+		{
+			g_pGoalUpdateText->Draw();
+		}
+		if (g_Mode == CourseMode::RaceGoal && g_pGoalRankingText)
+		{
+			g_pGoalRankingText->Draw();
 		}
 		if (g_Mode == CourseMode::RaceGoal && g_pGoalHintText)
 		{

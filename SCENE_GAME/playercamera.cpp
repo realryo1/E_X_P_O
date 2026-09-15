@@ -18,10 +18,11 @@
 using namespace DirectX;
 
 static const float EXPO_CAMERA_FAR = 2000.0f;
+static const float EXPO_CAMERA_FOV = 55.0f;
 static float g_Yaw = 0.0f;
 static float g_Pitch = 20.0f;
 static const float PLAYER_CAMERA_DISTANCE = 3.0f;
-static const float PLAYER_CAMERA_LOOK_Y = 0.2f;
+static const float PLAYER_CAMERA_LOOK_Y = 0.55f;
 static const float PLAYER_CAMERA_STICK_LOOK = 2.5f;
 
 #if defined(_DEBUG)
@@ -220,11 +221,21 @@ void PlayerCamera_Initialize(float startYaw, float startPitch)
 	g_Pitch = startPitch;
 	Camera_Initialize();
 	Camera_SetFar(EXPO_CAMERA_FAR);
+	Camera_SetFov(EXPO_CAMERA_FOV);
 #if defined(_DEBUG)
 	g_DebugActive = false;
 	g_DebugLooking = false;
 	g_DebugMoveSpeed = DEBUG_CAMERA_MOVE_SPEED_DEFAULT;
 #endif
+}
+
+void PlayerCamera_SetLookAngles(float yaw, float pitch)
+{
+	g_Yaw = yaw;
+	g_Pitch = pitch;
+	if (g_Pitch > 89.0f) g_Pitch = 89.0f;
+	if (g_Pitch < -89.0f) g_Pitch = -89.0f;
+	RequestRedraw();
 }
 
 void PlayerCamera_LockMouse(void)

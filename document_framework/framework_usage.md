@@ -612,7 +612,9 @@ SCENE_DEBUG
 `InitRenderer()` は専用ビデオメモリが最大のハードウェアアダプターを選び、D3D11 デバイスと
 `CreateSwapChainForHwnd()` による Flip モデルのスワップチェーンを作成する。スワップチェーンは
 2 枚のバックバッファ（`DXGI_SWAP_EFFECT_FLIP_DISCARD`）を持ち、`configureBackBuffer()` が
-各バックバッファの RTV と共有の深度バッファを生成する。
+各バックバッファの RTV、シーン色中間RT、半解像度AO RT、および
+`R24G8_TYPELESS` の共有深度バッファを生成する。深度バッファは
+`D24_UNORM_S8_UINT` のDSVと `R24_UNORM_X8_TYPELESS` のSRVを同じリソースから作る。
 
 ウィンドウサイズ変更時は `Direct3D_ResizeWindow()` でクライアントサイズを記録した後、
 `Direct3D_Resize()` が `ResizeBuffers()` とバックバッファ／深度バッファの再生成を行う。
@@ -640,8 +642,10 @@ LOD2本体と未パンチLOD2遠景では、`boundingVolume.region` による描
 Clear();
 
 // --- 3D描画 ---
+Direct3D_BeginScene();   // SCENE_GAMEのみ。シーン色RTへ切り替え
 SetDepthEnable(true);   // 内部で 3D ビューポートも設定
 // モデルの Draw()
+Direct3D_ApplySsao();    // 深度からAOを作り、バックバッファへ合成
 
 // --- 2D描画 ---
 SetDepthEnable(false);  // 内部で 2D ビューポートも設定
@@ -655,6 +659,12 @@ PumpAfterPresent(lastDrawMs, lastGpuMs);
 `SCENE_GAME` は続けて `PumpAfterPresent` で LOD3 の GPU 化を進める。
 静止した通常シーンは `NeedsPresent` が偽なら `Clear` / `Present` を間引く。動いたフレームは `RequestRedraw`。
 処理順の詳細は [起動とメインループ](#起動とメインループ)。
+
+`Direct3D_ApplySsao()` は3D描画色へだけ半解像度の画面空間AOを合成する。
+`SsaoPS` の近傍遮蔽、`SsaoBlurPS` の深度依存ぼかし、`SsaoCompositePS` の
+色合成を順に行い、2D HUD / Font / ImGuiはAOの影響を受けない。
+調整値は `Direct3D_SetSsaoParameters()` で設定し、ゲーム側では
+`Sunlight_DrawDebug()` の `Expo Sunlight` から変更する。
 
 `F2` は `app/scene.cpp` から `TakeScreenshot` を呼び、`screenshot/` に `1920×1080` の PNG を保存する。
 撮影は `Update` 中にオフスクリーンへ `Draw` し直すため ImGui フレーム外であり、
@@ -722,7 +732,7 @@ SetBlendState(BLENDSTATE_SUB);    // 減算
 | `S_SKYBOX`                    | ワールド方向から正距円筒UVを計算するスカイドーム |
 
 
-検証例: `SCENE_DEBUG/debug_lighting_scene.cpp` / `debug_toon_scene.cpp`。
+検証例: `SCENE_DEBUG/debug_lighting_scene.cpp`。
 `GrayscaleVS.hlsl` / `GrayscalePS.hlsl` はプロジェクトに含まれるが、`SHADERTYPE` とシェーダーマネージャーには未登録。
 
 ---
@@ -823,11 +833,11 @@ point.Apply(ambient);  // 内部で SetLight(ToLIGHT(...))
 ## SCENE_DEBUGについて
 
 デバッグへは Title 右上の `DEBUG` をクリック。実装フォルダは `SCENE_DEBUG/`。
-`SCENE_DEBUG` 内は **Tab** でサブシーン循環（MODEL → LIGHTING → TOON）、右クリックで視点操作、移動はマイクラのクリエと同じ。
+`SCENE_DEBUG` 内は **Tab** でサブシーン循環（MODEL → LIGHTING）、右クリックで視点操作、移動はマイクラのクリエと同じ。
 **Esc** で Title に戻る。
 
-- MODEL: `asset/model` と `asset/expomodel` 直下の `.fbx` と `.glb` を列挙してグリッド配置。`U` マウスロック、`B` 原点キューブ、`R` 再読み込み。
-- LIGHTING / TOON: 各種ライトと `S_TOON1` / `S_TOON2`。ImGui でパラメータ確認。
+- MODEL: `asset/model` と `asset/expomodel` 直下の `.fbx` と `.glb` を候補として列挙し、選択中の1体だけを表示する。`←` / `→` でモデル切替、`U` マウスロック、`B` 原点キューブ、`R` 再読み込み。
+- LIGHTING: 各種ライトを ImGui でパラメータ確認。
 
 Releaseビルドには `SCENE_DEBUG` が含まれない。
 
@@ -930,7 +940,7 @@ python tool/encoding_converter.py /framework
 
 ## prepare_collision.py
 
-描画GLBから衝突バイナリ `asset/collision/<stem>.bin` を書く。詳細は [collision.md](collision.md)。
+描画GLBから衝突バイナリ `asset/collision/<stem>.bin` を書く。引数なしでは床・リング、存在するLOD2タイル／遠景タイル、東西ゲートも対象にする。詳細は [collision.md](collision.md)。
 
 ```powershell
 python tool/prepare_collision.py

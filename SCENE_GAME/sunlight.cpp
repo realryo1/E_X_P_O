@@ -36,6 +36,11 @@ static const float SUN_SHADOW_CASCADE_1_DEFAULT = 20.0f;
 static const float SUN_SHADOW_CASCADE_2_DEFAULT = 70.0f;
 static const float SUN_SHADOW_BIAS_DEFAULT = 0.0005f;
 static const float SUN_SHADOW_BRIGHTNESS_DEFAULT = 0.25f;
+static const bool SUN_SSAO_ENABLED_DEFAULT = true;
+static const float SUN_SSAO_INTENSITY_DEFAULT = 0.85f;
+static const float SUN_SSAO_RADIUS_DEFAULT = 1.25f;
+static const float SUN_SSAO_BIAS_DEFAULT = 0.04f;
+static const float SUN_SSAO_POWER_DEFAULT = 1.20f;
 static const XMFLOAT3 FOG_COLOR_DEFAULT = {
 	179.0f / 255.0f,
 	199.0f / 255.0f,
@@ -84,6 +89,11 @@ static float g_ShadowCascadeDistances[NUM_SHADOW_CASCADES] = {
 };
 static float g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
 static float g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+static bool g_SsaoEnabled = SUN_SSAO_ENABLED_DEFAULT;
+static float g_SsaoIntensity = SUN_SSAO_INTENSITY_DEFAULT;
+static float g_SsaoRadius = SUN_SSAO_RADIUS_DEFAULT;
+static float g_SsaoBias = SUN_SSAO_BIAS_DEFAULT;
+static float g_SsaoPower = SUN_SSAO_POWER_DEFAULT;
 static XMFLOAT3 g_FogColor = FOG_COLOR_DEFAULT;
 static float g_FogStart = FOG_START_DEFAULT;
 static float g_FogEnd = FOG_END_DEFAULT;
@@ -404,6 +414,12 @@ static void ApplySunlightState(void)
 		XMFLOAT4(g_FogColor.x, g_FogColor.y, g_FogColor.z, g_FogDensity),
 		XMFLOAT4(g_FogStart, g_FogEnd, g_FogHeightMin, g_FogHeightRange)
 	});
+	Direct3D_SetSsaoParameters(
+		g_SsaoEnabled,
+		g_SsaoIntensity,
+		g_SsaoRadius,
+		g_SsaoBias,
+		g_SsaoPower);
 
 	const float skyYaw =
 		(g_Azimuth - g_ExtractedSunlight.azimuth) +
@@ -429,6 +445,11 @@ void Sunlight_Initialize(void)
 	g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
 	g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
 	g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+	g_SsaoEnabled = SUN_SSAO_ENABLED_DEFAULT;
+	g_SsaoIntensity = SUN_SSAO_INTENSITY_DEFAULT;
+	g_SsaoRadius = SUN_SSAO_RADIUS_DEFAULT;
+	g_SsaoBias = SUN_SSAO_BIAS_DEFAULT;
+	g_SsaoPower = SUN_SSAO_POWER_DEFAULT;
 	g_FogColor = FOG_COLOR_DEFAULT;
 	g_FogStart = FOG_START_DEFAULT;
 	g_FogEnd = FOG_END_DEFAULT;
@@ -796,6 +817,15 @@ void Sunlight_DrawDebug(void)
 	g_ShadowCascadeDistances[2] = g_ShadowRadius;
 	changed |= ImGui::SliderFloat("Shadow Bias", &g_ShadowBias, 0.0005f, 0.02f, "%.4f");
 	changed |= ImGui::SliderFloat("Shadow Brightness", &g_ShadowBrightness, 0.0f, 1.0f, "%.2f");
+	changed |= ImGui::Checkbox("SSAO", &g_SsaoEnabled);
+	changed |= ImGui::SliderFloat(
+		"SSAO Intensity", &g_SsaoIntensity, 0.0f, 1.0f, "%.2f");
+	changed |= ImGui::SliderFloat(
+		"SSAO Radius", &g_SsaoRadius, 0.1f, 4.0f, "%.2f m");
+	changed |= ImGui::SliderFloat(
+		"SSAO Bias", &g_SsaoBias, 0.001f, 0.2f, "%.3f m");
+	changed |= ImGui::SliderFloat(
+		"SSAO Power", &g_SsaoPower, 0.5f, 3.0f, "%.2f");
 	ImGui::Text(
 		"HDR Sun: %s",
 		g_HasExtractedSunlight ? "extracted" : "fallback");
@@ -826,6 +856,11 @@ void Sunlight_DrawDebug(void)
 		g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
 		g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
 		g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+		g_SsaoEnabled = SUN_SSAO_ENABLED_DEFAULT;
+		g_SsaoIntensity = SUN_SSAO_INTENSITY_DEFAULT;
+		g_SsaoRadius = SUN_SSAO_RADIUS_DEFAULT;
+		g_SsaoBias = SUN_SSAO_BIAS_DEFAULT;
+		g_SsaoPower = SUN_SSAO_POWER_DEFAULT;
 		g_FogColor = FOG_COLOR_DEFAULT;
 		g_FogStart = FOG_START_DEFAULT;
 		g_FogEnd = FOG_END_DEFAULT;

@@ -46,9 +46,6 @@
     <ClCompile Include="shader\renderer.cpp">
       <Filter>フレームワーク\シェーダー</Filter>
     </ClCompile>
-    <ClCompile Include="SCENE_DEBUG\debug_toon_scene.cpp">
-      <Filter>デバッグ</Filter>
-    </ClCompile>
     <ClCompile Include="SCENE_DEBUG\debug_lighting_scene.cpp">
       <Filter>デバッグ</Filter>
     </ClCompile>
@@ -206,9 +203,6 @@
     </ClInclude>
     <ClInclude Include="shader\shadermanager.h">
       <Filter>フレームワーク\シェーダー</Filter>
-    </ClInclude>
-    <ClInclude Include="SCENE_DEBUG\debug_toon_scene.h">
-      <Filter>デバッグ</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_DEBUG\debug_lighting_scene.h">
       <Filter>デバッグ</Filter>
@@ -378,6 +372,24 @@
       <Filter>フレームワーク\シェーダー</Filter>
     </FxCompile>
     <FxCompile Include="shader\GrayscaleVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SsaoVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SsaoBlurVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SsaoCompositeVS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SsaoPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SsaoBlurPS.hlsl">
+      <Filter>フレームワーク\シェーダー</Filter>
+    </FxCompile>
+    <FxCompile Include="shader\SsaoCompositePS.hlsl">
       <Filter>フレームワーク\シェーダー</Filter>
     </FxCompile>
     <FxCompile Include="shader\PixelDirectionalLightingVS.hlsl">

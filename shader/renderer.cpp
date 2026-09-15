@@ -15,6 +15,8 @@
 #include <cwchar>
 #include <chrono>
 #include <string>
+#include <algorithm>
+#include "shadermanager.h"
 
 #pragma comment(lib, "dxgi.lib")
 
@@ -120,6 +122,20 @@ static D3D11_TEXTURE2D_DESC g_BackBufferDesc;
 
 // 深度ステンシルバッファ（解放用に保持）
 static ID3D11Texture2D* g_pDepthStencilBuffer = NULL;
+static ID3D11ShaderResourceView* g_DepthShaderView = nullptr;
+static ID3D11Texture2D* g_SceneTexture = nullptr;
+static ID3D11RenderTargetView* g_SceneRenderTargetView = nullptr;
+static ID3D11ShaderResourceView* g_SceneShaderView = nullptr;
+static ID3D11Texture2D* g_SsaoTexture[2] = {};
+static ID3D11RenderTargetView* g_SsaoRenderTargetView[2] = {};
+static ID3D11ShaderResourceView* g_SsaoShaderView[2] = {};
+static ID3D11Buffer* g_SsaoQuadVertexBuffer = nullptr;
+static ID3D11Buffer* g_SsaoBuffer = nullptr;
+static bool g_SsaoEnabled = true;
+static float g_SsaoIntensity = 0.85f;
+static float g_SsaoRadius = 1.25f;
+static float g_SsaoBias = 0.04f;
+static float g_SsaoPower = 1.20f;
 
 // スクリーンショット撮影用フラグとターゲット
 static bool g_IsTakingScreenshot = false;
@@ -411,7 +427,12 @@ static void ResetRendererStateCache(void)
 static void releaseBackBuffer(void)
 {
 	if (g_ImmediateContext)
+	{
 		g_ImmediateContext->OMSetRenderTargets(0, NULL, NULL);
+		ID3D11ShaderResourceView* nullSrvs[8] = {};
+		g_ImmediateContext->PSSetShaderResources(
+			0, ARRAYSIZE(nullSrvs), nullSrvs);
+	}
 	for (ID3D11RenderTargetView*& renderTargetView : g_RenderTargetViews)
 	{
 		SAFE_RELEASE(renderTargetView);
@@ -419,6 +440,112 @@ static void releaseBackBuffer(void)
 	g_RenderTargetView = nullptr;
 	SAFE_RELEASE(g_pDepthStencilBuffer);
 	SAFE_RELEASE(g_DepthStencilView);
+	SAFE_RELEASE(g_DepthShaderView);
+	SAFE_RELEASE(g_SceneShaderView);
+	SAFE_RELEASE(g_SceneRenderTargetView);
+	SAFE_RELEASE(g_SceneTexture);
+	for (int i = 0; i < 2; ++i)
+	{
+		SAFE_RELEASE(g_SsaoShaderView[i]);
+		SAFE_RELEASE(g_SsaoRenderTargetView[i]);
+		SAFE_RELEASE(g_SsaoTexture[i]);
+	}
+}
+
+static void SetPostProcessViewport(UINT width, UINT height)
+{
+	D3D11_VIEWPORT vp = {};
+	vp.Width = static_cast<float>((width > 0) ? width : 1);
+	vp.Height = static_cast<float>((height > 0) ? height : 1);
+	vp.MinDepth = 0.0f;
+	vp.MaxDepth = 1.0f;
+	g_ImmediateContext->RSSetViewports(1, &vp);
+}
+
+static void BindSceneTarget(void)
+{
+	if (g_IsTakingScreenshot)
+	{
+		g_ImmediateContext->OMSetRenderTargets(
+			1, &g_SSTargetView, g_SSDepthView);
+	}
+	else
+	{
+		g_ImmediateContext->OMSetRenderTargets(
+			1, &g_SceneRenderTargetView, g_DepthStencilView);
+	}
+}
+
+static void CreateSsaoQuad(void)
+{
+	if (g_SsaoQuadVertexBuffer || !g_D3DDevice)
+	{
+		return;
+	}
+
+	const VERTEX_3D vertices[4] = {
+		{{-1.0f, -1.0f, 0.0f}, {}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+		{{ 1.0f, -1.0f, 0.0f}, {}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+		{{-1.0f,  1.0f, 0.0f}, {}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+		{{ 1.0f,  1.0f, 0.0f}, {}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}}
+	};
+	D3D11_BUFFER_DESC desc = {};
+	desc.ByteWidth = sizeof(vertices);
+	desc.Usage = D3D11_USAGE_IMMUTABLE;
+	desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	D3D11_SUBRESOURCE_DATA data = {};
+	data.pSysMem = vertices;
+	g_D3DDevice->CreateBuffer(&desc, &data, &g_SsaoQuadVertexBuffer);
+}
+
+static void CreateSsaoTargets(void)
+{
+	if (!g_D3DDevice || g_BackBufferDesc.Width == 0 || g_BackBufferDesc.Height == 0)
+	{
+		return;
+	}
+
+	D3D11_TEXTURE2D_DESC sceneDesc = {};
+	sceneDesc.Width = g_BackBufferDesc.Width;
+	sceneDesc.Height = g_BackBufferDesc.Height;
+	sceneDesc.MipLevels = 1;
+	sceneDesc.ArraySize = 1;
+	sceneDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	sceneDesc.SampleDesc.Count = 1;
+	sceneDesc.Usage = D3D11_USAGE_DEFAULT;
+	sceneDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	if (FAILED(g_D3DDevice->CreateTexture2D(
+		&sceneDesc, nullptr, &g_SceneTexture)))
+	{
+		return;
+	}
+	g_D3DDevice->CreateRenderTargetView(
+		g_SceneTexture, nullptr, &g_SceneRenderTargetView);
+	g_D3DDevice->CreateShaderResourceView(
+		g_SceneTexture, nullptr, &g_SceneShaderView);
+
+	const UINT aoWidth = (g_BackBufferDesc.Width + 1) / 2;
+	const UINT aoHeight = (g_BackBufferDesc.Height + 1) / 2;
+	D3D11_TEXTURE2D_DESC aoDesc = {};
+	aoDesc.Width = aoWidth;
+	aoDesc.Height = aoHeight;
+	aoDesc.MipLevels = 1;
+	aoDesc.ArraySize = 1;
+	aoDesc.Format = DXGI_FORMAT_R8_UNORM;
+	aoDesc.SampleDesc.Count = 1;
+	aoDesc.Usage = D3D11_USAGE_DEFAULT;
+	aoDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	for (int i = 0; i < 2; ++i)
+	{
+		if (SUCCEEDED(g_D3DDevice->CreateTexture2D(
+			&aoDesc, nullptr, &g_SsaoTexture[i])))
+		{
+			g_D3DDevice->CreateRenderTargetView(
+				g_SsaoTexture[i], nullptr, &g_SsaoRenderTargetView[i]);
+			g_D3DDevice->CreateShaderResourceView(
+				g_SsaoTexture[i], nullptr, &g_SsaoShaderView[i]);
+		}
+	}
 }
 
 // =====================================================
@@ -455,11 +582,11 @@ static void configureBackBuffer(void)
 	td.Height             = g_BackBufferDesc.Height;
 	td.MipLevels          = 1;
 	td.ArraySize          = 1;
-	td.Format             = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	td.Format             = DXGI_FORMAT_R24G8_TYPELESS;
 	td.SampleDesc.Count   = 1;
 	td.SampleDesc.Quality = 0;
 	td.Usage              = D3D11_USAGE_DEFAULT;
-	td.BindFlags          = D3D11_BIND_DEPTH_STENCIL;
+	td.BindFlags          = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
 	td.CPUAccessFlags     = 0;
 	td.MiscFlags          = 0;
 	g_D3DDevice->CreateTexture2D(&td, NULL, &g_pDepthStencilBuffer);
@@ -467,10 +594,20 @@ static void configureBackBuffer(void)
 	// 深度ステンシルビュー生成
 	D3D11_DEPTH_STENCIL_VIEW_DESC dsvd;
 	ZeroMemory(&dsvd, sizeof(dsvd));
-	dsvd.Format        = td.Format;
+	dsvd.Format        = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	dsvd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
 	dsvd.Flags         = 0;
 	g_D3DDevice->CreateDepthStencilView(g_pDepthStencilBuffer, &dsvd, &g_DepthStencilView);
+
+	D3D11_SHADER_RESOURCE_VIEW_DESC depthSrvDesc = {};
+	depthSrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+	depthSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	depthSrvDesc.Texture2D.MostDetailedMip = 0;
+	depthSrvDesc.Texture2D.MipLevels = 1;
+	g_D3DDevice->CreateShaderResourceView(
+		g_pDepthStencilBuffer, &depthSrvDesc, &g_DepthShaderView);
+	CreateSsaoTargets();
+	CreateSsaoQuad();
 
 	// DirectX へセット
 	g_ImmediateContext->OMSetRenderTargets(1, &g_RenderTargetView, g_DepthStencilView);
@@ -827,7 +964,7 @@ void EndShadowMap(void)
 	}
 	else
 	{
-		g_ImmediateContext->OMSetRenderTargets(1, &g_RenderTargetView, g_DepthStencilView);
+		BindSceneTarget();
 	}
 	SetDepthEnable(true);
 
@@ -888,7 +1025,7 @@ void EndFaceShadowMap(void)
 	}
 	else
 	{
-		g_ImmediateContext->OMSetRenderTargets(1, &g_RenderTargetView, g_DepthStencilView);
+		BindSceneTarget();
 	}
 	SetDepthEnable(true);
 
@@ -1363,6 +1500,9 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		XMFLOAT4(80.0f, 500.0f, 0.0f, 60.0f)
 	});
 
+	hBufferDesc.ByteWidth = sizeof(SSAO_CONSTANT);
+	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_SsaoBuffer);
+
 	MATERIAL material;
 	ZeroMemory(&material, sizeof(material));
 	material.Diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -1387,6 +1527,8 @@ void FinalizeRenderer(void)
 	if( g_PixelShader )			g_PixelShader->Release();
 	SAFE_RELEASE(g_ShadowBuffer);
 	SAFE_RELEASE(g_PlayerLightBuffer);
+	SAFE_RELEASE(g_SsaoBuffer);
+	SAFE_RELEASE(g_SsaoQuadVertexBuffer);
 	SAFE_RELEASE(g_FaceShadowBuffer);
 	SAFE_RELEASE(g_FogBuffer);
 	SAFE_RELEASE(g_FaceShadowSRV);
@@ -1428,8 +1570,20 @@ void Clear(void)
 #endif
 	// バックバッファクリア色
 	float ClearColor[4] = { 181.0f / 255.0f, 200.0f / 255.0f, 211.0f / 255.0f, 1.0f }; // #B5C8D3
-	//バックバッファをクリア
-	g_ImmediateContext->ClearRenderTargetView( g_RenderTargetView, ClearColor );
+	ID3D11ShaderResourceView* nullSrvs[8] = {};
+	g_ImmediateContext->PSSetShaderResources(0, ARRAYSIZE(nullSrvs), nullSrvs);
+	// 通常フレーム用のシーン色RTも同じ背景色にしておく。
+	if (!g_IsTakingScreenshot && g_SceneRenderTargetView)
+	{
+		g_ImmediateContext->ClearRenderTargetView(
+			g_SceneRenderTargetView, ClearColor);
+		g_ImmediateContext->ClearRenderTargetView(
+			g_RenderTargetView, ClearColor);
+	}
+	else
+	{
+		g_ImmediateContext->ClearRenderTargetView(g_RenderTargetView, ClearColor);
+	}
 	//デプスステンシルバッファをクリア
 	g_ImmediateContext->ClearDepthStencilView( g_DepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
 
@@ -1607,6 +1761,166 @@ void Direct3D_Resize(unsigned int width, unsigned int height)
 	releaseBackBuffer();
 	g_SwapChain->ResizeBuffers(2, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
 	configureBackBuffer();
+}
+
+void Direct3D_SetSsaoParameters(
+	bool enabled,
+	float intensity,
+	float radius,
+	float bias,
+	float power)
+{
+	g_SsaoEnabled = enabled;
+	g_SsaoIntensity = (std::max)(0.0f, (std::min)(1.0f, intensity));
+	g_SsaoRadius = (std::max)(0.05f, radius);
+	g_SsaoBias = (std::max)(0.0001f, bias);
+	g_SsaoPower = (std::max)(0.1f, power);
+}
+
+void Direct3D_BeginScene(void)
+{
+	if (g_IsTakingScreenshot ||
+		!g_ImmediateContext ||
+		!g_SceneRenderTargetView)
+	{
+		return;
+	}
+
+	ID3D11ShaderResourceView* nullSrvs[8] = {};
+	g_ImmediateContext->PSSetShaderResources(0, ARRAYSIZE(nullSrvs), nullSrvs);
+	g_ImmediateContext->OMSetRenderTargets(
+		1, &g_SceneRenderTargetView, g_DepthStencilView);
+	SetDepthEnable(true);
+}
+
+void Direct3D_ApplySsao(void)
+{
+	if (g_IsTakingScreenshot ||
+		!g_ImmediateContext ||
+		!g_SceneShaderView ||
+		!g_DepthShaderView ||
+		!g_SsaoRenderTargetView[0] ||
+		!g_SsaoRenderTargetView[1] ||
+		!g_SsaoBuffer ||
+		!g_SsaoQuadVertexBuffer)
+	{
+		return;
+	}
+
+	ShaderManager* ssaoShader = GetShader(S_SSAO);
+	ShaderManager* blurShader = GetShader(S_SSAO_BLUR);
+	ShaderManager* compositeShader = GetShader(S_SSAO_COMPOSITE);
+	if (!ssaoShader || !blurShader || !compositeShader ||
+		!ssaoShader->GetVertexShader() ||
+		!blurShader->GetVertexShader() ||
+		!compositeShader->GetVertexShader())
+	{
+		return;
+	}
+
+	const XMMATRIX inverseProjection = XMMatrixInverse(
+		nullptr, g_ProjectionMatrix);
+	SSAO_CONSTANT constants = {};
+	XMStoreFloat4x4(
+		&constants.InvProjection,
+		XMMatrixTranspose(inverseProjection));
+	const float fullWidth = static_cast<float>(
+		(std::max)(1u, g_BackBufferDesc.Width));
+	const float fullHeight = static_cast<float>(
+		(std::max)(1u, g_BackBufferDesc.Height));
+	const UINT aoWidth = (g_BackBufferDesc.Width + 1) / 2;
+	const UINT aoHeight = (g_BackBufferDesc.Height + 1) / 2;
+	const bool useSsao = g_SsaoEnabled;
+	const float effectiveIntensity = useSsao ? g_SsaoIntensity : 0.0f;
+	const float effectiveRadius = useSsao ? g_SsaoRadius : 1.0f;
+	const float effectiveBias = useSsao ? g_SsaoBias : 0.04f;
+	const float effectivePower = useSsao ? g_SsaoPower : 1.0f;
+	const float params[] = {
+		1.0f / fullWidth,
+		1.0f / fullHeight,
+		effectiveRadius,
+		effectiveBias
+	};
+	const float settings[] = {
+		effectiveIntensity,
+		effectivePower,
+		useSsao ? 1.0f : 0.0f,
+		0.0f
+	};
+	constants.Params = XMFLOAT4(
+		params[0], params[1], params[2], params[3]);
+	constants.Settings = XMFLOAT4(
+		settings[0], settings[1], settings[2], settings[3]);
+	UpdateDynamicConstantBuffer(
+		g_SsaoBuffer, &constants, sizeof(constants));
+
+	ID3D11Buffer* constantBuffer = g_SsaoBuffer;
+	UINT stride = sizeof(VERTEX_3D);
+	UINT offset = 0;
+	ID3D11ShaderResourceView* depthView = g_DepthShaderView;
+	ID3D11ShaderResourceView* ssaoView = g_SsaoShaderView[0];
+	ID3D11ShaderResourceView* blurredView = g_SsaoShaderView[1];
+	ID3D11RenderTargetView* aoTarget = g_SsaoRenderTargetView[0];
+	ID3D11RenderTargetView* blurTarget = g_SsaoRenderTargetView[1];
+
+	SetDepthEnable(false);
+	SetCullState(CULLSTATE_NONE);
+	SetBlendState(BLENDSTATE_NONE);
+	g_ImmediateContext->IASetVertexBuffers(
+		0, 1, &g_SsaoQuadVertexBuffer, &stride, &offset);
+	g_ImmediateContext->IASetPrimitiveTopology(
+		D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	g_ImmediateContext->VSSetConstantBuffers(10, 1, &constantBuffer);
+	g_ImmediateContext->PSSetConstantBuffers(10, 1, &constantBuffer);
+
+	// 深度を読む間は、深度DSVを出力先から外す。
+	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+	g_ImmediateContext->OMSetRenderTargets(1, &aoTarget, nullptr);
+	SetPostProcessViewport(aoWidth, aoHeight);
+	g_ImmediateContext->IASetInputLayout(ssaoShader->GetVertexLayout());
+	g_ImmediateContext->VSSetShader(
+		ssaoShader->GetVertexShader(), nullptr, 0);
+	g_ImmediateContext->PSSetShader(
+		ssaoShader->GetPixelShader(), nullptr, 0);
+	g_ImmediateContext->PSSetShaderResources(0, 1, &depthView);
+	g_ImmediateContext->Draw(4, 0);
+
+	// 深度差を見ながらAOをぼかし、柱の細い隙間のちらつきを抑える。
+	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+	g_ImmediateContext->OMSetRenderTargets(1, &blurTarget, nullptr);
+	g_ImmediateContext->IASetInputLayout(blurShader->GetVertexLayout());
+	g_ImmediateContext->VSSetShader(
+		blurShader->GetVertexShader(), nullptr, 0);
+	g_ImmediateContext->PSSetShader(
+		blurShader->GetPixelShader(), nullptr, 0);
+	ID3D11ShaderResourceView* blurInputs[2] = {
+		ssaoView, depthView
+	};
+	g_ImmediateContext->PSSetShaderResources(0, 2, blurInputs);
+	g_ImmediateContext->Draw(4, 0);
+
+	// シーン色とAOをバックバッファへ合成する。
+	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+	g_ImmediateContext->OMSetRenderTargets(
+		1, &g_RenderTargetView, nullptr);
+	SetPostProcessViewport(g_BackBufferDesc.Width, g_BackBufferDesc.Height);
+	g_ImmediateContext->IASetInputLayout(
+		compositeShader->GetVertexLayout());
+	g_ImmediateContext->VSSetShader(
+		compositeShader->GetVertexShader(), nullptr, 0);
+	g_ImmediateContext->PSSetShader(
+		compositeShader->GetPixelShader(), nullptr, 0);
+	ID3D11ShaderResourceView* compositeInputs[2] = {
+		g_SceneShaderView, blurredView
+	};
+	g_ImmediateContext->PSSetShaderResources(0, 2, compositeInputs);
+	g_ImmediateContext->Draw(4, 0);
+
+	ID3D11ShaderResourceView* nullViews[2] = {};
+	g_ImmediateContext->PSSetShaderResources(0, 2, nullViews);
+	g_ImmediateContext->VSSetShader(nullptr, nullptr, 0);
+	g_ImmediateContext->PSSetShader(nullptr, nullptr, 0);
+	SetBlendState(BLENDSTATE_ALFA);
 }
 
 #include <direct.h>

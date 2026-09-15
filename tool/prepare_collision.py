@@ -24,6 +24,11 @@ DEFAULT_GLBS = (
     PROJECT_ROOT / "asset" / "expomodel" / "expo_ring.glb",
     PROJECT_ROOT / "asset" / "expomodel" / "expo_floor.glb",
 )
+DEFAULT_LOD2_GLOB = PROJECT_ROOT / "asset" / "expomodel"
+DEFAULT_GATE_NAMES = (
+    "expo_pavilion_east_gate.glb",
+    "expo_pavilion_west_gate.glb",
+)
 
 MAGIC = b"EXCL"
 VERSION = 1
@@ -232,7 +237,17 @@ def export_collision_bin(glb_path: Path, output_dir: Path | None = None) -> Path
 
 def main() -> int:
     args = parse_args()
-    targets = [Path(p) for p in args.glb] if args.glb else list(DEFAULT_GLBS)
+    if args.glb:
+        targets = [Path(p) for p in args.glb]
+    else:
+        targets = list(DEFAULT_GLBS)
+        targets.extend(sorted(DEFAULT_LOD2_GLOB.glob("expo_tile_lod2_data*.glb")))
+        targets.extend(sorted(DEFAULT_LOD2_GLOB.glob("expo_tile_lod2_far_*.glb")))
+        targets.extend(
+            DEFAULT_LOD2_GLOB / name
+            for name in DEFAULT_GATE_NAMES
+            if (DEFAULT_LOD2_GLOB / name).is_file()
+        )
     wrote = 0
     for glb in targets:
         if export_collision_bin(glb, args.output_dir) is not None:

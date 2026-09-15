@@ -141,9 +141,11 @@ void Game_PumpAfterPresent(double lastDrawMs, float lastGpuMs)
 
 void Game_Draw(void)
 {
+	Direct3D_BeginScene();
 	if (!Field_IsLoadComplete())
 	{
 		Field_Draw();
+		Direct3D_ApplySsao();
 		return;
 	}
 
@@ -206,6 +208,7 @@ void Game_Draw(void)
 #endif
 	Player_Draw();
 	Course_Draw();
+	Direct3D_ApplySsao();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_OBJECTS);
 	Direct3D_DebugStageBegin(DIRECT3D_DEBUG_STAGE_UI);

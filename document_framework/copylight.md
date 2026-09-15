@@ -39,8 +39,6 @@ hit.mp3：壁ヒット / 机をドンと叩く.mp3
 
 fade.png：フェード用 / 自作
 
-tex.png：開発用 / 自作
-
 pizzo_pernice_puresky_4k.hdr：スカイドーム・太陽光解析用HDR / https://polyhaven.com/a/pizzo_pernice_puresky
 
 icon.ico,makulogo.png：アプリアイコン用・輪くぐり用輪 / 例のロゴ風自作テクスチャ

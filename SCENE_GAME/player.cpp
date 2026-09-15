@@ -162,6 +162,18 @@ void Player_WarpToStart(void)
 	Player_WarpTo(g_StartPos);
 }
 
+void Player_SetFacingYaw(float yaw)
+{
+	g_Yaw = NormalizeAngle(yaw);
+	g_Pitch = 0.0f;
+	g_Roll = 0.0f;
+	if (g_PlayerModel)
+	{
+		g_PlayerModel->SetRot({ g_Pitch, g_Yaw, g_Roll });
+	}
+	RequestRedraw();
+}
+
 void Player_SetControlEnabled(bool enabled)
 {
 	g_ControlEnabled = enabled;

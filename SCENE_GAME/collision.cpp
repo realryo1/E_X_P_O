@@ -31,7 +31,8 @@ namespace
 
 	static const float GRID_CELL_SIZE = 0.4f;
 	static const size_t GRID_MIN_TRIANGLES = 64;
-	static const int GRID_MAX_CELLS_PER_TRI = 64;
+	static const int GRID_MAX_CELLS_PER_TRI_RING = 64;
+	static const int GRID_MAX_CELLS_PER_TRI_BUILDING = 256;
 	static const int GRID_MAX_CELLS = 2000000;
 	static const float ASSIMP_GLOBAL_SCALE = 100.0f;
 
@@ -55,6 +56,9 @@ namespace
 		XMMATRIX world;
 		XMFLOAT3 boundsMin;
 		XMFLOAT3 boundsMax;
+		std::string sourceName;
+		bool loadedFromBin;
+		bool filterLattice;
 		bool useGrid;
 	};
 
@@ -63,6 +67,7 @@ namespace
 		std::string glbPath;
 		std::string binPath;
 		XMMATRIX world;
+		bool filterLattice;
 	};
 
 	struct BakeResult
@@ -81,6 +86,45 @@ namespace
 	std::atomic<size_t> g_ProgressDone{ 0 };
 	std::atomic<size_t> g_ProgressTotal{ 0 };
 	std::atomic<int> g_ProgressStage{ COLLISION_STAGE_IDLE };
+
+	std::string PathStem(const std::string& path)
+	{
+		const size_t slash = path.find_last_of("\\/");
+		const size_t nameStart = slash == std::string::npos ? 0 : slash + 1;
+		const size_t dot = path.find_last_of('.');
+		const size_t nameEnd =
+			dot != std::string::npos && dot > nameStart ? dot : path.size();
+		return path.substr(nameStart, nameEnd - nameStart);
+	}
+
+	std::string CollisionDisplayName(const std::string& sourceName)
+	{
+		if (sourceName == "expo_floor")
+		{
+			return "床";
+		}
+		if (sourceName == "expo_ring")
+		{
+			return "リング";
+		}
+		if (sourceName == "expo_pavilion_east_gate")
+		{
+			return "東ゲート高精細";
+		}
+		if (sourceName == "expo_pavilion_west_gate")
+		{
+			return "西ゲート高精細";
+		}
+		if (sourceName.find("expo_tile_lod2_far_") == 0)
+		{
+			return "遠景" + sourceName.substr(19);
+		}
+		if (sourceName.find("expo_tile_lod2_") == 0)
+		{
+			return "LOD2" + sourceName.substr(15);
+		}
+		return sourceName;
+	}
 
 	bool FileExists(const char* path)
 	{
@@ -331,7 +375,7 @@ namespace
 		return tris;
 	}
 
-	void BuildFlatGrid(CollisionMesh* mesh)
+	void BuildFlatGrid(CollisionMesh* mesh, int maxCellsPerTri)
 	{
 		if (!mesh)
 		{
@@ -416,9 +460,9 @@ namespace
 			const int spanX = x1 - x0 + 1;
 			const int spanZ = z1 - z0 + 1;
 			if (spanX > 0 && spanZ > 0
-				&& spanX <= GRID_MAX_CELLS_PER_TRI
-				&& spanZ <= GRID_MAX_CELLS_PER_TRI
-				&& spanX * spanZ <= GRID_MAX_CELLS_PER_TRI)
+				&& spanX <= maxCellsPerTri
+				&& spanZ <= maxCellsPerTri
+				&& spanX * spanZ <= maxCellsPerTri)
 			{
 				for (int cx = x0; cx <= x1; ++cx)
 				{
@@ -458,9 +502,9 @@ namespace
 			const int spanX = x1 - x0 + 1;
 			const int spanZ = z1 - z0 + 1;
 			if (!(spanX > 0 && spanZ > 0
-				&& spanX <= GRID_MAX_CELLS_PER_TRI
-				&& spanZ <= GRID_MAX_CELLS_PER_TRI
-				&& spanX * spanZ <= GRID_MAX_CELLS_PER_TRI))
+				&& spanX <= maxCellsPerTri
+				&& spanZ <= maxCellsPerTri
+				&& spanX * spanZ <= maxCellsPerTri))
 			{
 				continue;
 			}
@@ -489,12 +533,16 @@ namespace
 		mesh->useGrid = true;
 	}
 
-	CollisionMesh BakeMesh(std::vector<CollisionTriangle> localTris, const XMMATRIX& world)
+	CollisionMesh BakeMesh(
+		std::vector<CollisionTriangle> localTris,
+		const XMMATRIX& world,
+		bool filterLattice)
 	{
 		CollisionMesh mesh = {};
 		mesh.localTris = std::move(localTris);
 		mesh.world = world;
 		mesh.yBias = 0.0f;
+		mesh.filterLattice = filterLattice;
 		mesh.visitGen = 1;
 		mesh.useGrid = false;
 		mesh.boundsMin = { 0.0f, 0.0f, 0.0f };
@@ -508,7 +556,6 @@ namespace
 		g_ProgressDone = 0;
 		g_ProgressTotal = mesh.localTris.size();
 
-		const bool filterLattice = mesh.localTris.size() >= GRID_MIN_TRIANGLES;
 		mesh.worldTris.reserve(mesh.localTris.size());
 		XMFLOAT3 bMin = { FLT_MAX, FLT_MAX, FLT_MAX };
 		XMFLOAT3 bMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
@@ -534,12 +581,26 @@ namespace
 		}
 		mesh.boundsMin = bMin;
 		mesh.boundsMax = bMax;
-		BuildFlatGrid(&mesh);
+		BuildFlatGrid(
+			&mesh,
+			filterLattice
+				? GRID_MAX_CELLS_PER_TRI_RING
+				: GRID_MAX_CELLS_PER_TRI_BUILDING);
+		if (!filterLattice)
+		{
+			std::vector<CollisionTriangle>().swap(mesh.localTris);
+		}
 		return mesh;
 	}
 
-	std::vector<CollisionTriangle> LoadLocalTris(const BakeJob& job)
+	std::vector<CollisionTriangle> LoadLocalTris(
+		const BakeJob& job,
+		bool* loadedFromBin)
 	{
+		if (loadedFromBin)
+		{
+			*loadedFromBin = false;
+		}
 		g_ProgressStage = COLLISION_STAGE_LOAD;
 		g_ProgressDone = 0;
 		g_ProgressTotal = 1;
@@ -547,6 +608,10 @@ namespace
 		if (!job.binPath.empty() && FileExists(job.binPath.c_str()))
 		{
 			tris = LoadLocalTrisBin(job.binPath.c_str());
+			if (!tris.empty() && loadedFromBin)
+			{
+				*loadedFromBin = true;
+			}
 		}
 		if (tris.empty() && !job.glbPath.empty())
 		{
@@ -575,14 +640,21 @@ namespace
 			}
 
 			BakeResult result;
-			std::vector<CollisionTriangle> tris = LoadLocalTris(job);
+			bool loadedFromBin = false;
+			std::vector<CollisionTriangle> tris =
+				LoadLocalTris(job, &loadedFromBin);
 			if (tris.empty())
 			{
 				result.failed = true;
 			}
 			else
 			{
-				result.mesh = BakeMesh(std::move(tris), job.world);
+				result.mesh = BakeMesh(
+					std::move(tris),
+					job.world,
+					job.filterLattice);
+				result.mesh.sourceName = PathStem(job.glbPath);
+				result.mesh.loadedFromBin = loadedFromBin;
 				result.failed = result.mesh.worldTris.empty() && result.mesh.localTris.empty();
 			}
 			{
@@ -622,6 +694,45 @@ namespace
 		return aMin.x <= bMax.x && aMax.x >= bMin.x
 			&& aMin.y <= bMax.y && aMax.y >= bMin.y
 			&& aMin.z <= bMax.z && aMax.z >= bMin.z;
+	}
+
+	bool IsHighDetailGate(const CollisionMesh& mesh)
+	{
+		return mesh.sourceName == "expo_pavilion_east_gate" ||
+			mesh.sourceName == "expo_pavilion_west_gate";
+	}
+
+	bool IsLod2Mesh(const CollisionMesh& mesh)
+	{
+		return mesh.sourceName.find("expo_tile_lod2_") == 0;
+	}
+
+	bool IsInsideHighDetailGate(
+		const XMFLOAT3& aabbMin,
+		const XMFLOAT3& aabbMax)
+	{
+		for (const CollisionMesh& gate : g_Meshes)
+		{
+			if (!IsHighDetailGate(gate) || gate.worldTris.empty())
+			{
+				continue;
+			}
+			if (AabbOverlap(
+				aabbMin,
+				aabbMax,
+				XMFLOAT3(
+					gate.boundsMin.x,
+					gate.boundsMin.y + gate.yBias,
+					gate.boundsMin.z),
+				XMFLOAT3(
+					gate.boundsMax.x,
+					gate.boundsMax.y + gate.yBias,
+					gate.boundsMax.z)))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	XMFLOAT3 ClosestPointOnTriangle(const XMFLOAT3& p, const CollisionTriangle& tri)
@@ -775,10 +886,19 @@ namespace
 			center->y + half.y,
 			center->z + half.z
 		};
+		const bool insideHighDetailGate =
+			IsInsideHighDetailGate(aabbMin, aabbMax);
 
 		for (CollisionMesh& mesh : g_Meshes)
 		{
 			if (mesh.worldTris.empty())
+			{
+				continue;
+			}
+			// ゲートは高精細メッシュを正とする。
+			// 遠景補完LOD2にも同じゲート形状が残るため、
+			// ゲートAABB内だけLOD2側を無効にして二重判定を防ぐ。
+			if (insideHighDetailGate && IsLod2Mesh(mesh))
 			{
 				continue;
 			}
@@ -911,7 +1031,10 @@ namespace
 	}
 }
 
-bool Collision_StartAdd(const char* glbPath, const XMMATRIX& world)
+bool Collision_StartAdd(
+	const char* glbPath,
+	const XMMATRIX& world,
+	bool filterLattice)
 {
 	if (!glbPath)
 	{
@@ -921,6 +1044,7 @@ bool Collision_StartAdd(const char* glbPath, const XMMATRIX& world)
 	job.glbPath = glbPath;
 	job.binPath = DeriveBinPath(glbPath);
 	job.world = world;
+	job.filterLattice = filterLattice;
 	if (!FileExists(job.binPath.c_str()) && !FileExists(job.glbPath.c_str()))
 	{
 		return false;
@@ -1003,6 +1127,35 @@ void Collision_GetPumpProgress(size_t* done, size_t* total, int* stage)
 	}
 }
 
+void Collision_GetSourceStatus(char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+	{
+		return;
+	}
+	strcpy_s(out, outSize, "衝突 AABB");
+	if (g_Meshes.empty())
+	{
+		strcat_s(out, outSize, " なし");
+		return;
+	}
+	for (const CollisionMesh& mesh : g_Meshes)
+	{
+		const std::string displayName = CollisionDisplayName(mesh.sourceName);
+		char item[96] = {};
+		sprintf_s(
+			item,
+			" %s:%s",
+			displayName.c_str(),
+			mesh.loadedFromBin ? "BIN" : "GLB");
+		if (strlen(out) + strlen(item) + 1 >= outSize)
+		{
+			break;
+		}
+		strcat_s(out, outSize, item);
+	}
+}
+
 void Collision_SetWorld(int meshId, const XMMATRIX& world)
 {
 	if (meshId < 0 || meshId >= static_cast<int>(g_Meshes.size()))
@@ -1037,7 +1190,15 @@ void Collision_SetWorld(int meshId, const XMMATRIX& world)
 			return;
 		}
 	}
-	mesh = BakeMesh(mesh.localTris, world);
+	if (mesh.localTris.empty())
+	{
+		return;
+	}
+	const std::string sourceName = mesh.sourceName;
+	const bool loadedFromBin = mesh.loadedFromBin;
+	mesh = BakeMesh(mesh.localTris, world, mesh.filterLattice);
+	mesh.sourceName = sourceName;
+	mesh.loadedFromBin = loadedFromBin;
 }
 
 void Collision_Clear(void)

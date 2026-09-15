@@ -1,7 +1,6 @@
 ﻿#include "debugscene.h"
 #include "debug_model_scene.h"
 #include "debug_lighting_scene.h"
-#include "debug_toon_scene.h"
 #include "keyboard.h"
 #include "mouse.h"
 #include "fade.h"
@@ -13,7 +12,6 @@ using namespace DirectX;
 enum DEBUG_TYPE {
 	DEBUG_MODEL = 0,
 	DEBUG_LIGHTING,
-	DEBUG_TOON,
 	DEBUG_MAX
 };
 
@@ -28,9 +26,6 @@ void DebugScene_Initialize(void)
 		break;
 	case DEBUG_LIGHTING:
 		DebugLightingScene_Initialize();
-		break;
-	case DEBUG_TOON:
-		DebugToonScene_Initialize();
 		break;
 	default:
 		break;
@@ -56,9 +51,6 @@ void DebugScene_Update(void)
 		case DEBUG_LIGHTING:
 			DebugLightingScene_Finalize();
 			break;
-		case DEBUG_TOON:
-			DebugToonScene_Finalize();
-			break;
 		default:
 			break;
 		}
@@ -73,9 +65,6 @@ void DebugScene_Update(void)
 		case DEBUG_LIGHTING:
 			DebugLightingScene_Initialize();
 			break;
-		case DEBUG_TOON:
-			DebugToonScene_Initialize();
-			break;
 		default:
 			break;
 		}
@@ -88,9 +77,6 @@ void DebugScene_Update(void)
 		break;
 	case DEBUG_LIGHTING:
 		DebugLightingScene_Update();
-		break;
-	case DEBUG_TOON:
-		DebugToonScene_Update();
 		break;
 	default:
 		break;
@@ -107,9 +93,6 @@ void DebugScene_Draw(void)
 	case DEBUG_LIGHTING:
 		DebugLightingScene_Draw();
 		break;
-	case DEBUG_TOON:
-		DebugToonScene_Draw();
-		break;
 	default:
 		break;
 	}
@@ -124,9 +107,6 @@ void DebugScene_Finalize(void)
 		break;
 	case DEBUG_LIGHTING:
 		DebugLightingScene_Finalize();
-		break;
-	case DEBUG_TOON:
-		DebugToonScene_Finalize();
 		break;
 	default:
 		break;

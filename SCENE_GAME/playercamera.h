@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 void PlayerCamera_Initialize(float startYaw = 0.0f, float startPitch = 20.0f);
+void PlayerCamera_SetLookAngles(float yaw, float pitch);
 void PlayerCamera_LockMouse(void);
 void PlayerCamera_UpdateInput(void);
 void PlayerCamera_Update(void);

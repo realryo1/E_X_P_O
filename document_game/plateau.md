@@ -450,7 +450,7 @@ python tool/prepare_expo_pavilion.py --all-names
 - LOD2葉4枚の `boundingVolume.region` は `expo_tiles_lod2.txt` の各 `tile` 行へ
   保存し、タイル境界を使った描画時の視錐台カリングへ利用する
 - 実行時マニフェスト: `asset/expomodel/expo_field.txt` の `pavilion` 行（実行のたびに置き換え）
-- 当たり判定は追加しない。床と大屋根リングの `asset/collision/*.bin` のみが衝突対象で、LOD3近景は描画専用
+- 当たり判定はLOD2ベースで行う。床、大屋根リング、パンチ済みLOD2、遠景LOD2を `Collision_StartAdd` へ渡す。ただし東西ゲート本体だけは高精細LOD3モデルも `Collision_StartAdd` へ渡し、プレイヤーAABBがゲートのワールドAABB内にある間は重複するLOD2判定をスキップする。それ以外のLOD3近景は描画専用とする。`asset/collision/*.bin` があれば優先して使い、無ければGLBからワーカーでベイクする
 - 現状: `null2` は全面グレーのまま。ミラーメンブレンの見た目は別リサーチとして残す
 - セルビア館（`gml:name`「セルビア共和国パビリオン」、`075_Serbia.jpg`）の実行時GLBは 3D Tiles アトラスの UV と埋め込み WebP アルベド、glTF の `metallicFactor` / `roughnessFactor` を持つ。metallic-roughness / normal テクスチャは公式LOD3に含まれない。写真アルベドでは金属度を 0 とし、粗さだけ会場既定と混ぜる。単体再生成は `python tool/prepare_expo_pavilion.py --name セルビア共和国パビリオン` だが、`--all-names` と同様に `expo_field.txt` の pavilion 行と LOD2 パンチを書き換えるため、マップ追加が無い限り再パックしない
 - LOD3近景はカメラ周辺、視線方向、移動方向の先読み範囲を距離ストリーミングする。開始はロード半径、GPU化は破棄半径まで進め、視線方向（半頂角60°）は半径を32足して先行する。ヒステリシス帯のREADYが新規インポートを止めない。距離判定には既知のモデルXZ半径を足す。視線先の棟は開始・GPU化の優先度を上げる。万博GLBはワーカーでGLB 2.0のAccessor/BufferViewを直接展開し、埋め込みテクスチャのCPUデコードもワーカーで行う。CPU側では同一マテリアルのプリミティブを結合し、実行時の `DrawIndexed` を減らす。初期ロード中のGPU化と破棄は1フレーム6ms、完了後は `Present` 後3ms。頂点・インデックス・テクスチャの転送はチャンク化する。GPU化中は`cube.fbx`のプレースホルダーを表示する
@@ -513,7 +513,7 @@ asset/expomodel/expo_tile_lod2.glb
 asset/expomodel/expo_tile.glb
 ```
 
-衝突バイナリは `asset/collision/expo_floor.bin` と `asset/collision/expo_ring.bin`。作り方は [collision.md](../document_framework/collision.md)。
+衝突バイナリは `asset/collision/expo_floor.bin`、`expo_ring.bin`、LOD2タイルの `expo_tile_lod2_dataN.bin` / `expo_tile_lod2_far_dataN.bin`、東西ゲート高精細モデルの `expo_pavilion_east_gate.bin` / `expo_pavilion_west_gate.bin`。作り方は [collision.md](../document_framework/collision.md)。
 
 `SCENE_GAME` は次の順で重ねる。
 

@@ -31,7 +31,8 @@ flowchart TD
     taxiDraw["空飛ぶタクシー (S_PBR, Cast/Receive=ON)"]
     skyboxDraw --> floorDraw --> tileDraw --> ringDraw --> taxiDraw
   end
-  subgraph uiPass ["6. UI & デバッグ描画"]
+  ssaoPass["6. 半解像度 SSAO<br>(深度SRV・AO生成・深度依存ぼかし・合成)"]
+  subgraph uiPass ["7. UI & デバッグ描画"]
     uiReset["Ui_ResetMaterial"]
     depthDisable["SetDepthEnable(false)"]
     uiDraw["Ui_Draw (HUDテキスト)"]
@@ -39,7 +40,7 @@ flowchart TD
     uiReset --> depthDisable --> uiDraw --> debugDraw
   end
 
-  cameraDraw --> depthEnable --> sunlightApply --> shadowPass --> mainPass --> uiPass
+  cameraDraw --> depthEnable --> sunlightApply --> shadowPass --> mainPass --> ssaoPass --> uiPass
 ```
 
 ### 描画ステップ詳細
@@ -54,7 +55,11 @@ flowchart TD
 5. **メイン描画パス**:
    - `Field_Draw`: スカイドーム、床、LOD2タイル、遠景LOD2、LOD3パビリオン、プレースホルダー、リングの順で描画する。各モデルは `S_PBR` でglTF PBRマテリアルを処理し、最終色へ距離＋高度フォグを適用する。
    - `Player_Draw`: 空飛ぶタクシー（`flytaxi.glb`）を描画。
-6. **2D・UI・デバッグパス**:
+6. **画面空間アンビエントオクルージョン（SSAO）**:
+   - 通常フレームの3D色はシーン中間RTへ描き、深度バッファは `R24G8_TYPELESS` として DSV / `R24_UNORM_X8_TYPELESS` SRV を併用する。
+   - `SsaoPS` が半解像度で深度からビュー空間位置と近傍遮蔽を推定し、`SsaoBlurPS` が深度差を重みとして4近傍をぼかす。`SsaoCompositePS` がAOをシーン色へ乗算するため、柱の隙間や入れ組みの淵が暗くなる。
+   - `Expo Sunlight` の `SSAO`、`SSAO Intensity`、`SSAO Radius`、`SSAO Bias`、`SSAO Power` で調整できる。AOは3D色だけに適用し、HUD / ImGuiは対象外とする。
+7. **2D・UI・デバッグパス**:
    - `Ui_ResetMaterial`: マテリアル色を白（ディフューズ 1.0）へ戻す。
    - `SetDepthEnable(false)`: 2D 用 UI ビューポート（1280×720）へ切り替え。
    - `Ui_Draw`, `Course_DrawHud`, `Course_DrawMenu`, `Player_DrawDebug`, `Sunlight_DrawDebug`, `PlayerCamera_DrawDebug`: HUD、レースUI、および Debug ビルドの ImGui。ImGui の頂点があるフレームだけ GPU へ送る。

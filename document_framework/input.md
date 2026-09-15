@@ -89,7 +89,8 @@ bool Input_IsActionTrigger(Input_Action action);  // 押した瞬間
 * プレースホルダ
 
 ### SCENE_DEBUG（`SCENE_DEBUG/debugscene.cpp`）
-* **Tab**: サブシーン切替（MODEL → LIGHTING → TOON）
+* **Tab**: サブシーン切替（MODEL → LIGHTING）
+* **←** / **→**: モデルビューワの表示モデル切替
 * **Esc**: `UnLockMouse()`
 * カメラ操作はデバッグカメラ側（WASD + マウス相対移動）
 * 上記は `keyboard.h` / `mouse.h` を直接使用

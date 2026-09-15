@@ -109,6 +109,12 @@ void Camera_SetFar(float far_)
 	CameraObject->SetFar(far_);
 }
 
+void Camera_SetFov(float fov)
+{
+	if (!CameraObject) return;
+	CameraObject->SetFov(fov);
+}
+
 void Camera_SetAspect(float aspect)
 {
 	if (!CameraObject) return;
