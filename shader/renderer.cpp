@@ -9,7 +9,7 @@
 #include <io.h>
 #include "renderer.h"
 #include "define.h"
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include "../framework/debug_ostream.h"
 #include <cstring>
 #include <cwchar>
@@ -131,6 +131,11 @@ static float g_ClientHeight = DRAW_SCREEN_Y;
 
 // バックバッファ情報（リサイズ時に参照）
 static D3D11_TEXTURE2D_DESC g_BackBufferDesc;
+// 3Dシーンはウィンドウ実サイズから分離し、4Kでも1080p相当で描いて最後に拡大する。
+static const UINT kInternal3DMaxWidth = 1920;
+static const UINT kInternal3DMaxHeight = 1080;
+static UINT g_SceneWidth = 1;
+static UINT g_SceneHeight = 1;
 
 // 深度ステンシルバッファ（解放用に保持）
 static ID3D11Texture2D* g_pDepthStencilBuffer = NULL;
@@ -143,7 +148,7 @@ static ID3D11RenderTargetView* g_SsaoRenderTargetView[2] = {};
 static ID3D11ShaderResourceView* g_SsaoShaderView[2] = {};
 static ID3D11Buffer* g_SsaoQuadVertexBuffer = nullptr;
 static ID3D11Buffer* g_SsaoBuffer = nullptr;
-static bool g_SsaoEnabled = true;
+static bool g_SsaoEnabled = false;
 static float g_SsaoIntensity = 0.85f;
 static float g_SsaoRadius = 1.25f;
 static float g_SsaoBias = 0.04f;
@@ -154,7 +159,6 @@ static bool g_IsTakingScreenshot = false;
 static ID3D11RenderTargetView* g_SSTargetView = nullptr;
 static ID3D11DepthStencilView* g_SSDepthView = nullptr;
 
-#if defined(_DEBUG)
 static constexpr int GPU_TIMING_QUERY_COUNT = 8;
 
 struct GpuTimingQuery
@@ -168,7 +172,6 @@ struct GpuTimingQuery
 static GpuTimingQuery g_GpuTimingQueries[GPU_TIMING_QUERY_COUNT] = {};
 static int g_ActiveGpuTimingQuery = -1;
 static bool g_GpuTimingAvailable = false;
-#endif
 static float g_LastGpuFrameMs = -1.0f;
 
 #if defined(_DEBUG)
@@ -224,6 +227,112 @@ namespace
 		return false;
 	}
 
+	static bool IsHardwareAdapter(const DXGI_ADAPTER_DESC1& desc)
+	{
+		return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0;
+	}
+
+	static bool TrySelectAdapterByGpuPreference(
+		IDXGIFactory2* factory,
+		DXGI_GPU_PREFERENCE preference,
+		IDXGIAdapter1** outAdapter,
+		DXGI_ADAPTER_DESC1* outDesc)
+	{
+		if (!factory || !outAdapter || !outDesc)
+		{
+			return false;
+		}
+
+		IDXGIFactory6* factory6 = nullptr;
+		if (FAILED(factory->QueryInterface(IID_PPV_ARGS(&factory6))) || !factory6)
+		{
+			return false;
+		}
+
+		bool selected = false;
+		for (UINT index = 0; ; ++index)
+		{
+			IDXGIAdapter1* adapter = nullptr;
+			const HRESULT hr = factory6->EnumAdapterByGpuPreference(
+				index,
+				preference,
+				IID_PPV_ARGS(&adapter));
+			if (hr == DXGI_ERROR_NOT_FOUND)
+			{
+				break;
+			}
+			if (FAILED(hr) || !adapter)
+			{
+				SAFE_RELEASE(adapter);
+				continue;
+			}
+
+			DXGI_ADAPTER_DESC1 desc = {};
+			adapter->GetDesc1(&desc);
+			if (!IsHardwareAdapter(desc))
+			{
+				adapter->Release();
+				continue;
+			}
+
+			*outAdapter = adapter;
+			*outDesc = desc;
+			selected = true;
+			break;
+		}
+
+		factory6->Release();
+		return selected;
+	}
+
+	static void SelectAdapterByDedicatedMemory(
+		IDXGIFactory2* factory,
+		IDXGIAdapter1** outAdapter,
+		DXGI_ADAPTER_DESC1* outDesc)
+	{
+		if (!factory || !outAdapter || !outDesc)
+		{
+			return;
+		}
+
+		SIZE_T selectedMemory = 0;
+		for (UINT index = 0; ; ++index)
+		{
+			IDXGIAdapter1* adapter = nullptr;
+			if (factory->EnumAdapters1(index, &adapter) == DXGI_ERROR_NOT_FOUND)
+			{
+				break;
+			}
+			if (!adapter)
+			{
+				continue;
+			}
+
+			DXGI_ADAPTER_DESC1 desc = {};
+			adapter->GetDesc1(&desc);
+			if (!IsHardwareAdapter(desc))
+			{
+				adapter->Release();
+				continue;
+			}
+
+			const bool shouldSelect =
+				*outAdapter == nullptr ||
+				desc.DedicatedVideoMemory > selectedMemory;
+			if (shouldSelect)
+			{
+				SAFE_RELEASE(*outAdapter);
+				*outAdapter = adapter;
+				*outDesc = desc;
+				selectedMemory = desc.DedicatedVideoMemory;
+			}
+			else
+			{
+				adapter->Release();
+			}
+		}
+	}
+
 	static std::string AdapterNameForLog(const DXGI_ADAPTER_DESC1& desc)
 	{
 		std::string name;
@@ -274,7 +383,6 @@ namespace
 		return true;
 	}
 
-#if defined(_DEBUG)
 	static void ReleaseGpuTimingQueries(void)
 	{
 		for (GpuTimingQuery& query : g_GpuTimingQueries)
@@ -419,7 +527,6 @@ namespace
 		query.submitted = true;
 		g_ActiveGpuTimingQuery = -1;
 	}
-#endif
 }
 
 static void ResetRendererStateCache(void)
@@ -513,16 +620,44 @@ static void CreateSsaoQuad(void)
 	g_D3DDevice->CreateBuffer(&desc, &data, &g_SsaoQuadVertexBuffer);
 }
 
+static void UpdateInternalSceneSize(void)
+{
+	const UINT backWidth = (std::max)(1u, g_BackBufferDesc.Width);
+	const UINT backHeight = (std::max)(1u, g_BackBufferDesc.Height);
+	if (backWidth <= kInternal3DMaxWidth && backHeight <= kInternal3DMaxHeight)
+	{
+		g_SceneWidth = backWidth;
+		g_SceneHeight = backHeight;
+		return;
+	}
+
+	const float scale = (std::min)(
+		static_cast<float>(kInternal3DMaxWidth) / static_cast<float>(backWidth),
+		static_cast<float>(kInternal3DMaxHeight) / static_cast<float>(backHeight));
+	g_SceneWidth = (std::max)(1u, static_cast<UINT>(backWidth * scale + 0.5f));
+	g_SceneHeight = (std::max)(1u, static_cast<UINT>(backHeight * scale + 0.5f));
+}
+
+static UINT GetSsaoWidth(void)
+{
+	return (g_SceneWidth + 3) / 4;
+}
+
+static UINT GetSsaoHeight(void)
+{
+	return (g_SceneHeight + 3) / 4;
+}
+
 static void CreateSsaoTargets(void)
 {
-	if (!g_D3DDevice || g_BackBufferDesc.Width == 0 || g_BackBufferDesc.Height == 0)
+	if (!g_D3DDevice || g_SceneWidth == 0 || g_SceneHeight == 0)
 	{
 		return;
 	}
 
 	D3D11_TEXTURE2D_DESC sceneDesc = {};
-	sceneDesc.Width = g_BackBufferDesc.Width;
-	sceneDesc.Height = g_BackBufferDesc.Height;
+	sceneDesc.Width = g_SceneWidth;
+	sceneDesc.Height = g_SceneHeight;
 	sceneDesc.MipLevels = 1;
 	sceneDesc.ArraySize = 1;
 	sceneDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -539,8 +674,8 @@ static void CreateSsaoTargets(void)
 	g_D3DDevice->CreateShaderResourceView(
 		g_SceneTexture, nullptr, &g_SceneShaderView);
 
-	const UINT aoWidth = (g_BackBufferDesc.Width + 1) / 2;
-	const UINT aoHeight = (g_BackBufferDesc.Height + 1) / 2;
+	const UINT aoWidth = GetSsaoWidth();
+	const UINT aoHeight = GetSsaoHeight();
 	D3D11_TEXTURE2D_DESC aoDesc = {};
 	aoDesc.Width = aoWidth;
 	aoDesc.Height = aoHeight;
@@ -585,6 +720,8 @@ static void configureBackBuffer(void)
 		pBackBuffer->Release();
 	}
 
+	UpdateInternalSceneSize();
+
 	g_CurrentBackBufferIndex = g_SwapChain3
 		? g_SwapChain3->GetCurrentBackBufferIndex()
 		: 0;
@@ -593,8 +730,8 @@ static void configureBackBuffer(void)
 	// 深度ステンシルバッファ生成
 	D3D11_TEXTURE2D_DESC td;
 	ZeroMemory(&td, sizeof(td));
-	td.Width              = g_BackBufferDesc.Width;
-	td.Height             = g_BackBufferDesc.Height;
+	td.Width              = g_SceneWidth;
+	td.Height             = g_SceneHeight;
 	td.MipLevels          = 1;
 	td.ArraySize          = 1;
 	td.Format             = DXGI_FORMAT_R24G8_TYPELESS;
@@ -625,7 +762,7 @@ static void configureBackBuffer(void)
 	CreateSsaoQuad();
 
 	// DirectX へセット
-	g_ImmediateContext->OMSetRenderTargets(1, &g_RenderTargetView, g_DepthStencilView);
+	g_ImmediateContext->OMSetRenderTargets(1, &g_RenderTargetView, nullptr);
 
 	// ビューポートをバックバッファ全体に設定
 	D3D11_VIEWPORT vp;
@@ -687,8 +824,8 @@ static void Direct3D_SetViewport3D(void)
 	D3D11_VIEWPORT vp;
 	vp.TopLeftX = 0.0f;
 	vp.TopLeftY = 0.0f;
-	vp.Width    = static_cast<float>(g_BackBufferDesc.Width);
-	vp.Height   = static_cast<float>(g_BackBufferDesc.Height);
+	vp.Width    = static_cast<float>(g_SceneWidth);
+	vp.Height   = static_cast<float>(g_SceneHeight);
 	vp.MinDepth = 0.0f;
 	vp.MaxDepth = 1.0f;
 	g_ImmediateContext->RSSetViewports(1, &vp);
@@ -1378,70 +1515,34 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		: GpuSelectionMode::Auto;
 
 	IDXGIAdapter1* selectedAdapter = nullptr;
-	SIZE_T selectedMemory = 0;
-	bool selectedHasDisplayOutput = false;
 	DXGI_ADAPTER_DESC1 selectedAdapterDesc = {};
-	for (UINT index = 0; ; ++index)
+	bool selectedByGpuPreference = TrySelectAdapterByGpuPreference(
+		dxgiFactory,
+		DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+		&selectedAdapter,
+		&selectedAdapterDesc);
+	if (!selectedByGpuPreference)
 	{
-		IDXGIAdapter1* adapter = nullptr;
-		if (dxgiFactory->EnumAdapters1(index, &adapter) == DXGI_ERROR_NOT_FOUND)
-		{
-			break;
-		}
-		if (!adapter)
-		{
-			continue;
-		}
-
-		DXGI_ADAPTER_DESC1 desc = {};
-		adapter->GetDesc1(&desc);
-		if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
-		{
-			adapter->Release();
-			continue;
-		}
-
-		const bool hasDisplayOutput = AdapterHasDisplayOutput(adapter);
-		bool shouldSelect = selectedAdapter == nullptr;
-		if (!shouldSelect)
-		{
-			// autoでは表示出力を持つGPUを優先し、同条件なら専用VRAM量で選ぶ。
-			// highでは従来どおり専用VRAM量だけで選ぶ。
-			if (gpuSelectionMode == GpuSelectionMode::Auto &&
-				hasDisplayOutput != selectedHasDisplayOutput)
-			{
-				shouldSelect = hasDisplayOutput;
-			}
-			else
-			{
-				shouldSelect = desc.DedicatedVideoMemory >= selectedMemory;
-			}
-		}
-
-		if (shouldSelect)
-		{
-			SAFE_RELEASE(selectedAdapter);
-			selectedAdapter = adapter;
-			selectedMemory = desc.DedicatedVideoMemory;
-			selectedHasDisplayOutput = hasDisplayOutput;
-			selectedAdapterDesc = desc;
-		}
-		else
-		{
-			adapter->Release();
-		}
+		SelectAdapterByDedicatedMemory(
+			dxgiFactory,
+			&selectedAdapter,
+			&selectedAdapterDesc);
 	}
 
 	if (selectedAdapter)
 	{
+		const bool selectedHasDisplayOutput =
+			AdapterHasDisplayOutput(selectedAdapter);
 		hal::dout
 			<< "[Renderer] GPU mode: "
 			<< (gpuSelectionMode == GpuSelectionMode::HighPerformance ? "high" : "auto")
 			<< " | Adapter: " << AdapterNameForLog(selectedAdapterDesc)
+			<< " | Selection: "
+			<< (selectedByGpuPreference ? "gpu-preference-high" : "dedicated-vram")
 			<< " | Display output: " << (selectedHasDisplayOutput ? "yes" : "no")
 			<< " | Dedicated VRAM: "
 			<< static_cast<unsigned long long>(
-				selectedMemory / (1024 * 1024))
+				selectedAdapterDesc.DedicatedVideoMemory / (1024 * 1024))
 			<< " MB" << std::endl;
 	}
 
@@ -1518,9 +1619,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	}
 
 	configureBackBuffer();
-#if defined(_DEBUG)
 	InitializeGpuTimingQueries();
-#endif
 
 	// ラスタライザステート設定
 	D3D11_RASTERIZER_DESC rd;
@@ -1860,9 +1959,7 @@ void FinalizeRenderer(void)
 		SAFE_RELEASE(rState[i]);
 	}
 
-#if defined(_DEBUG)
 	ReleaseGpuTimingQueries();
-#endif
 	if( g_ImmediateContext )	g_ImmediateContext->ClearState();
 	releaseBackBuffer();
 	SAFE_RELEASE(g_SwapChain3);
@@ -1877,9 +1974,7 @@ void FinalizeRenderer(void)
 //=============================================================================
 void Clear(void)
 {
-#if defined(_DEBUG)
 	BeginGpuFrameTiming();
-#endif
 	// バックバッファクリア色
 	float ClearColor[4] = { 181.0f / 255.0f, 200.0f / 255.0f, 211.0f / 255.0f, 1.0f }; // #B5C8D3
 	ID3D11ShaderResourceView* nullSrvs[8] = {};
@@ -1939,9 +2034,7 @@ void Present(void)
 		return;
 	}
 
-#if defined(_DEBUG)
 	EndGpuFrameTiming();
-#endif
 	const HRESULT presentResult = g_SwapChain->Present(1, 0);
 	if (SUCCEEDED(presentResult))
 	{
@@ -1957,7 +2050,7 @@ void Present(void)
 		g_ImmediateContext->OMSetRenderTargets(
 			1,
 			&g_RenderTargetView,
-			g_DepthStencilView);
+			nullptr);
 	}
 }
 
@@ -2113,22 +2206,29 @@ void Direct3D_ApplySsao(void)
 	if (g_IsTakingScreenshot ||
 		!g_ImmediateContext ||
 		!g_SceneShaderView ||
-		!g_DepthShaderView ||
-		!g_SsaoRenderTargetView[0] ||
-		!g_SsaoRenderTargetView[1] ||
 		!g_SsaoBuffer ||
 		!g_SsaoQuadVertexBuffer)
 	{
 		return;
 	}
 
-	ShaderManager* ssaoShader = GetShader(S_SSAO);
-	ShaderManager* blurShader = GetShader(S_SSAO_BLUR);
 	ShaderManager* compositeShader = GetShader(S_SSAO_COMPOSITE);
-	if (!ssaoShader || !blurShader || !compositeShader ||
-		!ssaoShader->GetVertexShader() ||
-		!blurShader->GetVertexShader() ||
-		!compositeShader->GetVertexShader())
+	if (!compositeShader || !compositeShader->GetVertexShader())
+	{
+		return;
+	}
+
+	const bool useSsao =
+		g_SsaoEnabled &&
+		g_DepthShaderView &&
+		g_SsaoRenderTargetView[0] &&
+		g_SsaoRenderTargetView[1];
+	ShaderManager* ssaoShader = useSsao ? GetShader(S_SSAO) : nullptr;
+	ShaderManager* blurShader = useSsao ? GetShader(S_SSAO_BLUR) : nullptr;
+	if (useSsao &&
+		(!ssaoShader || !blurShader ||
+			!ssaoShader->GetVertexShader() ||
+			!blurShader->GetVertexShader()))
 	{
 		return;
 	}
@@ -2139,33 +2239,24 @@ void Direct3D_ApplySsao(void)
 	XMStoreFloat4x4(
 		&constants.InvProjection,
 		XMMatrixTranspose(inverseProjection));
-	const float fullWidth = static_cast<float>(
-		(std::max)(1u, g_BackBufferDesc.Width));
-	const float fullHeight = static_cast<float>(
-		(std::max)(1u, g_BackBufferDesc.Height));
-	const UINT aoWidth = (g_BackBufferDesc.Width + 1) / 2;
-	const UINT aoHeight = (g_BackBufferDesc.Height + 1) / 2;
-	const bool useSsao = g_SsaoEnabled;
+	const float sceneWidth = static_cast<float>((std::max)(1u, g_SceneWidth));
+	const float sceneHeight = static_cast<float>((std::max)(1u, g_SceneHeight));
+	const UINT aoWidth = GetSsaoWidth();
+	const UINT aoHeight = GetSsaoHeight();
 	const float effectiveIntensity = useSsao ? g_SsaoIntensity : 0.0f;
 	const float effectiveRadius = useSsao ? g_SsaoRadius : 1.0f;
 	const float effectiveBias = useSsao ? g_SsaoBias : 0.04f;
 	const float effectivePower = useSsao ? g_SsaoPower : 1.0f;
-	const float params[] = {
-		1.0f / fullWidth,
-		1.0f / fullHeight,
+	constants.Params = XMFLOAT4(
+		1.0f / sceneWidth,
+		1.0f / sceneHeight,
 		effectiveRadius,
-		effectiveBias
-	};
-	const float settings[] = {
+		effectiveBias);
+	constants.Settings = XMFLOAT4(
 		effectiveIntensity,
 		effectivePower,
 		useSsao ? 1.0f : 0.0f,
-		0.0f
-	};
-	constants.Params = XMFLOAT4(
-		params[0], params[1], params[2], params[3]);
-	constants.Settings = XMFLOAT4(
-		settings[0], settings[1], settings[2], settings[3]);
+		0.0f);
 	UpdateDynamicConstantBuffer(
 		g_SsaoBuffer, &constants, sizeof(constants));
 
@@ -2181,6 +2272,7 @@ void Direct3D_ApplySsao(void)
 	SetDepthEnable(false);
 	SetCullState(CULLSTATE_NONE);
 	SetBlendState(BLENDSTATE_NONE);
+	SetDefaultSampler();
 	g_ImmediateContext->IASetVertexBuffers(
 		0, 1, &g_SsaoQuadVertexBuffer, &stride, &offset);
 	g_ImmediateContext->IASetPrimitiveTopology(
@@ -2188,33 +2280,35 @@ void Direct3D_ApplySsao(void)
 	g_ImmediateContext->VSSetConstantBuffers(10, 1, &constantBuffer);
 	g_ImmediateContext->PSSetConstantBuffers(10, 1, &constantBuffer);
 
-	// 深度を読む間は、深度DSVを出力先から外す。
-	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
-	g_ImmediateContext->OMSetRenderTargets(1, &aoTarget, nullptr);
-	SetPostProcessViewport(aoWidth, aoHeight);
-	g_ImmediateContext->IASetInputLayout(ssaoShader->GetVertexLayout());
-	g_ImmediateContext->VSSetShader(
-		ssaoShader->GetVertexShader(), nullptr, 0);
-	g_ImmediateContext->PSSetShader(
-		ssaoShader->GetPixelShader(), nullptr, 0);
-	g_ImmediateContext->PSSetShaderResources(0, 1, &depthView);
-	g_ImmediateContext->Draw(4, 0);
+	if (useSsao)
+	{
+		// 深度を読む間は、深度DSVを出力先から外す。
+		g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+		g_ImmediateContext->OMSetRenderTargets(1, &aoTarget, nullptr);
+		SetPostProcessViewport(aoWidth, aoHeight);
+		g_ImmediateContext->IASetInputLayout(ssaoShader->GetVertexLayout());
+		g_ImmediateContext->VSSetShader(
+			ssaoShader->GetVertexShader(), nullptr, 0);
+		g_ImmediateContext->PSSetShader(
+			ssaoShader->GetPixelShader(), nullptr, 0);
+		g_ImmediateContext->PSSetShaderResources(0, 1, &depthView);
+		g_ImmediateContext->Draw(4, 0);
 
-	// 深度差を見ながらAOをぼかし、柱の細い隙間のちらつきを抑える。
-	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
-	g_ImmediateContext->OMSetRenderTargets(1, &blurTarget, nullptr);
-	g_ImmediateContext->IASetInputLayout(blurShader->GetVertexLayout());
-	g_ImmediateContext->VSSetShader(
-		blurShader->GetVertexShader(), nullptr, 0);
-	g_ImmediateContext->PSSetShader(
-		blurShader->GetPixelShader(), nullptr, 0);
-	ID3D11ShaderResourceView* blurInputs[2] = {
-		ssaoView, depthView
-	};
-	g_ImmediateContext->PSSetShaderResources(0, 2, blurInputs);
-	g_ImmediateContext->Draw(4, 0);
+		g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
+		g_ImmediateContext->OMSetRenderTargets(1, &blurTarget, nullptr);
+		g_ImmediateContext->IASetInputLayout(blurShader->GetVertexLayout());
+		g_ImmediateContext->VSSetShader(
+			blurShader->GetVertexShader(), nullptr, 0);
+		g_ImmediateContext->PSSetShader(
+			blurShader->GetPixelShader(), nullptr, 0);
+		ID3D11ShaderResourceView* blurInputs[2] = {
+			ssaoView, depthView
+		};
+		g_ImmediateContext->PSSetShaderResources(0, 2, blurInputs);
+		g_ImmediateContext->Draw(4, 0);
+	}
 
-	// シーン色とAOをバックバッファへ合成する。
+	// 内部解像度のシーン色をバックバッファへ拡大合成する。
 	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
 	g_ImmediateContext->OMSetRenderTargets(
 		1, &g_RenderTargetView, nullptr);
@@ -2226,7 +2320,8 @@ void Direct3D_ApplySsao(void)
 	g_ImmediateContext->PSSetShader(
 		compositeShader->GetPixelShader(), nullptr, 0);
 	ID3D11ShaderResourceView* compositeInputs[2] = {
-		g_SceneShaderView, blurredView
+		g_SceneShaderView,
+		useSsao ? blurredView : g_SceneShaderView
 	};
 	g_ImmediateContext->PSSetShaderResources(0, 2, compositeInputs);
 	g_ImmediateContext->Draw(4, 0);
@@ -2330,12 +2425,16 @@ void TakeScreenshot(void)
 	float prevClientWidth = g_ClientWidth;
 	float prevClientHeight = g_ClientHeight;
 	D3D11_TEXTURE2D_DESC prevBackBufferDesc = g_BackBufferDesc;
+	const UINT prevSceneWidth = g_SceneWidth;
+	const UINT prevSceneHeight = g_SceneHeight;
 
 	// SCREENSHOT_WIDTH x SCREENSHOT_HEIGHT に解像度を変更し、バックバッファ記述も書き換える
 	g_ClientWidth = static_cast<float>(SCREENSHOT_WIDTH);
 	g_ClientHeight = static_cast<float>(SCREENSHOT_HEIGHT);
 	g_BackBufferDesc.Width = SCREENSHOT_WIDTH;
 	g_BackBufferDesc.Height = SCREENSHOT_HEIGHT;
+	g_SceneWidth = SCREENSHOT_WIDTH;
+	g_SceneHeight = SCREENSHOT_HEIGHT;
 
 	// スクリーンショット撮影中フラグとターゲットの設定
 	g_IsTakingScreenshot = true;
@@ -2413,6 +2512,8 @@ void TakeScreenshot(void)
 	g_ClientWidth = prevClientWidth;
 	g_ClientHeight = prevClientHeight;
 	g_BackBufferDesc = prevBackBufferDesc;
+	g_SceneWidth = prevSceneWidth;
+	g_SceneHeight = prevSceneHeight;
 
 	g_ImmediateContext->OMSetRenderTargets(1, &pPrevRTView, pPrevDSView);
 	g_ImmediateContext->RSSetViewports(1, &prevViewport);

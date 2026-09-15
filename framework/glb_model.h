@@ -124,6 +124,8 @@ public:
 		std::vector<XMFLOAT3>* outTriangleVertices);
 	bool AttachPreparedData(GlbPreparedData* data);
 	void MergePreparedMeshesByMaterial(void);
+	// 小さいモデルだけ統合シャドウを作る。会場の巨大GLBは作らない。
+	void TryBuildSmallCombinedShadow(void);
 	// テクスチャが違っても最大 maxMeshes 本へ潰す。遠景LOD2向け。ワーカーから呼ぶ。
 	void CollapsePreparedMeshes(unsigned int maxMeshes);
 
@@ -190,6 +192,7 @@ private:
 	void SetupMeshMaterials(const aiScene* pScene);
 	void SetupPreparedMeshMaterials(void);
 	void RebuildVisibleIndexBuffer(GlbMesh& mesh);
+	bool ConvertImportedSceneToPrepared(void);
 	void BuildCombinedShadowGeometry(void);
 	int PumpCombinedShadow(ID3D11Device* pDevice);
 

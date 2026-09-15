@@ -175,6 +175,8 @@ struct ExpoDrawJob
 	XMFLOAT3 streamPosition = { 0.0f, 0.0f, 0.0f };
 	float streamRadius = 0.0f;
 	std::vector<std::pair<int, int>> farBatchRefs;
+	int retryCount = 0;
+	ULONGLONG retryAfterMs = 0;
 };
 
 static std::vector<std::unique_ptr<ExpoDrawJob>> g_DrawJobs;
@@ -1215,31 +1217,7 @@ static void CommitDrawJob(ExpoDrawJob* job)
 
 static int MaxImportWorkers(void)
 {
-	// 利用可能メモリが少ないUMA環境では同時実行を2に抑え、
-	// それ以外では最大4まで広げて初期ロードを短縮する。
-	int n = 4;
-	const unsigned int hardware = std::thread::hardware_concurrency();
-	if (hardware > 0 && static_cast<int>(hardware) < n)
-	{
-		n = static_cast<int>(hardware);
-	}
-	MEMORYSTATUSEX memory = {};
-	memory.dwLength = sizeof(memory);
-	if (GlobalMemoryStatusEx(&memory) &&
-		memory.ullAvailPhys < (3ull * 1024ull * 1024ull * 1024ull))
-	{
-		n = 2;
-	}
-	const int jobCount = static_cast<int>(g_DrawJobs.size());
-	if (n > jobCount)
-	{
-		n = jobCount;
-	}
-	if (n < 1)
-	{
-		n = 1;
-	}
-	return n;
+	return 1;
 }
 
 static bool IsCoreDrawJob(const ExpoDrawJob* job)
@@ -1434,6 +1412,7 @@ static void StartDrawWorker(ExpoDrawJob* job)
 		{
 			model->PrepareShadowCells(EXPO_SHADOW_CELL_WORLD / EXPO_MODEL_SCALE);
 		}
+		model->TryBuildSmallCombinedShadow();
 		if (!model->DecodeEmbeddedTextures(raw->kind == ExpoDrawKind::Floor))
 		{
 			raw->failureReason = "テクスチャCPUデコード失敗";
@@ -1599,6 +1578,11 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 				job->failureReason != "ファイルなし" &&
 				IsPavilionInLoadRange(job, EXPO_PAVILION_LOAD_RADIUS))
 			{
+				if (job->retryCount >= 3 ||
+					GetTickCount64() < job->retryAfterMs)
+				{
+					continue;
+				}
 				if (job->worker.joinable())
 				{
 					job->worker.join();
@@ -1613,6 +1597,9 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 				job->workerFailed = false;
 				job->workerCancelled = false;
 				job->failureReason.clear();
+				job->retryCount += 1;
+				job->retryAfterMs =
+					GetTickCount64() + 5000ull * static_cast<ULONGLONG>(job->retryCount);
 			}
 			continue;
 		}
@@ -2418,6 +2405,20 @@ void Field_PumpAfterPresent(double lastDrawMs, float lastGpuMs)
 		return;
 	}
 	if (lastGpuMs > EXPO_STREAM_SKIP_GPU_MS)
+	{
+		return;
+	}
+	unsigned long long localBudgetMb = 0;
+	unsigned long long localUsageMb = 0;
+	unsigned long long nonLocalBudgetMb = 0;
+	unsigned long long nonLocalUsageMb = 0;
+	if (Direct3D_GetMemoryInfo(
+		&localBudgetMb,
+		&localUsageMb,
+		&nonLocalBudgetMb,
+		&nonLocalUsageMb) &&
+		localBudgetMb > 0 &&
+		localUsageMb * 100ull > localBudgetMb * 85ull)
 	{
 		return;
 	}

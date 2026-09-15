@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal EnableExtensions
 chcp 65001 >nul
 set "PYTHONUTF8=1"
@@ -20,8 +20,8 @@ echo Project PLATEAU の公式データをダウンロードし、ゲーム用�
 echo.
 echo 必要な環境:
 echo   - Python 3.10 以降
-echo   - Node.js 18 以降（npm を含む）
-echo   - curl.exe（Windows 標準）
+echo   - Node.js 18 以降 / npm
+echo   - curl.exe / Windows 標準
 echo.
 echo 検出結果:
 set "DEP_OK=1"
@@ -69,7 +69,7 @@ echo https://www.geospatial.jp/ckan/dataset/plateau-27999-osaka-shi-2025
 echo.
 echo 注意:
 echo - データには第三者の著作権・商標が含まれる場合があります。
-echo - 公式の利用条件（非営利などの制限を含む）に従ってください。
+echo - 公式の利用条件に従ってください。非営利などの制限を含みます。
 echo - 元データの再配布や、公式作品であるかのような表示はしないでください。
 echo - 公開や営利利用の前に、最新の利用条件を再確認してください。
 echo.
@@ -141,7 +141,7 @@ if errorlevel 1 (
 echo.
 echo 削除しても asset\expomodel のゲーム用モデルは残ります。
 echo 残すと、再変換時のダウンロードを省略できます。
-set /p "CLEAN=一時フォルダ data_* を削除しますか？ (Y/N): "
+set /p "CLEAN=一時フォルダ data_* を削除しますか？ Y / N: "
 if /I "%CLEAN%"=="Y" (
     python "tool\download_expo_assets.py" --delete-data-dirs
     if errorlevel 1 (

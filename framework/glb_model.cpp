@@ -19,6 +19,7 @@
 #include <functional>
 #include <limits>
 #include <cmath>
+#include <cstdlib>
 #include <unordered_map>
 #include <thread>
 #include "nlohmann/json.hpp"
@@ -28,6 +29,7 @@ using json = nlohmann::json;
 
 static const size_t GLB_MAX_TEXTURE_DIMENSION = 2048;
 static const unsigned int GLB_MAX_CELL_DRAW_INDEXED = 1;
+static const std::size_t GLB_MAX_COMBINED_SHADOW_BYTES = 8u * 1024u * 1024u;
 static std::mutex g_AssimpMutex;
 
 static XMMATRIX AiMatrixToGlbMatrix(const aiMatrix4x4& matrix)
@@ -1423,6 +1425,227 @@ bool GlbModel::AttachImportedScene(const aiScene* scene)
 	return true;
 }
 
+static int AssimpTextureIndex(
+	const aiScene* scene,
+	const aiMaterial* material,
+	aiTextureType type)
+{
+	if (!scene || !material)
+	{
+		return -1;
+	}
+	aiString path;
+	if (material->GetTexture(type, 0, &path) != AI_SUCCESS || path.length == 0)
+	{
+		return -1;
+	}
+	const aiTexture* embedded = scene->GetEmbeddedTexture(path.C_Str());
+	if (embedded)
+	{
+		for (unsigned int i = 0; i < scene->mNumTextures; ++i)
+		{
+			if (scene->mTextures[i] == embedded)
+			{
+				return static_cast<int>(i);
+			}
+		}
+	}
+	if (path.data[0] == '*')
+	{
+		return atoi(path.data + 1);
+	}
+	return -1;
+}
+
+bool GlbModel::ConvertImportedSceneToPrepared(void)
+{
+	if (!m_pScene || m_pPreparedData)
+	{
+		return false;
+	}
+
+	std::unique_ptr<GlbPreparedData> data(new GlbPreparedData());
+	data->enablePreparedPbr = m_EnablePreparedPbr;
+	data->hasBounds = true;
+	data->boundsMin = m_BoundsMin;
+	data->boundsMax = m_BoundsMax;
+	data->boundsCenter = m_BoundsCenter;
+	data->textures.resize(m_pScene->mNumTextures);
+	for (unsigned int i = 0; i < m_pScene->mNumTextures; ++i)
+	{
+		const aiTexture* source = m_pScene->mTextures[i];
+		GlbPreparedTextureData& destination = data->textures[i];
+		destination.name = std::string("*") + std::to_string(i);
+		if (!source)
+		{
+			continue;
+		}
+		if (source->mFilename.length > 0)
+		{
+			destination.name = source->mFilename.C_Str();
+		}
+		if (source->mHeight == 0 && source->pcData && source->mWidth > 0)
+		{
+			const std::uint8_t* bytes =
+				reinterpret_cast<const std::uint8_t*>(source->pcData);
+			destination.bytes.assign(bytes, bytes + source->mWidth);
+		}
+	}
+
+	data->meshes.reserve(m_pScene->mNumMeshes);
+	for (unsigned int m = 0; m < m_pScene->mNumMeshes; ++m)
+	{
+		const aiMesh* sourceMesh = m_pScene->mMeshes[m];
+		if (!sourceMesh || sourceMesh->mNumVertices == 0)
+		{
+			continue;
+		}
+		const XMMATRIX nodeTransform =
+			m < m_MeshNodeTransforms.size()
+			? m_MeshNodeTransforms[m]
+			: XMMatrixIdentity();
+		XMVECTOR determinant;
+		const XMMATRIX normalTransform =
+			XMMatrixTranspose(XMMatrixInverse(&determinant, nodeTransform));
+
+		GlbPreparedMeshData mesh;
+		mesh.vertices.resize(sourceMesh->mNumVertices);
+		for (unsigned int v = 0; v < sourceMesh->mNumVertices; ++v)
+		{
+			Vertex3D& vertex = mesh.vertices[v];
+			XMStoreFloat3(
+				&vertex.position,
+				XMVector3TransformCoord(
+					XMVectorSet(
+						sourceMesh->mVertices[v].x,
+						sourceMesh->mVertices[v].y,
+						sourceMesh->mVertices[v].z,
+						1.0f),
+					nodeTransform));
+			if (sourceMesh->HasNormals())
+			{
+				XMStoreFloat3(
+					&vertex.normal,
+					XMVector3Normalize(
+						XMVector3TransformNormal(
+							XMVectorSet(
+								sourceMesh->mNormals[v].x,
+								sourceMesh->mNormals[v].y,
+								sourceMesh->mNormals[v].z,
+								0.0f),
+							normalTransform)));
+			}
+			else
+			{
+				vertex.normal = XMFLOAT3(0.0f, 1.0f, 0.0f);
+			}
+			if (sourceMesh->HasTextureCoords(0))
+			{
+				vertex.texCoord = XMFLOAT2(
+					sourceMesh->mTextureCoords[0][v].x,
+					sourceMesh->mTextureCoords[0][v].y);
+			}
+			else
+			{
+				vertex.texCoord = XMFLOAT2(0.0f, 0.0f);
+			}
+			if (sourceMesh->HasVertexColors(0))
+			{
+				vertex.color = XMFLOAT4(
+					sourceMesh->mColors[0][v].r,
+					sourceMesh->mColors[0][v].g,
+					sourceMesh->mColors[0][v].b,
+					sourceMesh->mColors[0][v].a);
+			}
+			else
+			{
+				vertex.color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			}
+		}
+
+		mesh.indices.reserve(sourceMesh->mNumFaces * 3);
+		for (unsigned int f = 0; f < sourceMesh->mNumFaces; ++f)
+		{
+			const aiFace& face = sourceMesh->mFaces[f];
+			if (face.mNumIndices != 3)
+			{
+				continue;
+			}
+			mesh.indices.push_back(face.mIndices[0]);
+			mesh.indices.push_back(face.mIndices[1]);
+			mesh.indices.push_back(face.mIndices[2]);
+		}
+		if (mesh.indices.size() < 3)
+		{
+			continue;
+		}
+
+		if (!mesh.vertices.empty())
+		{
+			mesh.boundsMin = mesh.vertices[0].position;
+			mesh.boundsMax = mesh.vertices[0].position;
+			mesh.hasBounds = true;
+			for (std::size_t v = 1; v < mesh.vertices.size(); ++v)
+			{
+				const XMFLOAT3& position = mesh.vertices[v].position;
+				mesh.boundsMin.x = (std::min)(mesh.boundsMin.x, position.x);
+				mesh.boundsMin.y = (std::min)(mesh.boundsMin.y, position.y);
+				mesh.boundsMin.z = (std::min)(mesh.boundsMin.z, position.z);
+				mesh.boundsMax.x = (std::max)(mesh.boundsMax.x, position.x);
+				mesh.boundsMax.y = (std::max)(mesh.boundsMax.y, position.y);
+				mesh.boundsMax.z = (std::max)(mesh.boundsMax.z, position.z);
+			}
+		}
+
+		if (sourceMesh->mMaterialIndex < m_pScene->mNumMaterials)
+		{
+			const aiMaterial* material =
+				m_pScene->mMaterials[sourceMesh->mMaterialIndex];
+			aiColor4D color(1.0f, 1.0f, 1.0f, 1.0f);
+			if (AI_SUCCESS == material->Get(AI_MATKEY_COLOR_DIFFUSE, color))
+			{
+				mesh.diffuseColor = XMFLOAT4(color.r, color.g, color.b, color.a);
+			}
+			material->Get(AI_MATKEY_METALLIC_FACTOR, mesh.metallicFactor);
+			material->Get(AI_MATKEY_ROUGHNESS_FACTOR, mesh.roughnessFactor);
+			mesh.textureIndex = AssimpTextureIndex(
+				m_pScene, material, aiTextureType_BASE_COLOR);
+			if (mesh.textureIndex < 0)
+			{
+				mesh.textureIndex = AssimpTextureIndex(
+					m_pScene, material, aiTextureType_DIFFUSE);
+			}
+			mesh.normalIndex = AssimpTextureIndex(
+				m_pScene, material, aiTextureType_NORMALS);
+			mesh.metallicRoughnessIndex = AssimpTextureIndex(
+				m_pScene, material, aiTextureType_GLTF_METALLIC_ROUGHNESS);
+			mesh.emissiveIndex = AssimpTextureIndex(
+				m_pScene, material, aiTextureType_EMISSIVE);
+			const int textureCount = static_cast<int>(m_pScene->mNumTextures);
+			auto clampIndex = [textureCount](int index) -> int
+			{
+				return (index >= 0 && index < textureCount) ? index : -1;
+			};
+			mesh.textureIndex = clampIndex(mesh.textureIndex);
+			mesh.normalIndex = clampIndex(mesh.normalIndex);
+			mesh.metallicRoughnessIndex = clampIndex(mesh.metallicRoughnessIndex);
+			mesh.emissiveIndex = clampIndex(mesh.emissiveIndex);
+		}
+		data->meshes.push_back(std::move(mesh));
+	}
+
+	if (data->meshes.empty())
+	{
+		return false;
+	}
+
+	aiReleaseImport(m_pScene);
+	m_pScene = nullptr;
+	m_MeshNodeTransforms.clear();
+	m_pPreparedData = std::move(data);
+	return true;
+}
+
 bool GlbModel::AttachPreparedData(GlbPreparedData* data)
 {
 	std::unique_ptr<GlbPreparedData> ownedData(data);
@@ -1794,7 +2017,6 @@ void GlbModel::PrepareShadowCells(float modelSpaceCellSize)
 			mesh.shadowCells.push_back(prep);
 		}
 	}
-	BuildCombinedShadowGeometry();
 }
 
 void GlbModel::BuildCombinedShadowGeometry(void)
@@ -1850,7 +2072,22 @@ void GlbModel::BuildCombinedShadowGeometry(void)
 	{
 		m_pPreparedData->combinedShadowVertices.clear();
 		m_pPreparedData->combinedShadowIndices.clear();
+		return;
 	}
+
+	const std::size_t combinedBytes =
+		m_pPreparedData->combinedShadowVertices.size() * sizeof(Vertex3D) +
+		m_pPreparedData->combinedShadowIndices.size() * sizeof(std::uint32_t);
+	if (combinedBytes > GLB_MAX_COMBINED_SHADOW_BYTES)
+	{
+		m_pPreparedData->combinedShadowVertices.clear();
+		m_pPreparedData->combinedShadowIndices.clear();
+	}
+}
+
+void GlbModel::TryBuildSmallCombinedShadow(void)
+{
+	BuildCombinedShadowGeometry();
 }
 
 int GlbModel::PumpCombinedShadow(ID3D11Device* pDevice)
@@ -2132,6 +2369,13 @@ bool GlbModel::Load(const char* filePath, ID3D11Device* pDevice, ID3D11DeviceCon
 		}
 		return false;
 	}
+	if (!ConvertImportedSceneToPrepared())
+	{
+		Release();
+		return false;
+	}
+	MergePreparedMeshesByMaterial();
+	TryBuildSmallCombinedShadow();
 	if (!DecodeEmbeddedTextures(IsExpoFloorGlbPath(filePath)))
 	{
 		Release();
@@ -2750,26 +2994,9 @@ static void DecodeAssimpTexture(
 	GenerateMipMapsIfNeeded(decoded, skipTextureResize);
 }
 
-static unsigned int TextureDecodeWorkerCount(std::size_t textureCount)
+static unsigned int TextureDecodeWorkerCount(std::size_t)
 {
-	if (textureCount <= 1)
-	{
-		return 1;
-	}
-	unsigned int n = std::thread::hardware_concurrency();
-	if (n == 0)
-	{
-		n = 2;
-	}
-	if (n > 4)
-	{
-		n = 4;
-	}
-	if (n > textureCount)
-	{
-		n = static_cast<unsigned int>(textureCount);
-	}
-	return n;
+	return 1;
 }
 
 static void RunTextureDecodeJobs(
