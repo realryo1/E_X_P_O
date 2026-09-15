@@ -27,6 +27,13 @@ int Field_GetRingCollisionId(void);
 void Field_GetLoadStatus(char* out, size_t outSize);
 void Field_GetFinishedStatus(char* out, size_t outSize);
 void Field_GetMemoryStatus(char* out, size_t outSize);
+bool Field_GetNearestHighDetailName(
+	DirectX::XMFLOAT3 pos,
+	char* out,
+	size_t outSize);
 void Field_SetSkyboxYaw(float yawDegrees);
 void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture);
 void Field_SetSkyboxEnabled(bool enabled);
+void Field_DrawDebug(void);
+void Field_SetPavilionLabelsVisible(bool visible);
+bool Field_ArePavilionLabelsVisible(void);

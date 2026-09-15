@@ -228,6 +228,7 @@ void Game_Draw(void)
 	Ui_Draw();
 	Course_DrawHud();
 	Player_DrawDebug();
+	Field_DrawDebug();
 	Course_DrawMenu();
 	Sunlight_DrawDebug();
 	PlayerCamera_DrawDebug();

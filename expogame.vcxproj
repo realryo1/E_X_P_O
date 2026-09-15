@@ -176,6 +176,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="framework\ClickFont.cpp" />
+    <ClCompile Include="framework\BillboardDrawFont.cpp" />
     <ClCompile Include="framework\debug_ostream.cpp" />
     <ClCompile Include="framework\fade.cpp" />
     <ClCompile Include="framework\font.cpp" />
@@ -236,6 +237,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="framework\ClickFont.h" />
+    <ClInclude Include="framework\BillboardDrawFont.h" />
     <ClInclude Include="framework\component.h" />
     <ClInclude Include="framework\debug_ostream.h" />
     <ClInclude Include="framework\DirectXTex.h" />

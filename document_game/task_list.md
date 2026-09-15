@@ -11,7 +11,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 ## いまここ
 
-会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、内部解像度3D＋既定オフのSSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA 向け DrawIndexed 削減、Present 後ストリーミング、高性能GPU選択、VRAM予算と失敗backoffまで実装完了。Cursor での実速度計測は CodeLLDB ではなく Task `Run Release (No Debugger)`。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、内部解像度3D＋既定オフのSSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA 向け DrawIndexed 削減、Present 後ストリーミング、高性能GPU選択、VRAM予算と失敗backoffまで実装完了。Cursor での実速度計測は CodeLLDB ではなく `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
 現在保留・未着手の主要項目は、衝突メッシュ間引き、機体アニメーション、会場全体のIBL・昼夜サイクルである。距離＋高度フォグは実装済み。`null2` は動的キューブマップ鏡面を実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
@@ -85,7 +85,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `internal-3d-resolution`: 3Dは最大1920×1080、UIはウィンドウ実サイズ
 - [x] `streaming-vram-retry`: 失敗backoff（最大3回）、VRAM 85%でPresent後ポンプ停止、GPU時間はReleaseでも計測、インポート／デコードは各1スレッド
 - [x] `taxi-merged-shadow`: `flytaxi.glb` を0フレーム焼きのあとマテリアル結合。8MB以下だけ結合シャドウ
-- [x] `cursor-no-debugger-run`: Task `Run Release (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
+- [x] `cursor-no-debugger-run`: 実行とデバッグの `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
 
 ---
 

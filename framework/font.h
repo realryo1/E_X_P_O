@@ -54,19 +54,23 @@ public:
 	// pos: 基準位置, fontSize: フォントサイズ(px), rotation: 角度(度)
 	// color: 色(R,G,B,A), text: 表示テキスト, align: アライメント
 	DrawFont(XMFLOAT2 pos, float fontSize, float rotation,
-				 XMFLOAT4 color, const std::string& text, TextAlignment align = TA_MIDDLE);
+				 XMFLOAT4 color, const std::string& text, TextAlignment align = TA_MIDDLE,
+				 bool shareAtlas = false);
 	~DrawFont();
 
 	virtual void Draw();
 	void SetColor(XMFLOAT4 color) {
 		if (m_Color.x != color.x || m_Color.y != color.y || m_Color.z != color.z || m_Color.w != color.w) {
 			m_Color = color;
-			UpdateAtlasTexture();
+			if (!m_ShareAtlas) {
+				UpdateAtlasTexture();
+			}
 			m_MeshDirty = true;
 			RequestRedraw();
 		}
 	}
 	virtual void SetText(const std::string& text);
+	const std::string& GetText() const { return m_Text; }
 	XMFLOAT4 GetColor() const { return m_Color; }
 
 	void SetAlignment(TextAlignment align) {
@@ -78,13 +82,25 @@ public:
 	}
 	TextAlignment GetAlignment() const { return m_Alignment; }
 
+	void SetLineSpacing(float lineSpacing) {
+		if (lineSpacing < 0.5f) {
+			lineSpacing = 0.5f;
+		}
+		if (m_LineSpacing != lineSpacing) {
+			m_LineSpacing = lineSpacing;
+			m_MeshDirty = true;
+			RequestRedraw();
+		}
+	}
+
 	// テキスト中のグリフを事前にアトラスへ登録（描画時のスタッター防止）
 	void PreCacheGlyphs();
 
 protected:
 	void InvalidateMesh() { m_MeshDirty = true; }
+	bool EnsureDrawMesh();
+	void DrawUnlitMesh();
 
-private:
 	struct FontVertex {
 		XMFLOAT3 position;
 		XMFLOAT3 normal;
@@ -99,7 +115,9 @@ private:
 	XMFLOAT4 m_Color;
 	std::string m_Text;
 	float m_FontSize;                         // フォントサイズ（ピクセル）
+	float m_LineSpacing;
 	TextAlignment m_Alignment;                // アライメント
+	bool m_ShareAtlas;
 
 	UINT m_VertexCount;                       // バッチ済み頂点数（三角形リスト）
 	UINT m_VertexCapacity;                    // 頂点バッファ容量（頂点数）
@@ -138,6 +156,8 @@ private:
 	void RebuildMesh();
 	float GetKerningPx(int prevGlyph, int glyphIndex) const;
 	float GetGlyphAdvancePx(int glyphIndex);
+	std::map<int, CharInfo>& GlyphCache();
+	std::deque<int>& GlyphLru();
 
 	bool m_Ready;                             // FreeType Face 利用可能か
 };

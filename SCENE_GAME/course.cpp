@@ -1,4 +1,5 @@
 ﻿#include "course.h"
+#include "field.h"
 #include "gameaudio.h"
 #include "player.h"
 #include "playercamera.h"
@@ -803,7 +804,7 @@ namespace
 		{
 			return static_cast<int>(g_Courses.size()) + 2;
 		}
-		return 4;
+		return 5;
 	}
 
 	bool MenuHasBackGap(void)
@@ -883,6 +884,9 @@ namespace
 				"レース開始",
 				"コース編集・追加",
 				"スタート地点へ戻る",
+				Field_ArePavilionLabelsVisible()
+					? "パビリオン名：表示"
+					: "パビリオン名：非表示",
 				"",
 				"戻る",
 			};
@@ -1159,6 +1163,10 @@ namespace
 			break;
 		}
 		case 3:
+			Field_SetPavilionLabelsVisible(!Field_ArePavilionLabelsVisible());
+			RefreshMenuText();
+			break;
+		case 4:
 			SetMenuOpen(false);
 			break;
 		default:
@@ -1361,7 +1369,7 @@ void Course_Initialize(void)
 		0.0f,
 		{ 1.0f, 1.0f, 1.0f, 1.0f },
 		{ 1.0f, 0.85f, 0.25f, 1.0f },
-		"レース開始\nコース編集・追加\nスタート地点へ戻る\n\n戻る",
+		"レース開始\nコース編集・追加\nスタート地点へ戻る\nパビリオン名：表示\n\n戻る",
 		1.5f,
 		TA_MIDDLE);
 	g_pMenuBackground = new Sprite2D(

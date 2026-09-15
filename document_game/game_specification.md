@@ -36,7 +36,7 @@ BGM / SE のパスと発火地点は
 
 ### できること
 
-- 起動時またはTitleからGameへ遷移後、フェード後に床・LOD2・遠景LOD2・リングを読み、完了後もLOD3近景を逐次ストリーミングする。
+- 起動時またはTitleからGameへ遷移後、フェード中に床・LOD2・遠景LOD2・リングと初期優先LOD3（`null2`、`dynamic_equilibrium`、`expo_related_31`、`expo_related_25`、`angola`、`czech`）を読み、完了後もその他のLOD3近景を逐次ストリーミングする。
 - 空飛ぶタクシー `asset/model/flytaxi.glb`。ロード完了後に `Player_Update` が出現させる。
 - カメラヨー基準のW / 左スティック上による前進、マウス左右にゆっくり追従する機体旋回、旋回中のロール傾斜、Space / Shiftによる徐々に変化する上下移動。上昇・下降の速度ベクトルは前進速度と合成する（前進中は斜め、停止中は垂直移動）。三人称視点は `playercamera.cpp`（Far 2000）。
 - 当たり判定は床・リング・LOD2建物・東西ゲート本体。東西ゲートだけは高精細モデルを使い、そのワールドAABB内ではパンチ済みLOD2／遠景LOD2の重複判定を止める。それ以外のLOD3パビリオンは描画専用で、衝突はパンチ済みLOD2と遠景LOD2の形状へ行う。
@@ -83,7 +83,7 @@ BGM / SE のパスと発火地点は
 - 起動シーン: `SCENE_GAME`（`app/scene.cpp`）。`SCENE_TITLE`はプレースホルダーとして個別に利用可能。
 - 決定入力: `SCENE_TITLE`から`SCENE_GAME`へ遷移。`SCENE_GAME`からはシーン遷移しない。
 - 表示順序: 床 → パンチ済みLOD2 → 未パンチLOD2遠景 → 近景パビリオン → 大屋根リング → 空飛ぶタクシーの順で描画。
-- 初期ロード: `Game_Initialize` は `PlayerCamera_Initialize`、`Field_Initialize`（マニフェスト）、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。フェードが不透明なあいだに床、パンチ済みLOD2、未パンチLOD2遠景、リング、衝突メッシュの初期ロードを進めて完了させる。進捗はフェード前面のプログレスバーに表示し、完了後に明転する。明転後もLOD3近景はカメラ周辺、視線先、移動先を読み込む。
+- 初期ロード: `Game_Initialize` は `PlayerCamera_Initialize`、`Field_Initialize`（マニフェスト）、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。フェードが不透明なあいだに床、パンチ済みLOD2、未パンチLOD2遠景、リング、衝突メッシュ、および明示指定の初期優先LOD3（`expo_pavilion_null2.glb`、`expo_pavilion_dynamic_equilibrium.glb`、`expo_pavilion_expo_related_31.glb`、`expo_pavilion_expo_related_25.glb`、`expo_pavilion_angola.glb`、`expo_pavilion_czech.glb` の順）を進めて完了させる。進捗はフェード前面のプログレスバーに表示し、完了後に明転する。明転後もその他のLOD3近景はカメラ周辺、視線先、移動先を読み込む。
 - 衝突判定の初期化: `asset/collision/*.bin` を fread し、ワーカーで一括ベイクする。初期処理が終わってから建物の固定Yオフセット（`-9.010`）、リングの固定Yオフセット（`-1.550`）を適用する。実行時の高さスライダーは設けない。
 - 継続的ロード: 初期完了後も `Field_PumpLoad` を論理更新あたり最大1回呼び、CPUインポート開始だけを行う。GPU化とパビリオン破棄は `Present` 後の `Field_PumpAfterPresent`（最大3ms、直前フレームが重いときはスキップ）へ送る。進捗は HUD へ `LOADING IMPORT ... PAV n/N ...` と表示。
 

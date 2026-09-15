@@ -81,6 +81,7 @@ namespace
 	std::atomic<size_t> g_ProgressDone{ 0 };
 	std::atomic<size_t> g_ProgressTotal{ 0 };
 	std::atomic<int> g_ProgressStage{ COLLISION_STAGE_IDLE };
+	std::vector<std::string> g_FrameHitNames;
 
 	std::string PathStem(const std::string& path)
 	{
@@ -119,6 +120,22 @@ namespace
 			return "LOD2" + sourceName.substr(15);
 		}
 		return sourceName;
+	}
+
+	void RecordHit(const std::string& sourceName)
+	{
+		if (sourceName.empty())
+		{
+			return;
+		}
+		for (const std::string& existing : g_FrameHitNames)
+		{
+			if (existing == sourceName)
+			{
+				return;
+			}
+		}
+		g_FrameHitNames.push_back(sourceName);
 	}
 
 	bool FileExists(const char* path)
@@ -915,6 +932,7 @@ namespace
 					if (ResolveTriangle(mesh, triIndex, center, half, aabbMin, aabbMax, grounded))
 					{
 						hit = true;
+						RecordHit(mesh.sourceName);
 					}
 				};
 
@@ -955,6 +973,7 @@ namespace
 					if (ResolveTriangle(mesh, i, center, half, aabbMin, aabbMax, grounded))
 					{
 						hit = true;
+						RecordHit(mesh.sourceName);
 					}
 				}
 			}
@@ -1134,6 +1153,31 @@ void Collision_GetSourceStatus(char* out, size_t outSize)
 	}
 }
 
+void Collision_GetLastHitStatus(char* out, size_t outSize)
+{
+	if (!out || outSize == 0)
+	{
+		return;
+	}
+	if (g_FrameHitNames.empty())
+	{
+		strcpy_s(out, outSize, "衝突なし");
+		return;
+	}
+	strcpy_s(out, outSize, "衝突");
+	for (const std::string& sourceName : g_FrameHitNames)
+	{
+		const std::string displayName = CollisionDisplayName(sourceName);
+		char item[128] = {};
+		sprintf_s(item, " %s", displayName.c_str());
+		if (strlen(out) + strlen(item) + 1 >= outSize)
+		{
+			break;
+		}
+		strcat_s(out, outSize, item);
+	}
+}
+
 void Collision_SetWorld(int meshId, const XMMATRIX& world)
 {
 	if (meshId < 0 || meshId >= static_cast<int>(g_Meshes.size()))
@@ -1197,6 +1241,7 @@ void Collision_Clear(void)
 		g_Ready.clear();
 	}
 	g_Meshes.clear();
+	g_FrameHitNames.clear();
 	g_ProgressDone = 0;
 	g_ProgressTotal = 0;
 	g_ProgressStage = COLLISION_STAGE_IDLE;
@@ -1232,6 +1277,7 @@ bool Collision_MoveAABB(
 		return false;
 	}
 
+	g_FrameHitNames.clear();
 	bool onGround = false;
 	MoveAxisSubsteps(&center, halfExtents, XMFLOAT3(delta.x, 0.0f, delta.z), nullptr);
 	MoveAxisSubsteps(&center, halfExtents, XMFLOAT3(0.0f, delta.y, 0.0f), &onGround);

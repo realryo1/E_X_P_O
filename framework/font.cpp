@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 
@@ -103,14 +104,30 @@ void Font_FinalizeGlobalData()
 	g_FtCurrentPixelSize = 0;
 }
 
+static int s_SharedAtlasRef = 0;
+static ID3D11Texture2D* s_SharedTexture = nullptr;
+static ID3D11ShaderResourceView* s_SharedSRV = nullptr;
+static unsigned char* s_SharedAtlasData = nullptr;
+static unsigned char* s_SharedAtlasRGBA = nullptr;
+static int s_SharedAtlasWidth = 0;
+static int s_SharedAtlasHeight = 0;
+static int s_SharedAtlasNextX = 0;
+static int s_SharedAtlasNextY = 0;
+static int s_SharedAtlasRowHeight = 0;
+static int s_SharedAscender = 0;
+static int s_SharedDescender = 0;
+static bool s_SharedReady = false;
+static std::map<int, CharInfo> s_SharedGlyphCache;
+static std::deque<int> s_SharedGlyphLru;
+
 // ==========================================
 // DrawFont クラス実装
 // ==========================================
 
 DrawFont::DrawFont(XMFLOAT2 pos, float fontSize, float rotation,
-	XMFLOAT4 color, const std::string& text, TextAlignment align)
+	XMFLOAT4 color, const std::string& text, TextAlignment align, bool shareAtlas)
 	: Transform2D(pos, rotation, { 1.0f, 1.0f }), m_Color(color), m_Text(text),
-	m_FontSize(fontSize), m_Alignment(align),
+	m_FontSize(fontSize), m_LineSpacing(1.0f), m_Alignment(align), m_ShareAtlas(shareAtlas),
 	m_pTexture(nullptr), m_pSRV(nullptr),
 	m_pVertexBuffer(nullptr),
 	m_VertexCount(0), m_VertexCapacity(0),
@@ -136,6 +153,28 @@ DrawFont::DrawFont(XMFLOAT2 pos, float fontSize, float rotation,
 
 DrawFont::~DrawFont() {
 	if (m_pVertexBuffer) m_pVertexBuffer->Release();
+	if (m_ShareAtlas)
+	{
+		if (s_SharedAtlasRef > 0)
+		{
+			s_SharedAtlasRef -= 1;
+		}
+		if (s_SharedAtlasRef == 0)
+		{
+			if (s_SharedSRV) s_SharedSRV->Release();
+			if (s_SharedTexture) s_SharedTexture->Release();
+			s_SharedSRV = nullptr;
+			s_SharedTexture = nullptr;
+			if (s_SharedAtlasData) free(s_SharedAtlasData);
+			if (s_SharedAtlasRGBA) free(s_SharedAtlasRGBA);
+			s_SharedAtlasData = nullptr;
+			s_SharedAtlasRGBA = nullptr;
+			s_SharedGlyphCache.clear();
+			s_SharedGlyphLru.clear();
+			s_SharedReady = false;
+		}
+		return;
+	}
 	if (m_pSRV) m_pSRV->Release();
 	if (m_pTexture) m_pTexture->Release();
 	if (m_pAtlasData) free(m_pAtlasData);
@@ -178,9 +217,17 @@ float DrawFont::GetKerningPx(int prevGlyph, int glyphIndex) const {
 	return (float)delta.x / 64.0f;
 }
 
+std::map<int, CharInfo>& DrawFont::GlyphCache() {
+	return m_ShareAtlas ? s_SharedGlyphCache : m_CharCache;
+}
+
+std::deque<int>& DrawFont::GlyphLru() {
+	return m_ShareAtlas ? s_SharedGlyphLru : m_CacheLRU;
+}
+
 float DrawFont::GetGlyphAdvancePx(int glyphIndex) {
-	auto it = m_CharCache.find(glyphIndex);
-	if (it != m_CharCache.end()) {
+	auto it = GlyphCache().find(glyphIndex);
+	if (it != GlyphCache().end()) {
 		return it->second.xadvance;
 	}
 
@@ -189,8 +236,8 @@ float DrawFont::GetGlyphAdvancePx(int glyphIndex) {
 		return 0.0f;
 	}
 
-	it = m_CharCache.find(glyphIndex);
-	return (it != m_CharCache.end()) ? it->second.xadvance : 0.0f;
+	it = GlyphCache().find(glyphIndex);
+	return (it != GlyphCache().end()) ? it->second.xadvance : 0.0f;
 }
 
 bool DrawFont::BakeAtlas() {
@@ -202,6 +249,28 @@ bool DrawFont::BakeAtlas() {
 
 	if (!g_FtFace) {
 		return false;
+	}
+
+	if (m_ShareAtlas && s_SharedReady && s_SharedTexture && s_SharedSRV)
+	{
+		m_pTexture = s_SharedTexture;
+		m_pSRV = s_SharedSRV;
+		m_pAtlasData = s_SharedAtlasData;
+		m_pAtlasRGBA = s_SharedAtlasRGBA;
+		m_AtlasWidth = s_SharedAtlasWidth;
+		m_AtlasHeight = s_SharedAtlasHeight;
+		m_AtlasNextX = s_SharedAtlasNextX;
+		m_AtlasNextY = s_SharedAtlasNextY;
+		m_AtlasRowHeight = s_SharedAtlasRowHeight;
+		m_FontAscender = s_SharedAscender;
+		m_FontDescender = s_SharedDescender;
+		m_Ready = true;
+		s_SharedAtlasRef += 1;
+		m_pVertexBuffer = nullptr;
+		m_VertexCount = 0;
+		m_VertexCapacity = 0;
+		m_MeshDirty = true;
+		return true;
 	}
 
 	m_Ready = true;
@@ -271,6 +340,23 @@ bool DrawFont::BakeAtlas() {
 		return false;
 	}
 
+	if (m_ShareAtlas)
+	{
+		s_SharedTexture = m_pTexture;
+		s_SharedSRV = m_pSRV;
+		s_SharedAtlasData = m_pAtlasData;
+		s_SharedAtlasRGBA = m_pAtlasRGBA;
+		s_SharedAtlasWidth = m_AtlasWidth;
+		s_SharedAtlasHeight = m_AtlasHeight;
+		s_SharedAtlasNextX = m_AtlasNextX;
+		s_SharedAtlasNextY = m_AtlasNextY;
+		s_SharedAtlasRowHeight = m_AtlasRowHeight;
+		s_SharedAscender = m_FontAscender;
+		s_SharedDescender = m_FontDescender;
+		s_SharedReady = true;
+		s_SharedAtlasRef = 1;
+	}
+
 	// 頂点バッファは RebuildMesh 時に必要サイズで確保する
 	m_pVertexBuffer = nullptr;
 	m_VertexCount = 0;
@@ -314,11 +400,24 @@ bool DrawFont::AddGlyphToAtlas(int glyphIndex) {
 		return false;
 	}
 
-	if (m_CharCache.find(glyphIndex) != m_CharCache.end()) {
+	if (m_ShareAtlas)
+	{
+		m_pAtlasData = s_SharedAtlasData;
+		m_pAtlasRGBA = s_SharedAtlasRGBA;
+		m_pTexture = s_SharedTexture;
+		m_pSRV = s_SharedSRV;
+		m_AtlasWidth = s_SharedAtlasWidth;
+		m_AtlasHeight = s_SharedAtlasHeight;
+		m_AtlasNextX = s_SharedAtlasNextX;
+		m_AtlasNextY = s_SharedAtlasNextY;
+		m_AtlasRowHeight = s_SharedAtlasRowHeight;
+	}
+
+	if (GlyphCache().find(glyphIndex) != GlyphCache().end()) {
 		return true;
 	}
 
-	if ((int)m_CharCache.size() >= FONT_MAX_CACHE_GLYPHS) {
+	if ((int)GlyphCache().size() >= FONT_MAX_CACHE_GLYPHS) {
 		EvictLRUGlyph();
 	}
 
@@ -344,8 +443,8 @@ bool DrawFont::AddGlyphToAtlas(int glyphIndex) {
 
 	if (glyph_width == 0 || glyph_height == 0) {
 		info.x0 = info.y0 = info.x1 = info.y1 = 0.0f;
-		m_CharCache[glyphIndex] = info;
-		m_CacheLRU.push_back(glyphIndex);
+		GlyphCache()[glyphIndex] = info;
+		GlyphLru().push_back(glyphIndex);
 		return true;
 	}
 
@@ -373,15 +472,15 @@ bool DrawFont::AddGlyphToAtlas(int glyphIndex) {
 	info.x1 = (float)(m_AtlasNextX + glyph_width);
 	info.y1 = (float)(m_AtlasNextY + glyph_height);
 
-	m_CharCache[glyphIndex] = info;
-	m_CacheLRU.push_back(glyphIndex);
+	GlyphCache()[glyphIndex] = info;
+	GlyphLru().push_back(glyphIndex);
 
 	m_AtlasNextX += glyph_width;
 	m_AtlasRowHeight = (std::max)(m_AtlasRowHeight, glyph_height);
 
-	const unsigned char r = (unsigned char)(m_Color.x * 255.0f);
-	const unsigned char g = (unsigned char)(m_Color.y * 255.0f);
-	const unsigned char b = (unsigned char)(m_Color.z * 255.0f);
+	const unsigned char r = m_ShareAtlas ? 255 : (unsigned char)(m_Color.x * 255.0f);
+	const unsigned char g = m_ShareAtlas ? 255 : (unsigned char)(m_Color.y * 255.0f);
+	const unsigned char b = m_ShareAtlas ? 255 : (unsigned char)(m_Color.z * 255.0f);
 	const int glyphX = static_cast<int>(info.x0);
 	const int glyphY = static_cast<int>(info.y0);
 	for (int y = 0; y < glyph_height; ++y) {
@@ -400,6 +499,12 @@ bool DrawFont::AddGlyphToAtlas(int glyphIndex) {
 		glyphY,
 		glyph_width,
 		glyph_height);
+	if (m_ShareAtlas)
+	{
+		s_SharedAtlasNextX = m_AtlasNextX;
+		s_SharedAtlasNextY = m_AtlasNextY;
+		s_SharedAtlasRowHeight = m_AtlasRowHeight;
+	}
 	return true;
 }
 
@@ -408,11 +513,22 @@ bool DrawFont::AddGlyphToAtlasBatch(int glyphIndex) {
 		return false;
 	}
 
-	if (m_CharCache.find(glyphIndex) != m_CharCache.end()) {
+	if (m_ShareAtlas)
+	{
+		m_pAtlasData = s_SharedAtlasData;
+		m_pAtlasRGBA = s_SharedAtlasRGBA;
+		m_AtlasWidth = s_SharedAtlasWidth;
+		m_AtlasHeight = s_SharedAtlasHeight;
+		m_AtlasNextX = s_SharedAtlasNextX;
+		m_AtlasNextY = s_SharedAtlasNextY;
+		m_AtlasRowHeight = s_SharedAtlasRowHeight;
+	}
+
+	if (GlyphCache().find(glyphIndex) != GlyphCache().end()) {
 		return false;
 	}
 
-	if ((int)m_CharCache.size() >= FONT_MAX_CACHE_GLYPHS) {
+	if ((int)GlyphCache().size() >= FONT_MAX_CACHE_GLYPHS) {
 		EvictLRUGlyph();
 	}
 
@@ -438,8 +554,8 @@ bool DrawFont::AddGlyphToAtlasBatch(int glyphIndex) {
 
 	if (glyph_width == 0 || glyph_height == 0) {
 		info.x0 = info.y0 = info.x1 = info.y1 = 0.0f;
-		m_CharCache[glyphIndex] = info;
-		m_CacheLRU.push_back(glyphIndex);
+		GlyphCache()[glyphIndex] = info;
+		GlyphLru().push_back(glyphIndex);
 		return false;
 	}
 
@@ -467,23 +583,30 @@ bool DrawFont::AddGlyphToAtlasBatch(int glyphIndex) {
 	info.x1 = (float)(m_AtlasNextX + glyph_width);
 	info.y1 = (float)(m_AtlasNextY + glyph_height);
 
-	m_CharCache[glyphIndex] = info;
-	m_CacheLRU.push_back(glyphIndex);
+	GlyphCache()[glyphIndex] = info;
+	GlyphLru().push_back(glyphIndex);
 
 	m_AtlasNextX += glyph_width;
 	m_AtlasRowHeight = (std::max)(m_AtlasRowHeight, glyph_height);
+
+	if (m_ShareAtlas)
+	{
+		s_SharedAtlasNextX = m_AtlasNextX;
+		s_SharedAtlasNextY = m_AtlasNextY;
+		s_SharedAtlasRowHeight = m_AtlasRowHeight;
+	}
 
 	return true;
 }
 
 void DrawFont::EvictLRUGlyph() {
-	if (m_CacheLRU.empty()) {
+	if (GlyphLru().empty()) {
 		return;
 	}
 
-	int lru_glyph = m_CacheLRU.front();
-	m_CacheLRU.pop_front();
-	m_CharCache.erase(lru_glyph);
+	int lru_glyph = GlyphLru().front();
+	GlyphLru().pop_front();
+	GlyphCache().erase(lru_glyph);
 }
 
 void DrawFont::UpdateAtlasTexture() {
@@ -492,9 +615,9 @@ void DrawFont::UpdateAtlasTexture() {
 		return;
 	}
 
-	const unsigned char r = (unsigned char)(m_Color.x * 255.0f);
-	const unsigned char g = (unsigned char)(m_Color.y * 255.0f);
-	const unsigned char b = (unsigned char)(m_Color.z * 255.0f);
+	const unsigned char r = m_ShareAtlas ? 255 : (unsigned char)(m_Color.x * 255.0f);
+	const unsigned char g = m_ShareAtlas ? 255 : (unsigned char)(m_Color.y * 255.0f);
+	const unsigned char b = m_ShareAtlas ? 255 : (unsigned char)(m_Color.z * 255.0f);
 	const int pixelCount = m_AtlasWidth * m_AtlasHeight;
 	for (int i = 0; i < pixelCount; i++) {
 		m_pAtlasRGBA[i * 4 + 0] = r;
@@ -597,13 +720,23 @@ void DrawFont::RebuildMesh() {
 		return;
 	}
 
-	// パス1: テキスト幅（アライメント用）
-	float text_width = 0.0f;
+	// パス1: 行ごとの幅（アライメント用）
+	std::vector<float> lineWidths;
+	float line_width = 0.0f;
 	size_t temp_i = 0;
 	int prev_glyph = 0;
 	while (temp_i < m_Text.length()) {
 		int codepoint = UTF8ToCodePoint(m_Text, temp_i);
 		if (codepoint <= 0) continue;
+		if (codepoint == 0x000D) {
+			continue;
+		}
+		if (codepoint == 0x000A) {
+			lineWidths.push_back(line_width);
+			line_width = 0.0f;
+			prev_glyph = 0;
+			continue;
+		}
 
 		FT_UInt glyph_index = FT_Get_Char_Index(g_FtFace, (FT_ULong)codepoint);
 		if (glyph_index == 0) continue;
@@ -612,24 +745,39 @@ void DrawFont::RebuildMesh() {
 
 		if (!AddGlyphToAtlas((int)glyph_index)) continue;
 
-		CharInfo& info = m_CharCache[(int)glyph_index];
+		CharInfo& info = GlyphCache()[(int)glyph_index];
 		float actual_glyph_width = info.x1 - info.x0;
 		float margin = actual_glyph_width * FONT_MARGIN_RATIO;
-		text_width += kerning + info.xadvance + margin;
+		line_width += kerning + info.xadvance + margin;
 		prev_glyph = (int)glyph_index;
+	}
+	lineWidths.push_back(line_width);
+	float text_width = 0.0f;
+	for (float width : lineWidths) {
+		if (width > text_width) {
+			text_width = width;
+		}
 	}
 
 	const float scX = GetScaleX();
 	const float scY = GetScaleY();
 
-	float draw_start_x = m_Position.x * DRAW_SCALE_X;
-	if (m_Alignment == TA_MIDDLE) {
-		draw_start_x -= (text_width * scX) / 2.0f;
-	} else if (m_Alignment == TA_END) {
-		draw_start_x -= (text_width * scX);
-	}
-	float draw_current_x = draw_start_x;
-	const float draw_current_y = m_Position.y * DRAW_SCALE_Y;
+	auto lineStartX = [&](int lineIndex) {
+		float width = (lineIndex >= 0 && lineIndex < (int)lineWidths.size())
+			? lineWidths[lineIndex]
+			: text_width;
+		float start = m_Position.x * DRAW_SCALE_X;
+		if (m_Alignment == TA_MIDDLE) {
+			start -= (width * scX) / 2.0f;
+		} else if (m_Alignment == TA_END) {
+			start -= (width * scX);
+		}
+		return start;
+	};
+	int draw_line = 0;
+	float draw_current_x = lineStartX(0);
+	float draw_current_y = m_Position.y * DRAW_SCALE_Y;
+	const float line_step = m_FontSize * m_LineSpacing * scY;
 
 	// 回転中心は Transform2D の位置（アライメント基準点）
 	const float pivotX = m_Position.x * DRAW_SCALE_X;
@@ -661,6 +809,16 @@ void DrawFont::RebuildMesh() {
 	while (i < m_Text.length()) {
 		int codepoint = UTF8ToCodePoint(m_Text, i);
 		if (codepoint <= 0) continue;
+		if (codepoint == 0x000D) {
+			continue;
+		}
+		if (codepoint == 0x000A) {
+			++draw_line;
+			draw_current_x = lineStartX(draw_line);
+			draw_current_y += line_step;
+			prev_glyph_draw = 0;
+			continue;
+		}
 
 		FT_UInt glyph_index = FT_Get_Char_Index(g_FtFace, (FT_ULong)codepoint);
 		if (glyph_index == 0) continue;
@@ -670,7 +828,7 @@ void DrawFont::RebuildMesh() {
 
 		if (!AddGlyphToAtlas((int)glyph_index)) continue;
 
-		CharInfo& info = m_CharCache[(int)glyph_index];
+		CharInfo& info = GlyphCache()[(int)glyph_index];
 		float actual_glyph_width = info.x1 - info.x0;
 		float actual_glyph_height = info.y1 - info.y0;
 		float margin = actual_glyph_width * FONT_MARGIN_RATIO;
@@ -733,19 +891,7 @@ void DrawFont::RebuildMesh() {
 	m_VertexCount = writeIndex;
 }
 
-void DrawFont::Draw() {
-	ID3D11DeviceContext* pContext = GetDeviceContext();
-	ShaderManager* shader = GetShader(S_UNLIT);
-
-	if (!pContext || !shader || !shader->GetVertexLayout() || !shader->GetVertexShader() || !shader->GetPixelShader()) {
-		return;
-	}
-
-	if (!m_pSRV || !m_Ready || !g_FtFace) {
-		return;
-	}
-
-	// Transform2D 側の変更は dirty フラグが立たないので、描画時に差分検出する
+bool DrawFont::EnsureDrawMesh() {
 	if (m_Position.x != m_CachedPos.x || m_Position.y != m_CachedPos.y ||
 		m_Rotation != m_CachedRot ||
 		m_Scale.x != m_CachedScale.x || m_Scale.y != m_CachedScale.y) {
@@ -756,20 +902,20 @@ void DrawFont::Draw() {
 		RebuildMesh();
 	}
 
-	if (!m_pVertexBuffer || m_VertexCount == 0) {
+	return m_pVertexBuffer != nullptr && m_VertexCount > 0 && m_pSRV && m_Ready;
+}
+
+void DrawFont::DrawUnlitMesh() {
+	ID3D11DeviceContext* pContext = GetDeviceContext();
+	ShaderManager* shader = GetShader(S_UNLIT);
+	if (!pContext || !shader || !shader->GetVertexLayout() || !shader->GetVertexShader() || !shader->GetPixelShader()) {
 		return;
 	}
-
-	SetWorldMatrix(XMMatrixIdentity());
-	SetViewMatrix(XMMatrixIdentity());
-	SetProjectionMatrix(XMMatrixOrthographicOffCenterLH(0.0f, DRAW_SCREEN_X, DRAW_SCREEN_Y, 0.0f, 0.0f, 1.0f));
 
 	MATERIAL material = {};
 	material.Diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	material.Ambient = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	SetMaterial(material);
-
-	SetDepthEnable(false);
 
 	pContext->IASetInputLayout(shader->GetVertexLayout());
 	pContext->VSSetShader(shader->GetVertexShader(), NULL, 0);
@@ -783,6 +929,18 @@ void DrawFont::Draw() {
 	pContext->IASetVertexBuffers(0, 1, &m_pVertexBuffer, &stride, &offset);
 	pContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	pContext->Draw(m_VertexCount, 0);
+}
+
+void DrawFont::Draw() {
+	if (!EnsureDrawMesh()) {
+		return;
+	}
+
+	SetWorldMatrix(XMMatrixIdentity());
+	SetViewMatrix(XMMatrixIdentity());
+	SetProjectionMatrix(XMMatrixOrthographicOffCenterLH(0.0f, DRAW_SCREEN_X, DRAW_SCREEN_Y, 0.0f, 0.0f, 1.0f));
+	SetDepthEnable(false);
+	DrawUnlitMesh();
 }
 
 void DrawFont::SetText(const std::string& text) {
@@ -802,12 +960,13 @@ void DrawFont::PreCacheGlyphs() {
 	while (idx < m_Text.length()) {
 		int codepoint = UTF8ToCodePoint(m_Text, idx);
 		if (codepoint <= 0) continue;
+		if (codepoint == 0x000A || codepoint == 0x000D) continue;
 		if (codepoint == 0x0020 || codepoint == 0x3000) continue;
 
 		FT_UInt glyph_index = FT_Get_Char_Index(g_FtFace, (FT_ULong)codepoint);
 		if (glyph_index == 0) continue;
 
-		if (m_CharCache.find((int)glyph_index) != m_CharCache.end()) continue;
+		if (GlyphCache().find((int)glyph_index) != GlyphCache().end()) continue;
 
 		if (AddGlyphToAtlasBatch((int)glyph_index)) {
 			atlasUpdated = true;

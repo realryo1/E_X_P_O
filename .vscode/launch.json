@@ -28,6 +28,26 @@
             "stopOnEntry": false,
             "terminal": "integrated",
             "preLaunchTask": "Build Release"
+        },
+        {
+            "name": "Debug Clean (No Debugger)",
+            "type": "node-terminal",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "_NO_DEBUG_HEAP": "1"
+            },
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/tool/build.ps1\" -Configuration Debug -Rebuild -Run"
+        },
+        {
+            "name": "Release Clean (No Debugger)",
+            "type": "node-terminal",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "_NO_DEBUG_HEAP": "1"
+            },
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/tool/build.ps1\" -Configuration Release -Rebuild -Run"
         }
     ]
 }

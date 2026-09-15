@@ -371,7 +371,11 @@ GPU化と破棄はゲーム更新中（初期ロード）または Present 後�
 
 LOD3パビリオンの距離判定はカメラ、視線先予測点、移動先予測点のXZ距離に、既知のモデルXZ半径を足す。
 開始はロード半径 48、破棄は半径 72（ワールド単位）。視線方向（半頂角60°）は半径をさらに32足して
-先行開始する。CPUインポートはロード半径内だけ始め、GPU化は破棄半径内まで進める。
+先行開始する。初期優先ロードは `expo_pavilion_null2.glb`、`expo_pavilion_dynamic_equilibrium.glb`、
+`expo_pavilion_expo_related_31.glb`、`expo_pavilion_expo_related_25.glb`、`expo_pavilion_angola.glb`、
+`expo_pavilion_czech.glb` をこの順で床・LOD2・リングと
+同じ初期完了条件に含め、明転前に最優先でGPU化する。CPUインポートはロード半径内だけ始め、
+GPU化は破棄半径内まで進める。
 ヒステリシス帯に残った READY はインポート枠を塞がず、視線先と近い棟の新規開始を優先する。
 範囲外で無効化した未完了ジョブは、再び範囲内へ戻ったら同じジョブを再開する。
 ファイル無し以外の失敗も、再接近でやり直す。
@@ -860,7 +864,7 @@ Releaseビルドには `SCENE_DEBUG` が含まれない。
 | `framework/main.h` | Win32 / D3D / DirectXTex 共通 include、`SAFE_DELETE`、`SetFPS` |
 | `shader/renderer.h` | 描画エンジン API、`SAFE_RELEASE`。Debug では `Direct3D_DebugStageBegin` と Map 回数 |
 
-Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Idx` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` と `idx` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。Debug の `F5` キーは局所影パスのオン／オフ。Cursor の F5（CodeLLDB）はデバッグイベントで実速度を落とすことがある。実速度は Task `Run Release (No Debugger)` で測る。
+Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Idx` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` と `idx` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。Debug の `F5` キーは局所影パスのオン／オフ。Cursor の F5（CodeLLDB の `Debug` / `Release`）はデバッグイベントで実速度を落とすことがある。実速度は `Debug Clean (No Debugger)` または `Release Clean (No Debugger)` で測る。
 
 サードパーティ（直接触らない）: `assimp/`・`freetype/`・`imgui/`・`nlohmann/`・`DirectXTex.h`・`stb_truetype.h`。
 
@@ -1017,6 +1021,7 @@ python tool/rename_project.py                    # 対話モード
 | IDE 操作                           | 呼び出し先                                | 実体                                      |
 | -------------------------------- | ------------------------------------ | --------------------------------------- |
 | 実行とデバッグ → `Debug` / `Release`   | CodeLLDB（`type: lldb`）          | デバッガー接続。実速度計測には使わない |
+| 実行とデバッグ → `Debug Clean (No Debugger)` / `Release Clean (No Debugger)` | `node-terminal`（LLDB なし） | Clean → 各 Configuration のビルド → `expogame.exe` をターミナルから直接起動 |
 | タスク: Run Release (No Debugger)   | `.vscode/tasks.json`                 | Build Release のあと `x64/Release/expogame.exe` を直接起動 |
 | タスク: Run Release Binary          | 同上                                   | ビルドせず同じ exe を直接起動 |
 | タスク: Rebuild and Run Release (No Debugger) | 同上                          | Clean → Build → 直接起動 |
@@ -1027,7 +1032,7 @@ python tool/rename_project.py                    # 対話モード
 
 設定ファイル:
 
-- `.vscode/launch.json` … CodeLLDB 用。Cursor では `cppvsdbg` は使えない
+- `.vscode/launch.json` … `Debug` / `Release` は CodeLLDB。`Debug Clean (No Debugger)` / `Release Clean (No Debugger)` は LLDB を付けず Clean ビルドして起動する。Cursor では `cppvsdbg` は使えない
 - `.vscode/tasks.json` … ビルドとデバッガーなし起動
 
 ZIP 作成（`create_release_zip.py`）は毎回 Release を Clean してからビルドする。開発側 F5 が重いのに ZIP や No Debugger が軽いときは、描画コードより CodeLLDB 接続、増分ビルド／共有 CSO、または `asset/expomodel` の差を疑う。

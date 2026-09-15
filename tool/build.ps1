@@ -2,6 +2,7 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
     [switch]$Clean,
+    [switch]$Rebuild,
     [switch]$Run
 )
 
@@ -45,8 +46,7 @@ if (-not $msbuild -or -not (Test-Path $msbuild)) {
 Write-Host "Using MSBuild: $msbuild" -ForegroundColor Cyan
 Write-Host "Configuration: $Configuration" -ForegroundColor Cyan
 
-# Clean only
-if ($Clean) {
+if ($Rebuild -or $Clean) {
     Write-Host "Cleaning solution..." -ForegroundColor Yellow
     & $msbuild "expogame.sln" /t:Clean /p:Configuration=$Configuration /p:Platform="x64"
     $exitCode = $LASTEXITCODE
@@ -56,7 +56,9 @@ if ($Clean) {
         Write-Error "Clean Failed with exit code $exitCode"
         exit $exitCode
     }
-    exit 0
+    if (-not $Rebuild) {
+        exit 0
+    }
 }
 
 # Build
@@ -72,6 +74,7 @@ if ($exitCode -eq 0) {
         if (Test-Path $exePath) {
             $fullExe = (Resolve-Path $exePath).Path
             $workDir = (Get-Item .).FullName
+            $env:_NO_DEBUG_HEAP = "1"
             $proc = Start-Process -FilePath $fullExe -WorkingDirectory $workDir -PassThru -Wait
             exit $proc.ExitCode
         } else {

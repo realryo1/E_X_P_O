@@ -2,6 +2,8 @@
 #include "define.h"
 #include "font.h"
 #include "field.h"
+#include "collision.h"
+#include "player.h"
 #include "main.h"
 #include "renderer.h"
 #include <chrono>
@@ -11,6 +13,7 @@
 #if defined(_DEBUG)
 static DrawFont* g_pModelStatusText = nullptr;
 static DrawFont* g_pCollisionStatusText = nullptr;
+static DrawFont* g_pHitModelText = nullptr;
 static DrawFont* g_pMemoryStatusText = nullptr;
 static std::chrono::steady_clock::time_point g_LastMemoryStatusUpdate;
 static bool g_HasMemoryStatusUpdate = false;
@@ -71,6 +74,31 @@ static void UpdateMemoryStatus(void)
 	Field_GetMemoryStatus(memoryStatus, sizeof(memoryStatus));
 	g_pMemoryStatusText->SetText(memoryStatus);
 }
+
+static void UpdateHitModelStatus(void)
+{
+	if (!g_pHitModelText)
+	{
+		return;
+	}
+	char hitStatus[384] = {};
+	Collision_GetLastHitStatus(hitStatus, sizeof(hitStatus));
+	char nearestName[128] = {};
+	if (Player_IsReady() &&
+		Field_GetNearestHighDetailName(
+			Player_GetPos(),
+			nearestName,
+			sizeof(nearestName)))
+	{
+		const size_t used = strlen(hitStatus);
+		if (used + strlen(nearestName) + 4 < sizeof(hitStatus))
+		{
+			strcat_s(hitStatus, " / ");
+			strcat_s(hitStatus, nearestName);
+		}
+	}
+	g_pHitModelText->SetText(hitStatus);
+}
 #endif
 
 void Ui_Initialize(void)
@@ -93,6 +121,14 @@ void Ui_Initialize(void)
 		"衝突 AABB なし"
 	);
 
+	g_pHitModelText = new DrawFont(
+		{ SCREEN_X / 2.0f, 36.0f },
+		22.0f,
+		0.0f,
+		{ 1.0f, 0.85f, 0.2f, 1.0f },
+		"衝突なし"
+	);
+
 	g_pMemoryStatusText = new DrawFont(
 		{ SCREEN_X / 2.0f, SCREEN_Y - 66.0f },
 		16.0f,
@@ -110,6 +146,7 @@ void Ui_Finalize(void)
 #if defined(_DEBUG)
 	SAFE_DELETE(g_pModelStatusText);
 	SAFE_DELETE(g_pCollisionStatusText);
+	SAFE_DELETE(g_pHitModelText);
 	SAFE_DELETE(g_pMemoryStatusText);
 #endif
 }
@@ -118,6 +155,7 @@ void Ui_Update(void)
 {
 #if defined(_DEBUG)
 	ApplyLoadStatus();
+	UpdateHitModelStatus();
 	UpdateMemoryStatus();
 #endif
 }
@@ -135,6 +173,7 @@ void Ui_Draw(void)
 #if defined(_DEBUG)
 	if (g_pModelStatusText) g_pModelStatusText->Draw();
 	if (g_pCollisionStatusText) g_pCollisionStatusText->Draw();
+	if (g_pHitModelText) g_pHitModelText->Draw();
 	if (g_pMemoryStatusText) g_pMemoryStatusText->Draw();
 #endif
 }

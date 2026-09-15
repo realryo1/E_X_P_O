@@ -26,6 +26,7 @@ bool Collision_StartAdd(
 CollisionPumpResult Collision_Pump(int* outMeshId);
 void Collision_GetPumpProgress(size_t* done, size_t* total, int* stage);
 void Collision_GetSourceStatus(char* out, size_t outSize);
+void Collision_GetLastHitStatus(char* out, size_t outSize);
 void Collision_SetWorld(int meshId, const DirectX::XMMATRIX& world);
 void Collision_Clear(void);
 bool Collision_GetBounds(int meshId, DirectX::XMFLOAT3* bmin, DirectX::XMFLOAT3* bmax);

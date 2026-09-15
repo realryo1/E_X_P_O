@@ -4,12 +4,14 @@
 #include "sprite3d.h"
 #include "glb_model.h"
 #include "collision.h"
+#include "BillboardDrawFont.h"
 #include "renderer.h"
 #include "camera.h"
 #include "playercamera.h"
 #include "envprobe.h"
 #include "input_manager.h"
 #include "fade.h"
+#include "imgui/imgui.h"
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
@@ -22,6 +24,7 @@
 #include <memory>
 #include <utility>
 #include <unordered_set>
+#include <unordered_map>
 #include <windows.h>
 #include <psapi.h>
 #pragma comment(lib, "Psapi.lib")
@@ -34,6 +37,7 @@ static const int EXPO_COLLISION_TARGET_MAX =
 	2 + EXPO_TILE_MAX * 2 + EXPO_GATE_COLLISION_COUNT;
 static const char* EXPO_TILE_SET_LOD2_PATH = "asset\\expomodel\\expo_tiles_lod2.txt";
 static const char* EXPO_FIELD_PATH = "asset\\expomodel\\expo_field.txt";
+static const char* EXPO_PAVILION_NAMES_PATH = "asset\\expomodel\\expo_pavilion_names.txt";
 static const char* EXPO_MODEL_LOD2_PATH = "asset\\expomodel\\expo_tile_lod2.glb";
 static const char* EXPO_MODEL_LOD1_PATH = "asset\\expomodel\\expo_tile.glb";
 static const float EXPO_MODEL_SCALE = 0.002f;
@@ -50,6 +54,9 @@ static const float EXPO_PAVILION_UNLOAD_RADIUS = 72.0f;
 static const float EXPO_PAVILION_PREFETCH_DISTANCE = 48.0f;
 static const float EXPO_PAVILION_LOOK_EXTRA_RADIUS = 32.0f;
 static const float EXPO_PAVILION_LOOK_COS = 0.5f;
+static const float EXPO_PAVILION_LABEL_HEIGHT = 0.20f;
+static const float EXPO_PAVILION_LABEL_WORLD_Y = -6.12f;
+static const float EXPO_PAVILION_LABEL_DISTANCE = 27.1f;
 static const double EXPO_LOAD_BUDGET_MILLISECONDS = 6.0;
 static const double EXPO_STREAM_AFTER_PRESENT_BUDGET_MS = 3.0;
 static const double EXPO_STREAM_SKIP_DRAW_MS = 8.0;
@@ -59,6 +66,16 @@ static const double EXPO_GRS80_F = 1.0 / 298.257222101;
 static const double EXPO_GRS80_E2 =
 	EXPO_GRS80_F * (2.0 - EXPO_GRS80_F);
 static const char* EXPO_PLACEHOLDER_MODEL_PATH = "asset\\model\\cube.fbx";
+static const char* EXPO_INITIAL_PRIORITY_PAVILIONS[] = {
+	"expo_pavilion_null2.glb",
+	"expo_pavilion_dynamic_equilibrium.glb",
+	"expo_pavilion_expo_related_31.glb",
+	"expo_pavilion_expo_related_25.glb",
+	"expo_pavilion_angola.glb",
+	"expo_pavilion_czech.glb",
+};
+static const int EXPO_INITIAL_PRIORITY_PAVILION_COUNT =
+	static_cast<int>(sizeof(EXPO_INITIAL_PRIORITY_PAVILIONS) / sizeof(EXPO_INITIAL_PRIORITY_PAVILIONS[0]));
 
 struct ExpoTileDesc
 {
@@ -177,6 +194,8 @@ struct ExpoDrawJob
 	std::vector<std::pair<int, int>> farBatchRefs;
 	int retryCount = 0;
 	ULONGLONG retryAfterMs = 0;
+	int initialPriority = 0;
+	BillboardDrawFont* nameLabel = nullptr;
 };
 
 static std::vector<std::unique_ptr<ExpoDrawJob>> g_DrawJobs;
@@ -200,6 +219,12 @@ static LONGLONG g_LoadStartCounter = 0;
 static bool g_LoggedCoreImport = false;
 static bool g_LoggedCoreGpu = false;
 static bool g_LoggedCollision = false;
+static float g_PavilionLabelDistance = EXPO_PAVILION_LABEL_DISTANCE;
+static float g_PavilionLabelSize = EXPO_PAVILION_LABEL_HEIGHT;
+static float g_PavilionLabelWorldY = EXPO_PAVILION_LABEL_WORLD_Y;
+static XMFLOAT4 g_PavilionLabelColor = { 1.0f, 1.0f, 1.0f, 1.0f };
+static bool g_PavilionLabelsVisible = true;
+static std::unordered_map<std::string, std::string> g_PavilionOfficialNames;
 
 static void ConfigureExpoShadowModel(Sprite3D* model, bool castShadow)
 {
@@ -218,9 +243,143 @@ static bool FileExists(const char* path)
 	return attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
+static std::string PathFileName(const std::string& path)
+{
+	const size_t slash = path.find_last_of("\\/");
+	if (slash == std::string::npos)
+	{
+		return path;
+	}
+	return path.substr(slash + 1);
+}
+
+static std::string FormatPavilionLabelName(const char* official)
+{
+	std::string formatted;
+	if (!official)
+	{
+		return formatted;
+	}
+	const unsigned char* bytes = reinterpret_cast<const unsigned char*>(official);
+	while (*bytes)
+	{
+		if (bytes[0] == 0xEF && bytes[1] == 0xBC && bytes[2] == 0x88)
+		{
+			formatted.push_back('\n');
+			bytes += 3;
+			continue;
+		}
+		if (bytes[0] == 0xE3 && bytes[1] == 0x80 && bytes[2] == 0x81)
+		{
+			formatted.push_back('\n');
+			bytes += 3;
+			continue;
+		}
+		if (bytes[0] == 0xEF && bytes[1] == 0xBC && bytes[2] == 0x89)
+		{
+			bytes += 3;
+			continue;
+		}
+		formatted.push_back(static_cast<char>(*bytes));
+		++bytes;
+	}
+	return formatted;
+}
+
+static void LoadPavilionOfficialNames(void)
+{
+	g_PavilionOfficialNames.clear();
+	FILE* file = nullptr;
+	if (fopen_s(&file, EXPO_PAVILION_NAMES_PATH, "rb") != 0 || !file)
+	{
+		return;
+	}
+	char line[1024] = {};
+	while (fgets(line, sizeof(line), file))
+	{
+		size_t len = strlen(line);
+		while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+		{
+			line[--len] = '\0';
+		}
+		if (strncmp(line, "name ", 5) != 0)
+		{
+			continue;
+		}
+		char* rest = line + 5;
+		char* space = strchr(rest, ' ');
+		if (!space || space == rest)
+		{
+			continue;
+		}
+		*space = '\0';
+		const char* official = space + 1;
+		while (*official == ' ')
+		{
+			++official;
+		}
+		if (*official == '\0')
+		{
+			continue;
+		}
+		g_PavilionOfficialNames[rest] = FormatPavilionLabelName(official);
+	}
+	fclose(file);
+}
+
+static void TryCreatePavilionLabel(ExpoDrawJob* job)
+{
+	if (!job || job->kind != ExpoDrawKind::Pavilion || job->path.empty())
+	{
+		return;
+	}
+	if (strstr(job->path.c_str(), "expo_pavilion_") == nullptr)
+	{
+		return;
+	}
+	const std::string fileName = PathFileName(job->path);
+	if (fileName.find("expo_pavilion_expo_related") == 0 ||
+		fileName.find("expo_pavilion_group_rest_area") == 0)
+	{
+		return;
+	}
+	const auto found = g_PavilionOfficialNames.find(PathFileName(job->path));
+	if (found == g_PavilionOfficialNames.end())
+	{
+		return;
+	}
+	SAFE_DELETE(job->nameLabel);
+	job->nameLabel = new BillboardDrawFont(
+		job->position,
+		g_PavilionLabelSize,
+		g_PavilionLabelColor,
+		found->second);
+}
+
 static bool IsNull2Path(const char* path)
 {
 	return path && strstr(path, "expo_pavilion_null2") != nullptr;
+}
+
+static int GetInitialPriorityPavilionOrder(const char* path)
+{
+	if (!path)
+	{
+		return 0;
+	}
+	for (int i = 0; i < EXPO_INITIAL_PRIORITY_PAVILION_COUNT; ++i)
+	{
+		if (strstr(path, EXPO_INITIAL_PRIORITY_PAVILIONS[i]) != nullptr)
+		{
+			return i + 1;
+		}
+	}
+	return 0;
+}
+
+static bool IsInitialPriorityPavilion(const ExpoDrawJob* job)
+{
+	return job && job->kind == ExpoDrawKind::Pavilion && job->initialPriority > 0;
 }
 
 static LONGLONG GetPerformanceCounter(void)
@@ -388,6 +547,7 @@ static void ResetDrawJobs(void)
 			job->gpuModel = nullptr;
 		}
 		SAFE_DELETE(job->placeholder);
+		SAFE_DELETE(job->nameLabel);
 		if (job->result && job->result != g_ExpoFloor && job->result != g_ExpoRing)
 		{
 			bool owned = false;
@@ -1110,6 +1270,7 @@ static ExpoDrawJob* AddDrawJob(
 	}
 	ExpoDrawJob* raw = job.get();
 	g_DrawJobs.push_back(std::move(job));
+	TryCreatePavilionLabel(raw);
 	return raw;
 }
 
@@ -1225,6 +1386,11 @@ static bool IsCoreDrawJob(const ExpoDrawJob* job)
 	return job && job->kind != ExpoDrawKind::Pavilion;
 }
 
+static bool IsInitialLoadJob(const ExpoDrawJob* job)
+{
+	return IsCoreDrawJob(job) || IsInitialPriorityPavilion(job);
+}
+
 static bool AreCoreImportsDone(void)
 {
 	if (g_DrawJobs.empty())
@@ -1233,7 +1399,7 @@ static bool AreCoreImportsDone(void)
 	}
 	for (const std::unique_ptr<ExpoDrawJob>& job : g_DrawJobs)
 	{
-		if (!IsCoreDrawJob(job.get()))
+		if (!IsInitialLoadJob(job.get()))
 		{
 			continue;
 		}
@@ -1257,6 +1423,10 @@ static float GetPavilionLoadScore(const ExpoDrawJob* job)
 	if (!job || job->kind != ExpoDrawKind::Pavilion)
 	{
 		return 0.0f;
+	}
+	if (job->initialPriority > 0)
+	{
+		return -100000000.0f + static_cast<float>(job->initialPriority);
 	}
 	Camera* camera = GetCamera();
 	if (!camera)
@@ -1314,6 +1484,10 @@ static void RememberPavilionStreamPadding(ExpoDrawJob* job, const XMFLOAT3& mode
 static bool IsPavilionInLoadRange(const ExpoDrawJob* job, float radius)
 {
 	if (!job || job->kind != ExpoDrawKind::Pavilion)
+	{
+		return true;
+	}
+	if (!g_LoadComplete && job->initialPriority > 0)
 	{
 		return true;
 	}
@@ -1458,7 +1632,7 @@ static void StartPendingImports(void)
 
 	// CPUインポート中のワーカー数と、GPU待ちの完成データ数を分ける。
 	// CPU準備済みモデルが増えすぎる場合だけ新しいインポートを抑える。
-	// まず床・LOD2・リングをすべて開始し、コアのGPU化完了後にパビリオンへ進む。
+	// まず床・LOD2・リングを開始し、続けて明示指定の初期優先LOD3を順に開始する。
 	for (std::unique_ptr<ExpoDrawJob>& job : g_DrawJobs)
 	{
 		if (inFlight >= maxWorkers || ready >= maxReadyModels)
@@ -1483,9 +1657,44 @@ static void StartPendingImports(void)
 			ready += 1;
 		}
 	}
-	if (!AllDrawJobsSettled())
+	if (!g_LoadComplete)
 	{
-		return;
+		for (int priority = 1; priority <= EXPO_INITIAL_PRIORITY_PAVILION_COUNT; ++priority)
+		{
+			if (inFlight >= maxWorkers || ready >= maxReadyModels)
+			{
+				break;
+			}
+			ExpoDrawJob* wiredJob = nullptr;
+			for (std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+			{
+				ExpoDrawJob* job = holder.get();
+				if (!job || job->started || job->finished ||
+					job->initialPriority != priority)
+				{
+					continue;
+				}
+				wiredJob = job;
+				break;
+			}
+			if (!wiredJob)
+			{
+				continue;
+			}
+			StartDrawWorker(wiredJob);
+			if (wiredJob->started && !wiredJob->workerDone)
+			{
+				inFlight += 1;
+			}
+			if (wiredJob->gpuModel)
+			{
+				ready += 1;
+			}
+		}
+		if (!AllDrawJobsSettled())
+		{
+			return;
+		}
 	}
 
 	// パビリオンはカメラ、視線先、移動先予測点に近い順で開始する。
@@ -1537,7 +1746,7 @@ static bool AllDrawJobsSettled(void)
 	}
 	for (std::unique_ptr<ExpoDrawJob>& job : g_DrawJobs)
 	{
-		if (IsCoreDrawJob(job.get()) && !job->finished)
+		if (IsInitialLoadJob(job.get()) && !job->finished)
 		{
 			return false;
 		}
@@ -1811,9 +2020,22 @@ static ExpoDrawJob* FindNextGpuJob(void)
 		{
 			continue;
 		}
-		if (!g_LoadComplete && IsCoreDrawJob(job))
+		if (!g_LoadComplete)
 		{
-			return job;
+			if (!IsInitialLoadJob(job))
+			{
+				continue;
+			}
+			if (IsCoreDrawJob(job))
+			{
+				return job;
+			}
+			if (!bestJob ||
+				job->initialPriority < bestJob->initialPriority)
+			{
+				bestJob = job;
+			}
+			continue;
 		}
 		if (job->kind == ExpoDrawKind::Pavilion)
 		{
@@ -2066,6 +2288,7 @@ static void BuildDrawJobs(void)
 				job->streamPosition = position;
 				job->streamRadius = 80.0f;
 			}
+			job->initialPriority = GetInitialPriorityPavilionOrder(job->path.c_str());
 			AssignFarBatchRefs(job);
 		}
 		if (g_TileSet.hasRing)
@@ -2283,6 +2506,91 @@ void Field_GetMemoryStatus(char* out, size_t outSize)
 		failed);
 }
 
+bool Field_GetNearestHighDetailName(
+	XMFLOAT3 pos,
+	char* out,
+	size_t outSize)
+{
+	if (!out || outSize == 0)
+	{
+		return false;
+	}
+	out[0] = '\0';
+
+	const ExpoDrawJob* nearest = nullptr;
+	float bestDistSq = FLT_MAX;
+	float bestVolume = FLT_MAX;
+	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+	{
+		const ExpoDrawJob* job = holder.get();
+		if (!job || job->kind != ExpoDrawKind::Pavilion || job->path.empty())
+		{
+			continue;
+		}
+
+		float distSq = FLT_MAX;
+		float volume = FLT_MAX;
+		if (job->result &&
+			job->result != job->placeholder &&
+			IsModelLoaded(job->result))
+		{
+			const XMFLOAT3 center = job->result->GetWorldCenter();
+			const XMFLOAT3 size = job->result->GetDisplaySize();
+			const XMFLOAT3 half = {
+				size.x * 0.5f,
+				size.y * 0.5f,
+				size.z * 0.5f
+			};
+			float dx = fabsf(pos.x - center.x) - half.x;
+			float dy = fabsf(pos.y - center.y) - half.y;
+			float dz = fabsf(pos.z - center.z) - half.z;
+			if (dx < 0.0f) dx = 0.0f;
+			if (dy < 0.0f) dy = 0.0f;
+			if (dz < 0.0f) dz = 0.0f;
+			distSq = dx * dx + dy * dy + dz * dz;
+			volume = fabsf(size.x * size.y * size.z);
+		}
+		else
+		{
+			const XMFLOAT3 origin = job->hasStreamCenter
+				? job->streamPosition
+				: job->position;
+			const float radius = job->streamRadius + job->streamPadding;
+			const float dx = pos.x - origin.x;
+			const float dz = pos.z - origin.z;
+			float dist = sqrtf(dx * dx + dz * dz) - radius;
+			if (dist < 0.0f)
+			{
+				dist = 0.0f;
+			}
+			distSq = dist * dist;
+		}
+
+		if (distSq < bestDistSq ||
+			(distSq == bestDistSq && volume < bestVolume))
+		{
+			bestDistSq = distSq;
+			bestVolume = volume;
+			nearest = job;
+		}
+	}
+
+	if (!nearest)
+	{
+		return false;
+	}
+
+	const std::string& path = nearest->path;
+	const size_t slash = path.find_last_of("\\/");
+	const size_t nameStart = slash == std::string::npos ? 0 : slash + 1;
+	const size_t dot = path.find_last_of('.');
+	const size_t nameEnd =
+		dot != std::string::npos && dot > nameStart ? dot : path.size();
+	const std::string stem = path.substr(nameStart, nameEnd - nameStart);
+	strcpy_s(out, outSize, stem.c_str());
+	return true;
+}
+
 static void EnsureSkyboxLoaded(void);
 
 void Field_PumpLoad(void)
@@ -2468,6 +2776,7 @@ void Field_Initialize(void)
 		InitTileSetDefaults(&g_TileSet);
 	}
 	ParseExpoField(EXPO_FIELD_PATH, &g_TileSet);
+	LoadPavilionOfficialNames();
 
 	g_ExpectedTiles = g_TileSet.count;
 	g_ExpectedFarTiles = g_TileSet.farCount;
@@ -2511,7 +2820,7 @@ float Field_GetInitialLoadProgress(void)
 	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
 	{
 		const ExpoDrawJob* job = holder.get();
-		if (!IsCoreDrawJob(job))
+		if (!IsInitialLoadJob(job))
 		{
 			continue;
 		}
@@ -2679,6 +2988,52 @@ static void DrawPavilionModel(Sprite3D* model, bool bindMirror)
 	model->Draw();
 }
 
+static void DrawPavilionLabels(void)
+{
+	if (!g_PavilionLabelsVisible)
+	{
+		return;
+	}
+	Camera* camera = GetCamera();
+	if (!camera)
+	{
+		return;
+	}
+	const XMFLOAT3 cameraPos = camera->GetPos();
+	const float maxDist = g_PavilionLabelDistance;
+	const float maxDistSq = maxDist * maxDist;
+	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+	{
+		ExpoDrawJob* job = holder.get();
+		if (!job || !job->nameLabel)
+		{
+			continue;
+		}
+
+		XMFLOAT3 origin = job->hasStreamCenter ? job->streamPosition : job->position;
+		if (job->result &&
+			job->result != job->placeholder &&
+			IsModelLoaded(job->result))
+		{
+			const XMFLOAT3 center = job->result->GetWorldCenter();
+			origin.x = center.x;
+			origin.z = center.z;
+		}
+
+		const float dx = origin.x - cameraPos.x;
+		const float dz = origin.z - cameraPos.z;
+		if (dx * dx + dz * dz > maxDistSq)
+		{
+			continue;
+		}
+
+		job->nameLabel->SetWorldHeight(g_PavilionLabelSize);
+		job->nameLabel->SetColor(g_PavilionLabelColor);
+		job->nameLabel->SetWorldPos({ origin.x, g_PavilionLabelWorldY, origin.z });
+		job->nameLabel->Draw();
+	}
+}
+
 static void DrawFieldContent(bool probePass)
 {
 	if (g_ExpoFloor)
@@ -2746,6 +3101,10 @@ static void DrawFieldContent(bool probePass)
 		g_ExpoSkybox->Draw();
 		SetParameter(savedParameter);
 	}
+	if (!probePass)
+	{
+		DrawPavilionLabels();
+	}
 }
 
 void Field_Draw(void)
@@ -2801,5 +3160,34 @@ bool Field_HasFloor(void)
 int Field_GetRingCollisionId(void)
 {
 	return g_RingCollisionId;
+}
+
+void Field_SetPavilionLabelsVisible(bool visible)
+{
+	g_PavilionLabelsVisible = visible;
+}
+
+bool Field_ArePavilionLabelsVisible(void)
+{
+	return g_PavilionLabelsVisible;
+}
+
+void Field_DrawDebug(void)
+{
+#if defined(_DEBUG)
+	if (Direct3D_IsTakingScreenshot())
+	{
+		return;
+	}
+	ImGui::Begin("Expo Pavilion Label");
+	ImGui::SliderFloat("Distance", &g_PavilionLabelDistance, 0.0f, 200.0f, "%.1f");
+	ImGui::End();
+
+	ImGui::Begin("Expo Pavilion Label Style");
+	ImGui::SliderFloat("Size", &g_PavilionLabelSize, 0.05f, 20.0f, "%.2f");
+	ImGui::ColorEdit4("Color", &g_PavilionLabelColor.x);
+	ImGui::SliderFloat("Height", &g_PavilionLabelWorldY, -50.0f, 0.0f, "%.2f");
+	ImGui::End();
+#endif
 }
 

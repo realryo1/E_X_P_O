@@ -80,7 +80,7 @@ flowchart TD
 | **大屋根リング** | `asset/expomodel/expo_ring.glb` | `S_PBR` | **○** (近傍セル) | **○** | 公式 appearance JPEG 22枚 + 単色 4枚 | Y: `-1.550` (`EXPO_RING_Y_OFFSET`) | 約90.6万ポリゴン。XZセル分割で影パスをカリング |
 | **LOD2タイル** | `asset/expomodel/expo_tile_lod2.glb` | `S_PBR` | **○** (近傍セル) | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | パンチ済みタイル4枚 |
 | **未パンチLOD2遠景** | `asset/expomodel/expo_tile_far.glb` | `S_PBR` | **○**（メッシュ単位） | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | LOD3常駐時にバッチ単位で排他非表示。メインは hidden 変更時に可視IBを連続化。影はセル無しの1発行 |
-| **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 48、破棄 72、視線方向は+32）。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理。`null2` は動的キューブマップ鏡面 |
+| **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 48、破棄 72、視線方向は+32）。初期優先は `null2` → `dynamic_equilibrium` → `expo_related_31` → `expo_related_25` → `angola` → `czech`。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理。`null2` は動的キューブマップ鏡面 |
 | **null2** | `asset/expomodel/expo_pavilion_null2.glb` | `S_PBR` | × | **○** | 写真アルベドは使わず銀アルベド | Y: `-9.010` | 金属度 1、粗さ 0.08。起動既定 512² キューブを t6 で反射（ImGui で 128～1024）。膜は高周波の微振動。撮影半径約 72、1フレーム1面 |
 | **プレースホルダー** | `asset/model/cube.fbx` | `S_PBR` | × | **○** | 単色マテリアル | 各建物の配置座標 | LOD3 の GPU 化進行中に表示。影はLOD2を投影元とする |
 | **プレイヤー機体** | `asset/model/flytaxi.glb` | `S_PBR` | **○**（結合シャドウ） | **○** | 組み込みテクスチャ | ホバー移動座標 | 表示長辺約 0.8。Assimp でアニメーション0フレームを焼いたあとマテリアル結合。影は 8MB 以下の結合バッファでカスケードあたり1発行 |
@@ -283,7 +283,7 @@ flowchart LR
 8. **小さいモデルだけ結合影を作る**: `TryBuildSmallCombinedShadow` は結合頂点＋インデックスが 8MB 以下のときだけ同期 `CreateBuffer` する。タクシー `flytaxi.glb` は Assimp で 0 フレーム姿勢を焼いたあと会場と同じマテリアル結合へ渡し、影の 61×3 発行を避ける。会場 LOD2／床の数百 MB 結合は作らない。
 9. **遠景LOD2はタイル1メッシュ**: ユニーク写真が何枚でも `CollapsePreparedMeshes(1)` で最大テクスチャのメッシュへ幾何を載せる。距離があるため見た目の優先は発行回数。hidden が空のときはバッチ範囲を分割せず IB 全体を1回描く。
 10. **アダプタ選択**: `InitRenderer` は `IDXGIFactory6::EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` を優先し、だめなら専用 VRAM 最大。`EnumOutputs()` の有無では選ばない。`--gpu=high` は同じ高性能 GPU を明示するだけ。
-11. **Cursor での計測**: 実速度は `.vscode/tasks.json` の `Run Release (No Debugger)`。F5 の CodeLLDB 接続は `OutputDebugString` やデバッグイベントで数十倍遅くなることがある。Cursor は `cppvsdbg` を使えない。
+11. **Cursor での計測**: 実速度は実行とデバッグの `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`、または Task `Run Release (No Debugger)`。F5 の CodeLLDB（`Debug` / `Release`）は `OutputDebugString` やデバッグイベントで数十倍遅くなることがある。Cursor は `cppvsdbg` を使えない。
 
 Debug ビルドではウィンドウキャプションと `debug-frame-perf.log` に `updUs` / `drwUs` / `gpuMs` / `mapCount` / `idx` / `shdMs` / `fldMs` / `objMs` / `uiMs` / `pumpMs` を残す。`gpuMs` が低く `fldMs` と `idx` が高いときは発行コスト、両方が高いときは転送やシェーダ初期化のキュー待ちである。`gpuMs` 自体は Release でも計測し、ストリーミング抑制に使う。
 

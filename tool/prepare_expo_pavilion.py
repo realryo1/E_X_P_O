@@ -176,6 +176,28 @@ OUTPUT_STEM = {
     "風の広場マーケットプレイス": "wind_plaza_market",
     "飯田グループ×大阪公立大学共同出展館": "iida_osaka_metropolitan",
 }
+
+def skip_pavilion_convert(name: str) -> bool:
+    if name == "大阪万博関連施設":
+        return True
+    if name.startswith("団体休憩所"):
+        return True
+    return False
+
+
+def skip_pavilion_glb(file_name: str) -> bool:
+    stem = Path(file_name).name
+    if stem.lower().endswith(".glb"):
+        stem = stem[:-4]
+    prefix = "expo_pavilion_"
+    rest = stem[len(prefix) :] if stem.startswith(prefix) else stem
+    if rest == "expo_related" or rest.startswith("expo_related_"):
+        return True
+    if rest == "group_rest_area" or rest.startswith("group_rest_area_"):
+        return True
+    return False
+
+
 FILTER_GLB = TOOL_DIR / "filter_glb_batches.cjs"
 LOD2_CONVERTED = PROJECT_ROOT / "data_converted" / "meshes"
 
@@ -224,6 +246,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--node-command", default="node")
     parser.add_argument("--keep-draco", action="store_true")
+    parser.add_argument(
+        "--write-names",
+        action="store_true",
+        help="既存GLBから asset/expomodel/expo_pavilion_names.txt だけ書く",
+    )
     return parser.parse_args()
 
 
@@ -238,6 +265,121 @@ def pavilion_file_name(name: str, match_index: int = 0) -> str:
     if match_index == 0:
         return f"expo_pavilion_{stem}{suffix}"
     return f"expo_pavilion_{stem}_{match_index}{suffix}"
+
+
+def pavilion_stem_from_file(file_name: str) -> str:
+    base = Path(file_name).name
+    prefix = "expo_pavilion_"
+    if base.startswith(prefix) and base.lower().endswith(".glb"):
+        return base[len(prefix) : -4]
+    return Path(base).stem
+
+
+def canonical_pavilion_stem(stem: str) -> str:
+    split_at = stem.rfind("_")
+    if split_at > 0 and stem[split_at + 1 :].isdigit():
+        return stem[:split_at]
+    return stem
+
+
+def official_names_are_duplicates(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if not longer.startswith(shorter):
+        return False
+    rest = longer[len(shorter) :]
+    return bool(rest) and all(ord(ch) < 128 and (ch.isalnum() or ch.isspace()) for ch in rest)
+
+
+def keep_longest_duplicate_names(rows: dict[str, str]) -> dict[str, str]:
+    files = list(rows.keys())
+    parent = list(range(len(files)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        root_left = find(left)
+        root_right = find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    stems = [canonical_pavilion_stem(pavilion_stem_from_file(name)) for name in files]
+    for i, left in enumerate(files):
+        for j in range(i + 1, len(files)):
+            right = files[j]
+            if stems[i] == stems[j] or official_names_are_duplicates(rows[left], rows[right]):
+                union(i, j)
+
+    groups: dict[int, list[str]] = {}
+    for i, file_name in enumerate(files):
+        groups.setdefault(find(i), []).append(file_name)
+
+    kept: dict[str, str] = {}
+    for members in groups.values():
+        best = max(
+            members,
+            key=lambda name: (
+                len(rows[name]),
+                0 if canonical_pavilion_stem(pavilion_stem_from_file(name)) == pavilion_stem_from_file(name) else -1,
+                name,
+            ),
+        )
+        kept[best] = rows[best]
+    return kept
+
+
+def official_name_for_glb(file_name: str) -> str | None:
+    base = Path(file_name).name
+    if skip_pavilion_glb(base):
+        return None
+    if base == OUTER_LANDMARK_FILE:
+        return " / ".join(OUTER_LANDMARK_NAMES)
+    prefix = "expo_pavilion_"
+    if not base.startswith(prefix) or not base.lower().endswith(".glb"):
+        return None
+    stem = base[len(prefix) : -4]
+    stem_to_name = {value: key for key, value in OUTPUT_STEM.items()}
+    if stem in stem_to_name:
+        return stem_to_name[stem]
+    split_at = stem.rfind("_")
+    if split_at > 0 and stem[split_at + 1 :].isdigit():
+        parent = stem[:split_at]
+        if parent in stem_to_name:
+            return stem_to_name[parent]
+    return None
+
+
+def write_pavilion_name_table(
+    extra: list[tuple[str, str]],
+    runtime_dir: Path,
+    converted_dir: Path,
+) -> None:
+    rows: dict[str, str] = {}
+    for file_name, official in extra:
+        if skip_pavilion_convert(official) or skip_pavilion_glb(file_name):
+            continue
+        rows[Path(file_name).name] = official
+    if runtime_dir.is_dir():
+        for path in sorted(runtime_dir.glob("expo_pavilion_*.glb")):
+            if skip_pavilion_glb(path.name):
+                continue
+            official = official_name_for_glb(path.name)
+            if official:
+                rows[path.name] = official
+    rows = keep_longest_duplicate_names(rows)
+    lines = ["EXPO_PAVILION_NAME 1"]
+    for file_name in sorted(rows):
+        lines.append(f"name {file_name} {rows[file_name]}")
+    text = "\n".join(lines) + "\n"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "expo_pavilion_names.txt").write_text(text, encoding="utf-8")
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    (converted_dir / "expo_pavilion_names.txt").write_text(text, encoding="utf-8")
 
 
 def lod2_far_file_name(stem: str) -> str:
@@ -760,6 +902,12 @@ def scan_all_named_leaves(
 
 def main() -> int:
     args = parse_args()
+    if args.write_names:
+        write_pavilion_name_table([], args.runtime_dir, args.output_dir)
+        print(
+            f"wrote {(args.runtime_dir / 'expo_pavilion_names.txt').as_posix()}"
+        )
+        return 0
     if not args.tileset.is_file():
         print(f"tilesetがありません: {args.tileset}")
         return 1
@@ -769,6 +917,15 @@ def main() -> int:
     else:
         names = list(args.name)
         found = scan_named_leaves(args.tileset, names)
+    names = [name for name in names if not skip_pavilion_convert(name)]
+    found = {
+        name: entries
+        for name, entries in found.items()
+        if not skip_pavilion_convert(name)
+    }
+    if not names:
+        print("変換対象のパビリオン名がありません")
+        return 1
     missing_stems = [name for name in names if name not in OUTPUT_STEM]
     if missing_stems:
         print("OUTPUT_STEMに英単語名がありません: " + ", ".join(missing_stems))
@@ -996,6 +1153,13 @@ def main() -> int:
         lod2_far=lod2_far,
         lod2_far_batches=lod2_far_batches,
     )
+    extra_names: list[tuple[str, str]] = []
+    for _path, _rtc, _mode, file_name, name, _stream_center, _stream_radius in written:
+        if name == "__outer_landmarks__":
+            extra_names.append((file_name, " / ".join(OUTER_LANDMARK_NAMES)))
+        else:
+            extra_names.append((file_name, name))
+    write_pavilion_name_table(extra_names, runtime_dir, args.output_dir)
     return 0
 
 
