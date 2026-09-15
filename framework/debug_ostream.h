@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <sstream>
+#include <string>
 
 namespace hal
 {
@@ -13,25 +14,36 @@ namespace hal
 			sync();
 		}
 	protected:
-		int sync()
+		int sync() override
 		{
+#if defined(_DEBUG) && defined(EXPO_VERBOSE_DEBUG_LOG)
 			const std::string message = str();
 			if (!message.empty())
 			{
-				int requiredChars = MultiByteToWideChar(CP_UTF8, 0, message.c_str(), -1, nullptr, 0);
-				if (requiredChars > 0)
+				int count = MultiByteToWideChar(
+					CP_UTF8,
+					0,
+					message.c_str(),
+					-1,
+					nullptr,
+					0);
+				if (count > 0)
 				{
-					std::wstring wideMessage(static_cast<std::size_t>(requiredChars), L'\0');
-					MultiByteToWideChar(CP_UTF8, 0, message.c_str(), -1, &wideMessage[0], requiredChars);
-					OutputDebugStringW(wideMessage.c_str());
-				}
-				else
-				{
-					OutputDebugStringA(message.c_str());
+					std::wstring wide(
+						static_cast<size_t>(count),
+						L'\0');
+					MultiByteToWideChar(
+						CP_UTF8,
+						0,
+						message.c_str(),
+						-1,
+						wide.data(),
+						count);
+					OutputDebugStringW(wide.c_str());
 				}
 			}
-
-			str(std::basic_string<char>());
+#endif
+			str(std::string());
 			return 0;
 		}
 	};

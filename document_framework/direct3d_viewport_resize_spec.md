@@ -79,17 +79,18 @@
 - `SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD`
 - `Format = DXGI_FORMAT_R8G8B8A8_UNORM`
 
-アダプターはソフトウェアアダプターを除外し、専用ビデオメモリが最も大きいハードウェアアダプターを選ぶ。これにより、内蔵 GPU と RTX 4060 が同時に見える環境でも、通常は専用 VRAM 側で D3D11 デバイスを作成する。
+アダプターはソフトウェアを除外し、`EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` を優先する。だめなら専用ビデオメモリが最も大きいハードウェアアダプターを選ぶ。`EnumOutputs()` の有無では選ばない。ハイブリッドノートでは内蔵パネルを持つ iGPU より dGPU を選ぶ。
 
 その後 `configureBackBuffer()` で以下を生成する。
 
 - 2 枚すべてのバックバッファ用 `RenderTargetView`
 - 現在のバックバッファインデックス（`IDXGISwapChain3::GetCurrentBackBufferIndex()`）
 - `g_BackBufferDesc`
-- バックバッファのサイズを基準にした深度ステンシルバッファ / ビュー
-- バックバッファ全体を覆う基準ビューポート
+- バックバッファ実サイズを上限 1920×1080 に収めた内部シーン幅・高さ
+- 内部シーンサイズの深度ステンシルバッファ / ビューとシーン色 RT
+- バックバッファ全体を覆う 2D 用ビューポート。3D は内部シーンサイズ
 
-したがって、`DRAW_SCREEN_X` × `DRAW_SCREEN_Y`（3840 × 2160）は論理的な基準アスペクトであり、バックバッファの固定サイズではない。
+したがって、`DRAW_SCREEN_X` × `DRAW_SCREEN_Y`（3840 × 2160）は論理的な基準アスペクトであり、バックバッファの固定サイズではない。3D の塗りは内部解像度、UI はウィンドウ実サイズである。
 
 ### 3.2 `Direct3D_Resize(UINT width, UINT height)`（公開）
 
@@ -107,11 +108,12 @@
 
 ### 3.3 `configureBackBuffer()` / `releaseBackBuffer()`（内部）
 
-生成: `g_RenderTargetViews[2]`, `g_RenderTargetView`, `g_BackBufferDesc`, 深度バッファ / ビュー, 基準ビューポート  
-解放: 2 枚の RTV / 深度バッファ / DSV
+生成: `g_RenderTargetViews[2]`, `g_RenderTargetView`, `g_BackBufferDesc`, 内部シーン色 RT、1/4 解像度 AO RT、シーン解像度の深度バッファ / ビュー, 2D/3D ビューポート  
+解放: 2 枚の RTV / シーン色 RT / AO RT / 深度バッファ / DSV
 
-`g_RenderTargetView` は現在描画する 1 枚を指すエイリアスである。`Present()` が成功すると
+`g_RenderTargetView` は現在描画するバックバッファ 1 枚を指すエイリアスである。`Present()` が成功すると
 `GetCurrentBackBufferIndex()` の値を読み直し、次の描画先へ `OMSetRenderTargets()` で切り替える。
+バックバッファと深度の解像度は一致しない。Present 後および 2D はバックバッファ RTV のみをバインドし、サイズの違う RT+DSV を同時に付けない。3D は `Direct3D_BeginScene()` で内部シーン色とシーン深度へ切り替える。
 
 ## 4. ウィンドウサイズ変更時の流れ
 
@@ -124,7 +126,7 @@
 ### 4.2 必要に応じた D3D リソース再構築
 
 - `Direct3D_Resize(newWidth, newHeight)`
-- バックバッファと深度バッファを作り直す
+- バックバッファ、内部シーン色 RT、AO RT、シーン深度バッファを作り直す
 
 現行の `WM_SIZE`（`framework/main.cpp`）は `Direct3D_ResizeWindow` と `Direct3D_Resize` の両方を呼ぶ。
 最小化中はリサイズを行わず、復帰時に再構築する。
@@ -137,7 +139,7 @@
 
 ### 3D
 - `SetDepthEnable(true)` → 内部で `Direct3D_SetViewport3D()`
-- バックバッファ全体へ描画し、カメラ Projection でターゲットアスペクトのカバー表示を行う
+- 内部シーン解像度（最大 1920×1080）へ描画し、カメラ Projection でターゲットアスペクトのカバー表示を行う
 
 ※ 旧ドキュメントの `SetDepthTest` は現行では `SetDepthEnable`。
 
@@ -158,5 +160,5 @@
 | 実バッファ再生成 | `Direct3D_Resize` + `ResizeBuffers` + `configureBackBuffer` |
 
 特に重要なのは、**`Direct3D_ResizeWindow()` はビューポート計算の基準値を更新し、
-`Direct3D_Resize()` は 2 枚のバックバッファ RTV と深度バッファを再構築する**という役割分担である。
+`Direct3D_Resize()` は 2 枚のバックバッファ RTV、内部シーン RT、AO RT、シーン深度を再構築する**という役割分担である。
 また、Flip モデルでは `Present()` 後のバックバッファインデックスに合わせて、次フレームの描画先 RTV を更新する。

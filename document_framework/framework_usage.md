@@ -322,6 +322,9 @@ Assimpの法線生成フラグも付けず、GLBに法線が無ければ既定�
 ゲーム側のストリーミングでは、初期ロード中のGPU化とリソース破棄を1フレーム6ms
 （フェード中は最大40ms）で進める。初期完了後は `Present` のあと最大3ms。
 直前フレームの CPU 描画が 8ms 超、または GPU が 8ms 超ならそのフレームはポンプしない。
+GPU タイムスタンプ Query は Release でも有効である。ローカル VRAM 使用量が予算の 85% を超えたら
+Present 後の追加アップロードを止める。パビリオン失敗は最大 3 回、5 秒単位の間隔で再試行する。
+同時インポートとテクスチャデコードは各 1 スレッド。
 描画と同じフレームの先頭で `UpdateSubresource` すると、NVIDIA では続く `DrawIndexed` が待ちやすい。
 `SCENE_GAME`の万博GLBは `GlbModel::ImportPreparedFile` がGLB 2.0のJSON/BIN、
 `bufferView.byteStride`、Accessorの`byteOffset`、u8/u16/u32インデックスを直接検証する。
@@ -335,6 +338,9 @@ Assimpの法線生成フラグも付けず、GLBに法線が無ければ既定�
 `AttachPreparedData` のあと、同一マテリアルの prepared メッシュを
 `MergePreparedMeshesByMaterial` で結合できる。結合後も `expo_batch_id` は
 `GlbBatchRange` として残り、hidden batch の省略と隣接範囲の `DrawIndexed` 結合に使う。
+`TryBuildSmallCombinedShadow` は結合データが 8MB 以下のときだけ影用バッファを作る。
+`GlbModel::Load`（プレイヤー機体など Assimp 経路）はアニメーション 0 フレームを頂点へ焼いたあと、
+同じ結合経路へ渡す。会場の巨大結合シャドウは作らない。
 PLATEAU の遠景LOD2は1ファイルでもプリミティブ分割が多く、NVIDIA の D3D11 ユーザモード
 ドライバでは1発行の固定費が AMD APU より高い。結合は見た目を変えずに発行回数を減らす。
 GLB のテクスチャが無い、または SRV を作れないマテリアルには `GlbModel` が内部生成する
@@ -609,12 +615,16 @@ SCENE_DEBUG
 
 ヘッダ: `shader/renderer.h`
 
-`InitRenderer()` は専用ビデオメモリが最大のハードウェアアダプターを選び、D3D11 デバイスと
+`InitRenderer()` は `IDXGIFactory6::EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` で
+高性能 GPU を選び、それが使えない OS では専用 VRAM 最大のハードウェアアダプターを選ぶ。
+`EnumOutputs()` の有無では選ばない（ハイブリッドノートで内蔵 GPU が優先されるのを避ける）。
+`--gpu=high` は同じ高性能選択を明示する。D3D11 デバイスと
 `CreateSwapChainForHwnd()` による Flip モデルのスワップチェーンを作成する。スワップチェーンは
 2 枚のバックバッファ（`DXGI_SWAP_EFFECT_FLIP_DISCARD`）を持ち、`configureBackBuffer()` が
-各バックバッファの RTV、シーン色中間RT、半解像度AO RT、および
-`R24G8_TYPELESS` の共有深度バッファを生成する。深度バッファは
+各バックバッファの RTV、最大 1920×1080 のシーン色中間RT、シーンの 1/4 解像度 AO RT、および
+シーン解像度の `R24G8_TYPELESS` 深度バッファを生成する。深度バッファは
 `D24_UNORM_S8_UINT` のDSVと `R24_UNORM_X8_TYPELESS` のSRVを同じリソースから作る。
+バックバッファと深度のサイズが違うため、Present 後はバックバッファだけをバインドする。
 
 ウィンドウサイズ変更時は `Direct3D_ResizeWindow()` でクライアントサイズを記録した後、
 `Direct3D_Resize()` が `ResizeBuffers()` とバックバッファ／深度バッファの再生成を行う。
@@ -660,7 +670,7 @@ PumpAfterPresent(lastDrawMs, lastGpuMs);
 静止した通常シーンは `NeedsPresent` が偽なら `Clear` / `Present` を間引く。動いたフレームは `RequestRedraw`。
 処理順の詳細は [起動とメインループ](#起動とメインループ)。
 
-`Direct3D_ApplySsao()` は3D描画色へだけ半解像度の画面空間AOを合成する。
+`Direct3D_ApplySsao()` は3D描画色へだけ画面空間AOを合成する。AOは既定オフで、オン時はシーンの 1/4 解像度。オフ時は生成を省略し内部RTをバックバッファへ拡大するだけである。
 `SsaoPS` の近傍遮蔽、`SsaoBlurPS` の深度依存ぼかし、`SsaoCompositePS` の
 色合成を順に行い、2D HUD / Font / ImGuiはAOの影響を受けない。
 調整値は `Direct3D_SetSsaoParameters()` で設定し、ゲーム側では
@@ -845,12 +855,12 @@ Releaseビルドには `SCENE_DEBUG` が含まれない。
 
 | ヘッダ | 用途 |
 | ------ | ---- |
-| `framework/debug_ostream.h` | `hal::dout << "..."` で OutputDebugString（UTF-8） |
+| `framework/debug_ostream.h` | `hal::dout`。既定では `OutputDebugString` しない。Debug かつプリプロセッサ `EXPO_VERBOSE_DEBUG_LOG` のときだけ UTF-8 をワイドへ変換して出す |
 | `framework/input_monitor_console.h` | 別コンソールに入力状態を表示（`main` が自動初期化） |
 | `framework/main.h` | Win32 / D3D / DirectXTex 共通 include、`SAFE_DELETE`、`SetFPS` |
 | `shader/renderer.h` | 描画エンジン API、`SAFE_RELEASE`。Debug では `Direct3D_DebugStageBegin` と Map 回数 |
 
-Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Idx` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` と `idx` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。`F5` は局所影パスのオン／オフ。
+Debug ビルドの `SCENE_GAME` では、ウィンドウキャプションに Draw/Logic FPS、`Upd` / `Drw` / `Prs` / `GPU` / `Map` / `Idx` / `Shd` / `Fld` / `Obj` / `UI` / `Pump` を出す。同じ値をプロジェクトルートの `debug-frame-perf.log` へ CSV で残す（起動のたびに上書き）。`gpuMs` が低く `fldMs` と `idx` が高いときは CPU 側の Draw 発行、両方が高いときは GPU 待ちである。Debug の `F5` キーは局所影パスのオン／オフ。Cursor の F5（CodeLLDB）はデバッグイベントで実速度を落とすことがある。実速度は Task `Run Release (No Debugger)` で測る。
 
 サードパーティ（直接触らない）: `assimp/`・`freetype/`・`imgui/`・`nlohmann/`・`DirectXTex.h`・`stb_truetype.h`。
 
@@ -1001,22 +1011,26 @@ python tool/rename_project.py                    # 対話モード
 ## tool/build.ps1（VSCode系IDE用ビルドツール）
 
 **通常のVisualStudioを使用する場合は関係ない。**
-想定される使い方は VS Code 系 IDE（Cursor 含む）の「実行とデバッグ」／タスク経由。`vswhere` または既定パスから MSBuild を探し、`expogame.sln` を x64 でビルドする。実体は `tool/build.ps1` である。
+想定される使い方は VS Code 系 IDE（Cursor 含む）のタスク、およびブレークポイント用の「実行とデバッグ」。`vswhere` または既定パスから MSBuild を探し、`expogame.sln` を x64 でビルドする。実体は `tool/build.ps1` である。
 
 
 | IDE 操作                           | 呼び出し先                                | 実体                                      |
 | -------------------------------- | ------------------------------------ | --------------------------------------- |
-| 実行とデバッグ → `Debug (Run Only)`     | `preLaunchTask`: Build Debug   | `tool/build.ps1 -Configuration Debug`   |
-| 実行とデバッグ → `Release (Run Only)`   | `preLaunchTask`: Build Release | `tool/build.ps1 -Configuration Release` |
-| タスク: Build Debug（既定ビルド）          | `.vscode/tasks.json`                 | `tool/build.ps1 -Configuration Debug`        |
+| 実行とデバッグ → `Debug` / `Release`   | CodeLLDB（`type: lldb`）          | デバッガー接続。実速度計測には使わない |
+| タスク: Run Release (No Debugger)   | `.vscode/tasks.json`                 | Build Release のあと `x64/Release/expogame.exe` を直接起動 |
+| タスク: Run Release Binary          | 同上                                   | ビルドせず同じ exe を直接起動 |
+| タスク: Rebuild and Run Release (No Debugger) | 同上                          | Clean → Build → 直接起動 |
+| タスク: Build Debug（既定ビルド）          | 同上                                   | `tool/build.ps1 -Configuration Debug`        |
 | タスク: Build Release               | 同上                                   | `tool/build.ps1 -Configuration Release`      |
-| タスク: Clean Debug / Clean Release | 同上                                   | `tool/build.ps1 ... -Clean`                  |
+| タスク: Clean Debug / Clean Release / Rebuild Release | 同上                    | `tool/build.ps1` の Clean と Rebuild |
 
 
 設定ファイル:
 
-- `.vscode/launch.json` … 実行構成（上記 Run Only）
-- `.vscode/tasks.json` … `tool/build.ps1` を呼び出すシェルタスク
+- `.vscode/launch.json` … CodeLLDB 用。Cursor では `cppvsdbg` は使えない
+- `.vscode/tasks.json` … ビルドとデバッガーなし起動
+
+ZIP 作成（`create_release_zip.py`）は毎回 Release を Clean してからビルドする。開発側 F5 が重いのに ZIP や No Debugger が軽いときは、描画コードより CodeLLDB 接続、増分ビルド／共有 CSO、または `asset/expomodel` の差を疑う。
 
 ---
 

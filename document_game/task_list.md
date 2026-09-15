@@ -11,7 +11,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 ## いまここ
 
-会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、半解像度SSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA dGPU 向けの `DrawIndexed` 削減と Present 後ストリーミングまで実装完了。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、内部解像度3D＋既定オフのSSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA 向け DrawIndexed 削減、Present 後ストリーミング、高性能GPU選択、VRAM予算と失敗backoffまで実装完了。Cursor での実速度計測は CodeLLDB ではなく Task `Run Release (No Debugger)`。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
 現在保留・未着手の主要項目は、衝突メッシュ間引き、機体アニメーション、会場全体のIBL・昼夜サイクルである。距離＋高度フォグは実装済み。`null2` は動的キューブマップ鏡面を実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
@@ -60,15 +60,15 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `tile-streaming-cache`: 非同期ロード、キャッシュ、GPUアップロード、破棄を追加する
 - [x] `streaming-stall`: 新規建物ロード時の約5秒停止をなくす（直接GLBデコード、CPU/GPU待ち分離、GPU転送チャンク化、6ms予算、先読み、プレースホルダー）
 - [x] `streaming-nearby-miss`: 破棄半径内のREADYをGPU化し、モデルXZ半径を距離に足して近くても始まらない欠落を防ぐ
-- [x] `nvidia-d3d11-drawcall`: ハイブリッドGPUで NVIDIA だけ数fpsになる問題。原因は塗りではなく `DrawIndexed` 発行。マテリアル結合、遠景の1メッシュ化、Present後GPUポンプ、影はモデル結合バッファで1発行（1メッシュでも作成）、hidden 連続IB、セル分裂時は全メッシュ1発行、初期ロード中のSSAO省略。780M 互換は維持。計測はキャプションの `Idx` と `debug-frame-perf.log`
+- [x] `nvidia-d3d11-drawcall`: ハイブリッドGPUで NVIDIA だけ数fpsになる問題。発行回数削減、Present後GPUポンプ、影の結合バッファ。780M 互換は維持。計測はキャプションの `Idx` と `debug-frame-perf.log`。F5（CodeLLDB）時の遅さは描画本体と切り分ける
 - [x] `glb-vertex-validation`: カタール／中国を含む万博GLBのAccessor境界、インデックス上限、有限値、参照頂点AABBを検証する
 - [x] `glb-uv-coordinate-contract`: 直接デコードのUVをglTFの値のまま使用し、不要なV反転によるテクスチャずれを修正する
 - [x] `flight-hover`: `flytaxi.glb` の静的表示、カメラヨー基準の前進、マウス追従旋回、旋回時のロール傾斜、Wの前進加減速、Space/Shiftのピッチ付き上下移動を実装する
 - [x] `world-tuning`: 遠景LODと近景アセットを組み合わせて会場全体を調整する
 - [x] skydome
 - [x] `pbr-sun-directional`: HDR輝度抽出による平行太陽と連動環境光。場のモデル・プレースホルダ・タクシーを `S_PBR` 化。スカイドームはHDRを表示用変換した `S_SKYBOX`。方位既定値は `-170.0°` で、HDR抽出方位との差分により見た目の太陽位置を維持する。DebugビルドのみImGui `Expo Sunlight`
-- [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–20m / 20–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーはメッシュ全体を使う
-- [x] `ssao-crevice`: シーン色を中間RTへ描き、サンプル可能な深度から半解像度SSAOと深度依存ぼかしを生成して3D色へ合成。`Expo Sunlight` から強度・半径・バイアス・カーブを調整でき、UIはAO対象外
+- [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–20m / 20–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーは 8MB 以下の結合シャドウ
+- [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
 - [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能
@@ -81,6 +81,11 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] タイトル、リザルトをまともに
 - [x] アプリアイコン差し替え（手動）
 - [x] 諸々整備してgithubへ上げる（手動）
+- [x] `gpu-adapter-high-performance`: Auto でも `EnumAdapterByGpuPreference(HIGH_PERFORMANCE)`。出力所有権では選ばない
+- [x] `internal-3d-resolution`: 3Dは最大1920×1080、UIはウィンドウ実サイズ
+- [x] `streaming-vram-retry`: 失敗backoff（最大3回）、VRAM 85%でPresent後ポンプ停止、GPU時間はReleaseでも計測、インポート／デコードは各1スレッド
+- [x] `taxi-merged-shadow`: `flytaxi.glb` を0フレーム焼きのあとマテリアル結合。8MB以下だけ結合シャドウ
+- [x] `cursor-no-debugger-run`: Task `Run Release (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
 
 ---
 

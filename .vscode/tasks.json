@@ -57,6 +57,51 @@
             ],
             "group": "build",
             "problemMatcher": []
+        },
+        {
+            "label": "Rebuild Release",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Clean Release",
+                "Build Release"
+            ],
+            "problemMatcher": [],
+            "group": "build"
+        },
+        {
+            "label": "Run Release Binary",
+            "type": "process",
+            "command": "${workspaceFolder}\\x64\\Release\\expogame.exe",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "_NO_DEBUG_HEAP": "1"
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Release (No Debugger)",
+            "type": "process",
+            "command": "${workspaceFolder}\\x64\\Release\\expogame.exe",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": {
+                    "_NO_DEBUG_HEAP": "1"
+                }
+            },
+            "dependsOn": "Build Release",
+            "problemMatcher": []
+        },
+        {
+            "label": "Rebuild and Run Release (No Debugger)",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Clean Release",
+                "Build Release",
+                "Run Release Binary"
+            ],
+            "problemMatcher": []
         }
     ]
 }

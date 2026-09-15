@@ -2,7 +2,7 @@
 
 ## 1. この資料の目的
 
-この資料は、`expogame` における万博会場（`SCENE_GAME`）の3D描画パイプライン、HDR画像のプリプロセスから抽出する平行太陽光、連動環境光、GGXベースのPBRシェーディング、全モデルが受影し建物はLOD2を投影元とする近傍シャドウマップ、半解像度SSAO、HDRを表示用に変換したスカイドーム、および ImGui によるリアルタイム調整の設計と実装仕様を整理する。
+この資料は、`expogame` における万博会場（`SCENE_GAME`）の3D描画パイプライン、HDR画像のプリプロセスから抽出する平行太陽光、連動環境光、GGXベースのPBRシェーディング、全モデルが受影し建物はLOD2を投影元とする近傍シャドウマップ、内部解像度のシーンRTと任意のSSAO、HDRを表示用に変換したスカイドーム、および ImGui によるリアルタイム調整の設計と実装仕様を整理する。
 
 全体仕様は [game_specification.md](game_specification.md)、タスク進捗は [task_list.md](task_list.md)、会場都市モデルは [plateau.md](plateau.md)、フレームワーク仕様は [../document_framework/framework_usage.md](../document_framework/framework_usage.md) を参照する。
 
@@ -34,7 +34,7 @@ flowchart TD
     taxiDraw["空飛ぶタクシー (S_PBR, Cast/Receive=ON)"]
     skyboxDraw --> floorDraw --> tileDraw --> ringDraw --> taxiDraw
   end
-  ssaoPass["7. 半解像度 SSAO<br>(深度SRV・AO生成・深度依存ぼかし・合成)"]
+  ssaoPass["7. 内部解像度のシーン色をバックバッファへ合成<br>(SSAOは既定オフ。オン時は1/4解像度AO)"]
   subgraph uiPass ["8. UI & デバッグ描画"]
     uiReset["Ui_ResetMaterial"]
     depthDisable["SetDepthEnable(false)"]
@@ -53,15 +53,15 @@ flowchart TD
 3. **`Sunlight_Apply`**: 起動時の方位 `-170.0°`、HDRから抽出した仰角・色、既定強度 `2.00`（いずれもImGuiで変更可能）から平行光定数バッファ（`g_LightBuffer` / `b4`）およびマテリアルパラメータ（`g_ParameterBuffer` / `b6`）を設定し、スカイドームの回転角度を更新。
 4. **近傍シャドウマップ作成パス**:
    - `Sunlight_BeginLocalShadow`: カメラ視錐台を3段（既定 `0–20m / 20–70m / 70–160m`）に分け、各段の直交投影ライトカメラを構築。テクセル整列スナップを行い、カスケード0の深度ビューへ切り替える。アクネ防止のため `CULLSTATE_FRONT`（前面カリング＝裏面深度書き込み）を設定。
-   - `Field_DrawLocalShadow` と `Player_DrawLocalShadow`: 床、パンチ済みLOD2、遠景LOD2、大屋根リング、空飛ぶタクシーをカスケードごとに `S_SHADOW_MAP` で深度バッファへ描画する。マテリアルが複数でも結合バッファがあればモデルあたり1回の `DrawIndexed` にする。LOD3パビリオンとプレースホルダーは影を受けるが投影しない。タクシーはメッシュ全体を投影する。
+   - `Field_DrawLocalShadow` と `Player_DrawLocalShadow`: 床、パンチ済みLOD2、遠景LOD2、大屋根リング、空飛ぶタクシーをカスケードごとに `S_SHADOW_MAP` で深度バッファへ描画する。結合シャドウが 8MB 以下で作れているモデルはカスケードあたり1回の `DrawIndexed`。無いときはメッシュ単位。LOD3パビリオンとプレースホルダーは影を受けるが投影しない。会場の巨大GLBは結合シャドウを作らず、セルまたはメッシュ単位にする。
    - `Sunlight_EndLocalShadow`: 通常の画面レンダーターゲットへ復帰し、カリングを `CULLSTATE_NONE` に戻す。3スライスの深度テクスチャ配列をピクセルシェーダーの `t1`、サンプラーを `s1` にバインド。
 5. **null2 環境キューブ**: プレイヤーが `expo_pavilion_null2` の中心から約 72 以内にいるとき、`EnvProbe_CaptureOneFace` がキューブの1面だけを撮影する（起動既定 512²。Debug の `Expo Sunlight` で 128 / 256 / 512 / 1024）。6面が揃ったら再撮影しない。撮影は既存 CSM を流用し、SSAO・遠景LOD2・null2 自身は描かない。床、パンチ済みLOD2、他の近傍LOD3、リング、スカイドーム、タクシーを映す。6面が揃うまでメイン描画では鏡面サンプリングしない。膜は `CameraPosition.w` の経過秒で高周波に微振動し、映り込みも細かく震える。
 6. **メイン描画パス**:
    - `Field_Draw`: スカイドーム、床、LOD2タイル、遠景LOD2、LOD3パビリオン、プレースホルダー、リングの順で描画する。各モデルは `S_PBR` でglTF PBRマテリアルを処理し、最終色へ距離＋高度フォグを適用する。null2 は `TexMode >= 2.5` で t6 のキューブを反射サンプルする。
    - `Player_Draw`: 空飛ぶタクシー（`flytaxi.glb`）を描画。
-7. **画面空間アンビエントオクルージョン（SSAO）**:
-   - 通常フレームの3D色はシーン中間RTへ描き、深度バッファは `R24G8_TYPELESS` として DSV / `R24_UNORM_X8_TYPELESS` SRV を併用する。
-   - `SsaoPS` が半解像度で深度からビュー空間位置と近傍遮蔽を推定し、`SsaoBlurPS` が深度差を重みとして4近傍をぼかす。`SsaoCompositePS` がAOをシーン色へ乗算するため、柱の隙間や入れ組みの淵が暗くなる。
+7. **内部解像度と画面空間アンビエントオクルージョン（SSAO）**:
+   - スワップチェーンはウィンドウ実サイズ。3Dのシーン色と深度は最大 1920×1080 に抑え、最後にバックバッファへ拡大する。UI は実ウィンドウ解像度。
+   - SSAO の起動既定はオフ。オフ時は AO 生成とぼかしを走らせず、合成パスだけを拡大に使う。オン時の AO はシーンの 1/4 解像度。
    - `Expo Sunlight` の `SSAO`、`SSAO Intensity`、`SSAO Radius`、`SSAO Bias`、`SSAO Power` で調整できる。AOは3D色だけに適用し、HUD / ImGuiは対象外とする。
 8. **2D・UI・デバッグパス**:
    - `Ui_ResetMaterial`: マテリアル色を白（ディフューズ 1.0）へ戻す。
@@ -83,7 +83,7 @@ flowchart TD
 | **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 48、破棄 72、視線方向は+32）。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理。`null2` は動的キューブマップ鏡面 |
 | **null2** | `asset/expomodel/expo_pavilion_null2.glb` | `S_PBR` | × | **○** | 写真アルベドは使わず銀アルベド | Y: `-9.010` | 金属度 1、粗さ 0.08。起動既定 512² キューブを t6 で反射（ImGui で 128～1024）。膜は高周波の微振動。撮影半径約 72、1フレーム1面 |
 | **プレースホルダー** | `asset/model/cube.fbx` | `S_PBR` | × | **○** | 単色マテリアル | 各建物の配置座標 | LOD3 の GPU 化進行中に表示。影はLOD2を投影元とする |
-| **プレイヤー機体** | `asset/model/flytaxi.glb` | `S_PBR` | **○** | **○** | 組み込みテクスチャ | ホバー移動座標 | 表示長辺約 0.8 にスケール |
+| **プレイヤー機体** | `asset/model/flytaxi.glb` | `S_PBR` | **○**（結合シャドウ） | **○** | 組み込みテクスチャ | ホバー移動座標 | 表示長辺約 0.8。Assimp でアニメーション0フレームを焼いたあとマテリアル結合。影は 8MB 以下の結合バッファでカスケードあたり1発行 |
 | **スカイドーム** | `asset/model/basic_skybox_3d.fbx` | `S_SKYBOX` | × | × | `asset/texture/pizzo_pernice_puresky_4k.hdr` をReinhard変換した `R8G8B8A8_UNORM` | スケール 1000、Pitch 0°、カメラ位置追従 | ワールド方向から正距円筒UVを計算し、太陽方位に追従して Yaw 回転。フォグ対象外 |
 
 ---
@@ -216,7 +216,7 @@ flowchart LR
   const float snappedY = floorf(centerLightSpaceY / texel) * texel;
   ```
 - **カリング設定**: 深度書き込みパス中は `SetCullState(CULLSTATE_FRONT)` を設定。ポリゴンの裏面深度を記録することで、表面で発生しやすい自己影アクネ（シャドウニキビ）を抑制する。
-- **描画負荷**: カスケードごとに影パスを実行するため、単一マップ時より最大3倍の影描画になる。パンチ済みLOD2とリングは各段でXZセルカリングされ、セルを持たないタクシーはメッシュ全体を投影する。遠景LOD2・LOD3パビリオン・プレースホルダーは投影しない。ImGuiで距離を調整して負荷を手動確認できる。Debug ビルドでは `F5` で局所影パスを切れる。
+- **描画負荷**: カスケードごとに影パスを実行するため、単一マップ時より最大3倍の影描画になる。パンチ済みLOD2とリングは各段でXZセルカリングされ、タクシーは 8MB 以下の結合シャドウがあれば1発行にする。遠景LOD2・LOD3パビリオン・プレースホルダーは投影しない。ImGuiで距離を調整して負荷を手動確認できる。Debug ビルドでは `F5` で局所影パスを切れる。
 
 ### 5.2 影投影用LOD2会場GLBの XZ セル空間分割 (`PrepareShadowCells`)
 
@@ -226,7 +226,7 @@ flowchart LR
 - **インデックスの再構築**: 各三角形の重心位置から所属セルを決定し、セル単位でまとまったインデックス配列（`shadowIndices`）とセルメタデータ（`GlbShadowCell`）を構築。
 - **GPU 転送**: 通常の頂点・インデックスバッファとは別に、専用のシャドウインデックスバッファ（`pShadowIndexBuffer`）を 6ms のフレーム予算内でチャンク転送（約 3.6MB）。
 - **描画時カリング (`GlbModel::DrawShadowMap`)**:
-  注視点 \(\pm\) 半径で定義されるライトカリング AABB と、各LOD2セルのワールド AABB が交差するセルのみを `DrawIndexed` で発行する。可視範囲が8を超えたらメッシュ全体を1回描く。遠景LOD2はセルを使わずメッシュ全体を投影し、LOD3表示中もパンチ穴の建物影を維持する。セル情報を持たないタクシーは、通常のインデックスバッファ全体を投影する。
+  注視点 \(\pm\) 半径で定義されるライトカリング AABB と、各LOD2セルのワールド AABB が交差するセルのみを `DrawIndexed` で発行する。可視範囲が8を超えたらメッシュ全体を1回描く。遠景LOD2はセルを使わずメッシュ全体を投影し、LOD3表示中もパンチ穴の建物影を維持する。タクシーは結合シャドウがあれば1発行、無ければメッシュ単位。
 
 ### 5.3 影サンプリングと範囲外処理 (`CalcShadow` in `Common.hlsl`)
 
@@ -256,7 +256,7 @@ flowchart LR
 
 シャドウを全対象へ拡張した後の CPU/GPU 負荷を抑えるため、描画結果を変えずに以下の最適化を適用する。
 
-- **シャドウセルのカリング**: `PrepareShadowCells` でセルを XZ の行優先順に並べる。影パスはマテリアルをまたいだ結合バッファがあればモデルあたり1回の `DrawIndexed` にする。結合が無いときだけメッシュ全体を1回投影する。
+- **シャドウセルのカリング**: `PrepareShadowCells` でセルを XZ の行優先順に並べる。影パスは 8MB 以下の結合バッファがあればモデルあたり1回の `DrawIndexed` にする。会場の巨大結合は作らない。結合が無いときはセルまたはメッシュ単位。
 - **定数バッファ更新の重複排除**: `SetWorldMatrix`、`SetViewMatrix`、`SetProjectionMatrix`、`SetMaterial`、`SetLight`、`SetCameraPosition`、`SetParameter`、`SetParameterW` は直前値と同一の場合に Map を発行しない。これにより、シャドウカスケード間およびモデル間で共通する行列・パラメータの CPU コマンド発行を削減する。
 - **テクスチャのミップマップ**: 床以外の GLB テクスチャは、CPU デコード後に `GenerateMipMaps` でフルミップチェーンを生成し、GPU 転送もミップレベル単位で分割する。異方性サンプラーが遠景で適切な解像度を選択できるため、縮小表示時のテクスチャ参照負荷とモアレを抑える。
 - **床テクスチャの扱い**: `asset/expomodel/expo_floor.glb` は、分割前の巨大テクスチャを一旦そのまま使用する方針により、ミップマップを生成しない。床テクスチャの分割とミップマップ化は別途の改善項目とする。
@@ -275,15 +275,17 @@ flowchart LR
 
 1. **`GlbModel::MergePreparedMeshesByMaterial`**: CPU 準備済みメッシュを同一アルベド（埋め込みテクスチャ番号。テクスチャ無しは diffuse）で結合する。法線／ORM／エミッシブの違いでは割らない。元の `expo_batch_id` は `GlbBatchRange` として残す。
 2. **`GlbModel::Draw` の範囲結合**: hidden が無いときは隣接する可視範囲を1つの `DrawIndexed` にする。遠景LOD2は hidden batch の集合が変わったときだけ可視インデックスを連続バッファへ載せ替え、メッシュあたり1回発行する。
-3. **初期ロード完了後の GPU ポンプを Present 後へ**: `Field_PumpLoad` は CPU インポート開始だけを Update で行い、`PumpGpu` とパビリオン破棄は `Field_PumpAfterPresent` が `Present` の後に最大 3ms で進める。直前フレームの Draw が 8ms 超、または GPU が 8ms 超ならそのフレームはポンプしない。描画前の `UpdateSubresource` が `DrawIndexed` をブロックするのを避ける。
+3. **初期ロード完了後の GPU ポンプを Present 後へ**: `Field_PumpLoad` は CPU インポート開始だけを Update で行い、`PumpGpu` とパビリオン破棄は `Field_PumpAfterPresent` が `Present` の後に最大 3ms で進める。直前フレームの Draw が 8ms 超、または GPU が 8ms 超ならそのフレームはポンプしない。GPU タイムスタンプは Release でも取る。ローカル VRAM が予算の 85% を超えたら追加アップロードを止める。描画前の `UpdateSubresource` が `DrawIndexed` をブロックするのを避ける。
 4. **レース開始で FBX を読まない**: スタートマーカーは `cube.fbx` ではなくコース輪と同じビルボード。リングは毎回 new/delete せず位置だけ更新し、遠いゲートは描かない。スタート付近にいるときはワープしない。NVIDIA ではレース開始フレームの Assimp＋PBR 初回発行が Field 全体をキュー待ちに巻き込む。
 5. **遠景LOD2の影は結合バッファ**: パンチ穴の建物影は残し、マテリアルが複数でもモデルあたり1回の `DrawIndexed` にする。
 6. **セル描画の発行上限**: 床・パンチ済みLOD2・リングで、可視セル範囲が2以上に分裂したら IB 全体を1回描く。
 7. **初期ロード中は 2D のみ**: `Game_Draw` はコア完了まで SSAO とシーンRTを使わない。スカイドーム FBX は `FinishLoad` の直前（まだ3Dを描かないフレーム）に読む。
-8. **結合影はメッシュ1本でも作る**: 同一アルベドで1メッシュになったモデルでも、カスケード3回×メッシュ数にしない。不正インデックスでは結合全体を捨てず、その三角形だけ飛ばす。GPU 化は `CreateBuffer` の初期データで行い、NVIDIA で失敗しやすい `UpdateSubresource` の部分更新は使わない。バッファ生成に失敗してもモデル全体は破棄しない。
+8. **小さいモデルだけ結合影を作る**: `TryBuildSmallCombinedShadow` は結合頂点＋インデックスが 8MB 以下のときだけ同期 `CreateBuffer` する。タクシー `flytaxi.glb` は Assimp で 0 フレーム姿勢を焼いたあと会場と同じマテリアル結合へ渡し、影の 61×3 発行を避ける。会場 LOD2／床の数百 MB 結合は作らない。
 9. **遠景LOD2はタイル1メッシュ**: ユニーク写真が何枚でも `CollapsePreparedMeshes(1)` で最大テクスチャのメッシュへ幾何を載せる。距離があるため見た目の優先は発行回数。hidden が空のときはバッチ範囲を分割せず IB 全体を1回描く。
+10. **アダプタ選択**: `InitRenderer` は `IDXGIFactory6::EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` を優先し、だめなら専用 VRAM 最大。`EnumOutputs()` の有無では選ばない。`--gpu=high` は同じ高性能 GPU を明示するだけ。
+11. **Cursor での計測**: 実速度は `.vscode/tasks.json` の `Run Release (No Debugger)`。F5 の CodeLLDB 接続は `OutputDebugString` やデバッグイベントで数十倍遅くなることがある。Cursor は `cppvsdbg` を使えない。
 
-Debug ビルドではウィンドウキャプションと `debug-frame-perf.log` に `updUs` / `drwUs` / `gpuMs` / `mapCount` / `idx` / `shdMs` / `fldMs` / `objMs` / `uiMs` / `pumpMs` を残す。`gpuMs` が低く `fldMs` と `idx` が高いときは発行コスト、両方が高いときは転送やシェーダ初期化のキュー待ちである。
+Debug ビルドではウィンドウキャプションと `debug-frame-perf.log` に `updUs` / `drwUs` / `gpuMs` / `mapCount` / `idx` / `shdMs` / `fldMs` / `objMs` / `uiMs` / `pumpMs` を残す。`gpuMs` が低く `fldMs` と `idx` が高いときは発行コスト、両方が高いときは転送やシェーダ初期化のキュー待ちである。`gpuMs` 自体は Release でも計測し、ストリーミング抑制に使う。
 
 ---
 
@@ -374,7 +376,7 @@ SSAOの後処理シェーダーでは `t0` / `t1` を後処理用に再利用す
 | **Shadow Cascade 3 End (Draw Distance)** | `g_ShadowRadius` | 16.0 ～ 320.0 | `160.0` | 第3カスケードの終端距離。これより遠い場所は影なし |
 | **Shadow Bias** | `g_ShadowBias` | 0.0005 ～ 0.0200 | `0.0005` | シャドウアクネ防止用深度バイアス |
 | **Shadow Brightness** | `g_ShadowBrightness` | 0.00 ～ 1.00 | `0.25` | 影内部の直接光最小輝度（値が小さいほど濃い影） |
-| **SSAO** | `g_SsaoEnabled` | ON / OFF | ON | 画面空間AOの有効・無効 |
+| **SSAO** | `g_SsaoEnabled` | ON / OFF | OFF | 画面空間AOの有効・無効。オフ時は生成パスを走らせない |
 | **SSAO Intensity** | `g_SsaoIntensity` | 0.00 ～ 1.00 | `0.85` | AOの合成強度 |
 | **SSAO Radius** | `g_SsaoRadius` | 0.10 ～ 4.00 m | `1.25 m` | 深度サンプルを探すワールド半径 |
 | **SSAO Bias** | `g_SsaoBias` | 0.001 ～ 0.200 m | `0.04 m` | 同一面を遮蔽とみなさない深度差 |
@@ -399,10 +401,10 @@ SSAOの後処理シェーダーでは `t0` / `t1` を後処理用に再利用す
 | [`framework/sprite3d.h`](../framework/sprite3d.h) | `SetCastShadow` / `SetReceiveShadow` フラグ管理、シャドウパス分岐 |
 | [`shader/PBRShaderVS.hlsl`](../shader/PBRShaderVS.hlsl) | `Parameter.w` に応じたライト空間座標計算。null2 は膜の頂点変位 |
 | [`shader/PBRShaderPS.hlsl`](../shader/PBRShaderPS.hlsl) | GGX 反射計算、直接光への影乗算、環境光との加算合成、距離＋高度フォグ。`TexMode >= 2.5` でキューブ鏡面。床とリングで式は共通 |
-| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | `BeginShadowMap`, `EndShadowMap`, `BeginEnvCubeFace`, `EndEnvCubeFace`, `SetShadowMatrix`, `SetParameterW`, `SetFog`, `Direct3D_BeginScene`, `Direct3D_ApplySsao`、中間RT・深度SRV・定数バッファ管理 |
+| [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | GPU アダプタ選択、内部 3D 解像度、`BeginShadowMap`, `EndShadowMap`, `BeginEnvCubeFace`, `EndEnvCubeFace`, `SetShadowMatrix`, `SetParameterW`, `SetFog`, `Direct3D_BeginScene`, `Direct3D_ApplySsao`、中間RT・深度SRV・定数バッファ管理。GPU タイムスタンプは Release でも有効 |
 | [`shader/SkyboxTextureVS.hlsl`](../shader/SkyboxTextureVS.hlsl) / [`shader/SkyboxTexturePS.hlsl`](../shader/SkyboxTexturePS.hlsl) | スカイドーム専用。ワールド方向から正距円筒UVを計算してHDR表示テクスチャをサンプル |
 | [`shader/Common.hlsl`](../shader/Common.hlsl) | `CalcShadow`（3×3 PCF、深度バイアス、ボーダー処理）、`ApplyFog`（距離＋高度フォグ） |
-| [`shader/SsaoVS.hlsl`](../shader/SsaoVS.hlsl)、[`shader/SsaoPS.hlsl`](../shader/SsaoPS.hlsl) | 半解像度の深度サンプリングと近傍遮蔽の推定 |
+| [`shader/SsaoVS.hlsl`](../shader/SsaoVS.hlsl)、[`shader/SsaoPS.hlsl`](../shader/SsaoPS.hlsl) | シーンの 1/4 解像度で深度をサンプリングし近傍遮蔽を推定する |
 | [`shader/SsaoBlurVS.hlsl`](../shader/SsaoBlurVS.hlsl)、[`shader/SsaoBlurPS.hlsl`](../shader/SsaoBlurPS.hlsl) | 深度差を重みにしたAOの近傍ぼかし |
 | [`shader/SsaoCompositeVS.hlsl`](../shader/SsaoCompositeVS.hlsl)、[`shader/SsaoCompositePS.hlsl`](../shader/SsaoCompositePS.hlsl) | シーン色へのAO合成。2D UIは対象外 |
 | [`framework/texture.h`](../framework/texture.h) / [`.cpp`](../framework/texture.cpp) | DirectXTexのHDR読み込み、解析用float画素の提供、Reinhard表示用SRV生成 |
