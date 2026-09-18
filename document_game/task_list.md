@@ -71,14 +71,12 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
 - [x] `photo-mode`: ゲームメニューからReleaseでも使えるフリーカメラ、ライティング調整、ポスタライズ・ノイズ・フィルムグレイン・RGBずらし、およびエフェクト込みのF2撮影を追加
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
-- [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能
 - [x] `billboard-course-race`: `SCENE_GAME` 内にフリー飛行・コース作成・レースを追加。`P`配置、`asset/course/*.yml`保存、`asset/texture/makulogo.png`のビルボード輪、カウントダウン、タイマー、通過判定、ゴールログに対応
 - [x] `game-menu-input`: `SCENE_GAME` のコース操作をImGuiからゲーム内メニューへ移行。`Esc` / パッドSTARTで開閉し、ClickFont・矢印キー・決定入力でフリー飛行、レース、コース作成を操作。新規コース名は自動生成し、ReleaseビルドではPlayer/SunlightのDebug ImGuiを表示しない
 - [x] `game-audio`: `gameaudio.cpp` で BGM / SE を再生。パスは [audio_needs.md](audio_needs.md)。`menu.mp3` / `warp.mp3` / `race_abort.mp3` / `land.mp3` / `spawn.mp3` は未配置
 - [x] `separate-expo-assets`: 万博モデルを`asset/expomodel`へ分離し、規約同意付き`tool/download_expo_assets.bat`でローカル生成する
 - [x] 大屋根リング外側の日本館や企業館のモデルがしょぼい問題の修正（外周8棟のLOD3統合、重心基準ストリーミング、NTTランドマーク半径。DrawIndexed増加を抑制）
-- [ ] GLB直接読み込み失敗の謎に迫る
 - [x] タイトル、リザルトをまともに
 - [x] アプリアイコン差し替え（手動）
 - [x] 諸々整備してgithubへ上げる（手動）
@@ -87,6 +85,11 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `streaming-vram-retry`: 失敗backoff（最大3回）、VRAM 85%でPresent後ポンプ停止、GPU時間はReleaseでも計測、インポート／デコードは各1スレッド
 - [x] `taxi-merged-shadow`: `flytaxi.glb` を0フレーム焼きのあとマテリアル結合。8MB以下だけ結合シャドウ
 - [x] `cursor-no-debugger-run`: 実行とデバッグの `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
+- [x] `photomode`: 既存フリーカムを進化し、ライティングやポスタライズ、ノイズ、フィルムグレイン、グリッジなどのプリプロセス活用のフォトモード
+- [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
+- [ ] GLB直接読み込み失敗の謎に迫る
+- [ ] オルソ床に起伏を付ける
+- [ ] ウォータープラザに波と噴水を
 
 ---
 
