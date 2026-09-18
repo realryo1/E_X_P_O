@@ -677,12 +677,14 @@ PumpAfterPresent(lastDrawMs, lastGpuMs);
 `Direct3D_ApplySsao()` は3D描画色へだけ画面空間AOを合成する。AOは既定オフで、オン時はシーンの 1/4 解像度。オフ時は生成を省略し内部RTをバックバッファへコピーするだけである。
 `SsaoPS` の近傍遮蔽、`SsaoBlurPS` の深度依存ぼかし、`SsaoCompositePS` の
 色合成を順に行い、2D HUD / Font / ImGuiはAOの影響を受けない。
+フォトモードのポスタライズ、ノイズ、フィルムグレイン、RGBずらしも
+`SsaoCompositePS` で同じタイミングに適用される。
 調整値は `Direct3D_SetSsaoParameters()` で設定し、ゲーム側では
 `Sunlight_DrawDebug()` の `Expo Sunlight` から変更する。
 
 `F2` は `app/scene.cpp` から `TakeScreenshot` を呼び、`screenshot/` に `1920×1080` の PNG を保存する。
-撮影は `Update` 中にオフスクリーンへ `Draw` し直すため ImGui フレーム外であり、
-`Direct3D_IsTakingScreenshot` が真のときは ImGui ウィジェットを描かない。
+撮影はシーンRT、SSAO、フォトエフェクトの合成を含めてオフスクリーンへ `Draw` し直すため
+ImGui フレーム外であり、`Direct3D_IsTakingScreenshot` が真のときは ImGui ウィジェットを描かない。
 
 通常の ShadowMap は `BeginShadowMap` / `EndShadowMap` の間で描画する。
 4方向 × Player/Enemy 用の配列 ShadowMap API もあるが、通常の Title / Game / Result では使っていない。

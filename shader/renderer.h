@@ -85,6 +85,12 @@ struct SSAO_CONSTANT
 	XMFLOAT4 Settings;
 };
 
+struct PHOTO_CONSTANT
+{
+	XMFLOAT4 Params; // x:posterize levels, y:noise, z:film grain, w:RGB shift
+	XMFLOAT4 Time;
+};
+
 // 近距離ほど高密度にサンプリングするカスケード数。
 #define NUM_SHADOW_CASCADES 3
 
@@ -222,6 +228,11 @@ bool Direct3D_IsTakingScreenshot(void);
 void Direct3D_BeginScene(void);
 void Direct3D_ApplySsao(void);
 void Direct3D_SetSsaoParameters(bool enabled, float intensity, float radius, float bias, float power);
+void Direct3D_SetPhotoParameters(
+	float posterizeLevels,
+	float noise,
+	float filmGrain,
+	float rgbShift);
 float Direct3D_GetLastGpuFrameMs(void);
 bool Direct3D_GetMemoryInfo(unsigned long long* localBudgetMb,
 	unsigned long long* localUsageMb,

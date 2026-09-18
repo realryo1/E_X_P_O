@@ -7,3 +7,4 @@ void Course_Draw(void);
 void Course_DrawHud(void);
 void Course_DrawMenu(void);
 bool Course_IsMenuOpen(void);
+bool Course_IsRaceCountdown(void);

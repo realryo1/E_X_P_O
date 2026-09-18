@@ -43,6 +43,7 @@ static float g_Roll = 0.0f;
 static float g_ForwardSpeed = 0.0f;
 static float g_VerticalSpeed = 0.0f;
 static bool g_ControlEnabled = true;
+static bool g_Visible = true;
 static float g_DashTimer = 0.0f;
 static float g_DashVelocity = 0.0f;
 static bool g_WasGrounded = false;
@@ -74,6 +75,7 @@ void Player_Initialize(XMFLOAT3 startPos)
 	g_ForwardSpeed = 0.0f;
 	g_VerticalSpeed = 0.0f;
 	g_ControlEnabled = true;
+	g_Visible = true;
 	g_DashTimer = 0.0f;
 	g_DashVelocity = 0.0f;
 	g_WasGrounded = false;
@@ -187,6 +189,12 @@ void Player_SetControlEnabled(bool enabled)
 		g_DashVelocity = 0.0f;
 		GameAudio_UpdateHover(false, 0.0f);
 	}
+}
+
+void Player_SetVisible(bool visible)
+{
+	g_Visible = visible;
+	RequestRedraw();
 }
 
 void Player_Update(void)
@@ -323,7 +331,7 @@ void Player_Update(void)
 
 void Player_Draw(void)
 {
-	if (g_PlayerModel)
+	if (g_Visible && g_PlayerModel)
 	{
 		g_PlayerModel->Draw();
 	}
@@ -335,7 +343,7 @@ void Player_DrawLocalShadow(
 	XMFLOAT3 focus,
 	float radius)
 {
-	if (g_PlayerModel)
+	if (g_Visible && g_PlayerModel)
 	{
 		g_PlayerModel->DrawShadowMap(
 			lightView,

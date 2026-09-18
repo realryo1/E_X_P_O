@@ -109,6 +109,9 @@
     <ClCompile Include="SCENE_GAME\playercamera.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
+    <ClCompile Include="SCENE_GAME\photomode.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
     <ClCompile Include="SCENE_GAME\collision.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
@@ -277,6 +280,9 @@
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\playercamera.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\photomode.h">
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\collision.h">

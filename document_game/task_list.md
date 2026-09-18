@@ -69,6 +69,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `pbr-sun-directional`: HDR輝度抽出による平行太陽と連動環境光。場のモデル・プレースホルダ・タクシーを `S_PBR` 化。スカイドームはHDRを表示用変換した `S_SKYBOX`。方位既定値は `-170.0°` で、HDR抽出方位との差分により見た目の太陽位置を維持する。DebugビルドのみImGui `Expo Sunlight`
 - [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–20m / 20–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーは 8MB 以下の結合シャドウ
 - [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
+- [x] `photo-mode`: ゲームメニューからReleaseでも使えるフリーカメラ、ライティング調整、ポスタライズ・ノイズ・フィルムグレイン・RGBずらし、およびエフェクト込みのF2撮影を追加
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
 - [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能

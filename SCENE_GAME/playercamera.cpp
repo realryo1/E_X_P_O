@@ -7,13 +7,11 @@
 #include "main.h"
 #include "mouse.h"
 #include "player.h"
+#include "input_manager.h"
+#include "imgui/imgui.h"
 #include "renderer.h"
 #include <cmath>
-#if defined(_DEBUG)
 #include "course.h"
-#include "keyboard.h"
-#include "imgui/imgui.h"
-#endif
 
 using namespace DirectX;
 
@@ -25,7 +23,6 @@ static const float PLAYER_CAMERA_DISTANCE = 3.0f;
 static const float PLAYER_CAMERA_LOOK_Y = 0.55f;
 static const float PLAYER_CAMERA_STICK_LOOK = 2.5f;
 
-#if defined(_DEBUG)
 static const float DEBUG_CAMERA_MOVE_SPEED_DEFAULT = 0.5f;
 static bool g_DebugActive = false;
 static bool g_DebugLooking = false;
@@ -33,7 +30,6 @@ static XMFLOAT3 g_DebugPos = { 0.0f, 0.0f, 0.0f };
 static float g_DebugYaw = 0.0f;
 static float g_DebugPitch = 20.0f;
 static float g_DebugMoveSpeed = DEBUG_CAMERA_MOVE_SPEED_DEFAULT;
-#endif
 
 static void SyncRendererCamera(void)
 {
@@ -65,7 +61,6 @@ static void ComputeFollowCamera(XMFLOAT3* outPos, XMFLOAT3* outLookAt)
 	*outLookAt = lookAt;
 }
 
-#if defined(_DEBUG)
 static void ClampDebugPitch(void)
 {
 	if (g_DebugPitch > 89.0f) g_DebugPitch = 89.0f;
@@ -185,15 +180,24 @@ static void UpdateDebugCamera(void)
 			XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 			XMVECTOR moveDir = XMVectorZero();
 
-			if (Keyboard_IsKeyDown(KK_W)) moveDir = XMVectorAdd(moveDir, forward);
-			if (Keyboard_IsKeyDown(KK_S)) moveDir = XMVectorSubtract(moveDir, forward);
-			if (Keyboard_IsKeyDown(KK_D)) moveDir = XMVectorAdd(moveDir, right);
-			if (Keyboard_IsKeyDown(KK_A)) moveDir = XMVectorSubtract(moveDir, right);
-			if (Keyboard_IsKeyDown(KK_SPACE)) moveDir = XMVectorAdd(moveDir, up);
-			if (Keyboard_IsKeyDown(KK_LEFTSHIFT) || Keyboard_IsKeyDown(KK_RIGHTSHIFT))
+			const Input_Vector2 move = Input_GetMoveVector();
+			moveDir = XMVectorAdd(
+				moveDir,
+				XMVectorScale(forward, move.y));
+			moveDir = XMVectorAdd(
+				moveDir,
+				XMVectorScale(right, move.x));
+			if (Input_IsActionDown(INPUT_ACTION_JUMP))
+			{
+				moveDir = XMVectorAdd(moveDir, up);
+			}
+			if (Input_IsActionDown(INPUT_ACTION_DESCEND))
 			{
 				moveDir = XMVectorSubtract(moveDir, up);
 			}
+			const Input_Vector2 look = Input_GetLookVector();
+			g_DebugYaw += look.x * PLAYER_CAMERA_STICK_LOOK;
+			g_DebugPitch -= look.y * PLAYER_CAMERA_STICK_LOOK;
 
 			if (!XMVector3Equal(moveDir, XMVectorZero()))
 			{
@@ -213,7 +217,6 @@ static void UpdateDebugCamera(void)
 	ApplyDebugView();
 	RequestRedraw();
 }
-#endif
 
 void PlayerCamera_Initialize(float startYaw, float startPitch)
 {
@@ -222,11 +225,9 @@ void PlayerCamera_Initialize(float startYaw, float startPitch)
 	Camera_Initialize();
 	Camera_SetFar(EXPO_CAMERA_FAR);
 	Camera_SetFov(EXPO_CAMERA_FOV);
-#if defined(_DEBUG)
 	g_DebugActive = false;
 	g_DebugLooking = false;
 	g_DebugMoveSpeed = DEBUG_CAMERA_MOVE_SPEED_DEFAULT;
-#endif
 }
 
 void PlayerCamera_SetLookAngles(float yaw, float pitch)
@@ -240,43 +241,33 @@ void PlayerCamera_SetLookAngles(float yaw, float pitch)
 
 void PlayerCamera_LockMouse(void)
 {
-#if defined(_DEBUG)
 	if (g_DebugActive)
 	{
 		return;
 	}
-#endif
 	LockMouse();
 }
 
 float PlayerCamera_GetYaw(void)
 {
-#if defined(_DEBUG)
 	if (g_DebugActive)
 	{
 		return g_DebugYaw;
 	}
-#endif
 	return g_Yaw;
 }
 
 bool PlayerCamera_IsDebugActive(void)
 {
-#if defined(_DEBUG)
 	return g_DebugActive;
-#else
-	return false;
-#endif
 }
 
 void PlayerCamera_UpdateInput(void)
 {
-#if defined(_DEBUG)
 	if (g_DebugActive)
 	{
 		return;
 	}
-#endif
 
 	Mouse_State mouseState;
 	Mouse_GetState(&mouseState);
@@ -296,13 +287,11 @@ void PlayerCamera_UpdateInput(void)
 
 void PlayerCamera_Update(void)
 {
-#if defined(_DEBUG)
 	if (g_DebugActive)
 	{
 		UpdateDebugCamera();
 		return;
 	}
-#endif
 
 	XMFLOAT3 camPos;
 	XMFLOAT3 lookAt;
@@ -323,57 +312,43 @@ void PlayerCamera_Draw(void)
 
 void PlayerCamera_DrawDebug(void)
 {
-#if defined(_DEBUG)
-	if (Direct3D_IsTakingScreenshot())
-	{
-		return;
-	}
-
-	ImGui::Begin("Expo Debug Camera");
-
-	bool enabled = g_DebugActive;
-	if (ImGui::Checkbox("Enable Free Camera", &enabled))
-	{
-		SetDebugActive(enabled);
-	}
-
-	ImGui::TextUnformatted("WASD: move  Space/Shift: up/down  RMB: look");
-
-	if (g_DebugActive)
-	{
-		ImGui::DragFloat3("Position", &g_DebugPos.x, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::DragFloat("Yaw", &g_DebugYaw, 0.5f, 0.0f, 0.0f, "%.1f");
-		if (ImGui::SliderFloat("Pitch", &g_DebugPitch, -89.0f, 89.0f, "%.1f"))
-		{
-			ClampDebugPitch();
-		}
-		if (ImGui::DragFloat("Move Speed", &g_DebugMoveSpeed, 0.01f, 0.01f, 20.0f, "%.3f"))
-		{
-			if (g_DebugMoveSpeed < 0.01f) g_DebugMoveSpeed = 0.01f;
-			if (g_DebugMoveSpeed > 20.0f) g_DebugMoveSpeed = 20.0f;
-		}
-		if (ImGui::Button("Reset Speed"))
-		{
-			g_DebugMoveSpeed = DEBUG_CAMERA_MOVE_SPEED_DEFAULT;
-		}
-		if (ImGui::Button("プレイヤーカメラへ合わせる"))
-		{
-			SnapDebugToPlayerCamera();
-		}
-		ApplyDebugView();
-		RequestRedraw();
-	}
-
-	ImGui::End();
-#endif
 }
 
 void PlayerCamera_Finalize(void)
 {
-#if defined(_DEBUG)
 	StopDebugLook();
 	g_DebugActive = false;
-#endif
 	UnLockMouse();
 	Camera_Finalize();
+}
+
+void PlayerCamera_SetFreeCameraActive(bool active)
+{
+	SetDebugActive(active);
+}
+
+void PlayerCamera_SetFreeCameraFov(float fov)
+{
+	if (GetCamera())
+	{
+		GetCamera()->SetFov(fov);
+	}
+}
+
+float PlayerCamera_GetFreeCameraMoveSpeed(void)
+{
+	return g_DebugMoveSpeed;
+}
+
+void PlayerCamera_SetFreeCameraMoveSpeed(float speed)
+{
+	if (speed < 0.01f) speed = 0.01f;
+	if (speed > 20.0f) speed = 20.0f;
+	g_DebugMoveSpeed = speed;
+}
+
+void PlayerCamera_SnapFreeCameraToPlayer(void)
+{
+	SnapDebugToPlayerCamera();
+	ApplyDebugView();
 }

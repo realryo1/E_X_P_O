@@ -3,6 +3,7 @@
 #include "gameaudio.h"
 #include "player.h"
 #include "playercamera.h"
+#include "photomode.h"
 #include "billboard.h"
 #include "sprite2d.h"
 #include "font.h"
@@ -790,7 +791,7 @@ namespace
 			g_Mode == CourseMode::RaceRunning ||
 			g_Mode == CourseMode::RaceGoal)
 		{
-			return 1;
+			return 2;
 		}
 		if (g_Mode == CourseMode::CourseCreate)
 		{
@@ -804,7 +805,7 @@ namespace
 		{
 			return static_cast<int>(g_Courses.size()) + 2;
 		}
-		return 5;
+		return 6;
 	}
 
 	bool MenuHasBackGap(void)
@@ -863,7 +864,7 @@ namespace
 			g_Mode == CourseMode::RaceRunning ||
 			g_Mode == CourseMode::RaceGoal)
 		{
-			lines = { "レースを中止" };
+			lines = { "レースを中止", "フォトモード" };
 		}
 		else if (g_MenuPage == MenuPage::RaceSelect)
 		{
@@ -887,6 +888,7 @@ namespace
 				Field_ArePavilionLabelsVisible()
 					? "パビリオン名：表示"
 					: "パビリオン名：非表示",
+				"フォトモード",
 				"",
 				"戻る",
 			};
@@ -1085,6 +1087,11 @@ namespace
 				ReturnToFreeFlight();
 				SetMenuOpen(false);
 			}
+			else if (item == 1)
+			{
+				SetMenuOpen(false);
+				PhotoMode_Enter();
+			}
 			return;
 		}
 
@@ -1167,6 +1174,10 @@ namespace
 			RefreshMenuText();
 			break;
 		case 4:
+			SetMenuOpen(false);
+			PhotoMode_Enter();
+			break;
+		case 5:
 			SetMenuOpen(false);
 			break;
 		default:
@@ -1506,6 +1517,11 @@ void Course_Update(void)
 bool Course_IsMenuOpen(void)
 {
 	return g_MenuOpen;
+}
+
+bool Course_IsRaceCountdown(void)
+{
+	return g_Mode == CourseMode::RaceCountdown;
 }
 
 void Course_Draw(void)

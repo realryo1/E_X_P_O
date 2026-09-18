@@ -146,11 +146,16 @@ static ID3D11RenderTargetView* g_SsaoRenderTargetView[2] = {};
 static ID3D11ShaderResourceView* g_SsaoShaderView[2] = {};
 static ID3D11Buffer* g_SsaoQuadVertexBuffer = nullptr;
 static ID3D11Buffer* g_SsaoBuffer = nullptr;
+static ID3D11Buffer* g_PhotoBuffer = nullptr;
 static bool g_SsaoEnabled = false;
 static float g_SsaoIntensity = 0.85f;
 static float g_SsaoRadius = 1.25f;
 static float g_SsaoBias = 0.04f;
 static float g_SsaoPower = 1.20f;
+static PHOTO_CONSTANT g_PhotoConstants = {
+	XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f),
+	XMFLOAT4(0.0f, 0.0f, 0.0f, 0.0f)
+};
 
 // スクリーンショット撮影用フラグとターゲット
 static bool g_IsTakingScreenshot = false;
@@ -983,6 +988,18 @@ void SetCameraPosition(XMFLOAT3 CameraPosition)
 void SetShaderTime(float seconds)
 {
 	g_ShaderTime = seconds;
+	if (g_PhotoBuffer)
+	{
+		g_PhotoConstants.Time = XMFLOAT4(
+			g_ShaderTime,
+			g_SceneWidth > 0 ? 1.0f / g_SceneWidth : 1.0f,
+			g_SceneHeight > 0 ? 1.0f / g_SceneHeight : 1.0f,
+			0.0f);
+		UpdateDynamicConstantBuffer(
+			g_PhotoBuffer,
+			&g_PhotoConstants,
+			sizeof(g_PhotoConstants));
+	}
 	XMFLOAT4 temp = XMFLOAT4(
 		g_CameraPositionValue.x,
 		g_CameraPositionValue.y,
@@ -996,6 +1013,26 @@ void SetShaderTime(float seconds)
 	UpdateDynamicConstantBuffer(g_CameraBuffer, &temp, sizeof(temp));
 	g_LastCameraPosition = temp;
 	g_HasLastCameraPosition = true;
+}
+
+void Direct3D_SetPhotoParameters(
+	float posterizeLevels,
+	float noise,
+	float filmGrain,
+	float rgbShift)
+{
+	g_PhotoConstants.Params = XMFLOAT4(
+		(std::max)(0.0f, posterizeLevels),
+		(std::max)(0.0f, noise),
+		(std::max)(0.0f, filmGrain),
+		(std::max)(0.0f, rgbShift));
+	if (g_PhotoBuffer)
+	{
+		UpdateDynamicConstantBuffer(
+			g_PhotoBuffer,
+			&g_PhotoConstants,
+			sizeof(g_PhotoConstants));
+	}
 }
 
 void SetFog(FOG_CONSTANT Fog)
@@ -1895,6 +1932,11 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 	g_ImmediateContext->PSSetConstantBuffers(12, 1, &g_Null2Buffer);
 	SetNull2Membrane(XMFLOAT4(0.05f, 2.5f, 0.02f, 0.05f));
 
+	hBufferDesc.ByteWidth = sizeof(PHOTO_CONSTANT);
+	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_PhotoBuffer);
+	g_ImmediateContext->PSSetConstantBuffers(13, 1, &g_PhotoBuffer);
+	Direct3D_SetPhotoParameters(0.0f, 0.0f, 0.0f, 0.0f);
+
 	hBufferDesc.ByteWidth = sizeof(SSAO_CONSTANT);
 	g_D3DDevice->CreateBuffer(&hBufferDesc, NULL, &g_SsaoBuffer);
 
@@ -1924,6 +1966,7 @@ void FinalizeRenderer(void)
 	SAFE_RELEASE(g_PlayerLightBuffer);
 	SAFE_RELEASE(g_SsaoBuffer);
 	SAFE_RELEASE(g_SsaoQuadVertexBuffer);
+	SAFE_RELEASE(g_PhotoBuffer);
 	SAFE_RELEASE(g_FaceShadowBuffer);
 	SAFE_RELEASE(g_FogBuffer);
 	SAFE_RELEASE(g_Null2Buffer);
@@ -2006,6 +2049,7 @@ void Clear(void)
 	g_ImmediateContext->PSSetConstantBuffers(11, 1, &g_FogBuffer);
 	g_ImmediateContext->VSSetConstantBuffers(12, 1, &g_Null2Buffer);
 	g_ImmediateContext->PSSetConstantBuffers(12, 1, &g_Null2Buffer);
+	g_ImmediateContext->PSSetConstantBuffers(13, 1, &g_PhotoBuffer);
 	SetDefaultSampler();
 }
 
@@ -2173,8 +2217,7 @@ void Direct3D_SetSsaoParameters(
 
 void Direct3D_BeginScene(void)
 {
-	if (g_IsTakingScreenshot ||
-		!g_ImmediateContext ||
+	if (!g_ImmediateContext ||
 		!g_SceneRenderTargetView)
 	{
 		return;
@@ -2189,8 +2232,7 @@ void Direct3D_BeginScene(void)
 
 void Direct3D_ApplySsao(void)
 {
-	if (g_IsTakingScreenshot ||
-		!g_ImmediateContext ||
+	if (!g_ImmediateContext ||
 		!g_SceneShaderView ||
 		!g_SsaoBuffer ||
 		!g_SsaoQuadVertexBuffer)
@@ -2245,6 +2287,17 @@ void Direct3D_ApplySsao(void)
 		0.0f);
 	UpdateDynamicConstantBuffer(
 		g_SsaoBuffer, &constants, sizeof(constants));
+	if (g_PhotoBuffer)
+	{
+		g_PhotoConstants.Time.y =
+			1.0f / static_cast<float>((std::max)(1u, g_SceneWidth));
+		g_PhotoConstants.Time.z =
+			1.0f / static_cast<float>((std::max)(1u, g_SceneHeight));
+		UpdateDynamicConstantBuffer(
+			g_PhotoBuffer,
+			&g_PhotoConstants,
+			sizeof(g_PhotoConstants));
+	}
 
 	ID3D11Buffer* constantBuffer = g_SsaoBuffer;
 	UINT stride = sizeof(VERTEX_3D);
@@ -2297,7 +2350,9 @@ void Direct3D_ApplySsao(void)
 	// 内部解像度のシーン色をバックバッファへ拡大合成する。
 	g_ImmediateContext->OMSetRenderTargets(0, nullptr, nullptr);
 	g_ImmediateContext->OMSetRenderTargets(
-		1, &g_RenderTargetView, nullptr);
+		1,
+		g_IsTakingScreenshot ? &g_SSTargetView : &g_RenderTargetView,
+		nullptr);
 	SetPostProcessViewport(g_BackBufferDesc.Width, g_BackBufferDesc.Height);
 	g_ImmediateContext->IASetInputLayout(
 		compositeShader->GetVertexLayout());
@@ -2372,11 +2427,12 @@ void TakeScreenshot(void)
 	depthDesc.Height = SCREENSHOT_HEIGHT;
 	depthDesc.MipLevels = 1;
 	depthDesc.ArraySize = 1;
-	depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	depthDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
 	depthDesc.SampleDesc.Count = 1;
 	depthDesc.SampleDesc.Quality = 0;
 	depthDesc.Usage = D3D11_USAGE_DEFAULT;
-	depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	depthDesc.BindFlags =
+		D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
 	depthDesc.CPUAccessFlags = 0;
 	depthDesc.MiscFlags = 0;
 
@@ -2390,9 +2446,33 @@ void TakeScreenshot(void)
 	}
 
 	ID3D11DepthStencilView* pSSDSView = nullptr;
-	hr = g_D3DDevice->CreateDepthStencilView(pSSDepthBuffer, nullptr, &pSSDSView);
+	D3D11_DEPTH_STENCIL_VIEW_DESC pssDsvDesc = {};
+	pssDsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	pssDsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+	hr = g_D3DDevice->CreateDepthStencilView(
+		pSSDepthBuffer,
+		&pssDsvDesc,
+		&pSSDSView);
 	if (FAILED(hr))
 	{
+		SAFE_RELEASE(pSSDepthBuffer);
+		SAFE_RELEASE(pSSRTView);
+		SAFE_RELEASE(pSSTexture);
+		return;
+	}
+
+	ID3D11ShaderResourceView* pSSDepthSRV = nullptr;
+	D3D11_SHADER_RESOURCE_VIEW_DESC pssSrvDesc = {};
+	pssSrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+	pssSrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	pssSrvDesc.Texture2D.MipLevels = 1;
+	hr = g_D3DDevice->CreateShaderResourceView(
+		pSSDepthBuffer,
+		&pssSrvDesc,
+		&pSSDepthSRV);
+	if (FAILED(hr))
+	{
+		SAFE_RELEASE(pSSDSView);
 		SAFE_RELEASE(pSSDepthBuffer);
 		SAFE_RELEASE(pSSRTView);
 		SAFE_RELEASE(pSSTexture);
@@ -2421,6 +2501,110 @@ void TakeScreenshot(void)
 	g_BackBufferDesc.Height = SCREENSHOT_HEIGHT;
 	g_SceneWidth = SCREENSHOT_WIDTH;
 	g_SceneHeight = SCREENSHOT_HEIGHT;
+
+	ID3D11Texture2D* previousSceneTexture = g_SceneTexture;
+	ID3D11RenderTargetView* previousSceneRTV = g_SceneRenderTargetView;
+	ID3D11ShaderResourceView* previousSceneSRV = g_SceneShaderView;
+	ID3D11DepthStencilView* previousDepthDSV = g_DepthStencilView;
+	ID3D11ShaderResourceView* previousDepthSRV = g_DepthShaderView;
+	ID3D11Texture2D* screenshotSceneTexture = nullptr;
+	ID3D11RenderTargetView* screenshotSceneRTV = nullptr;
+	ID3D11ShaderResourceView* screenshotSceneSRV = nullptr;
+	ID3D11Texture2D* screenshotAoTexture[2] = {};
+	ID3D11RenderTargetView* screenshotAoRTV[2] = {};
+	ID3D11ShaderResourceView* screenshotAoSRV[2] = {};
+
+	D3D11_TEXTURE2D_DESC screenshotSceneDesc = {};
+	screenshotSceneDesc.Width = SCREENSHOT_WIDTH;
+	screenshotSceneDesc.Height = SCREENSHOT_HEIGHT;
+	screenshotSceneDesc.MipLevels = 1;
+	screenshotSceneDesc.ArraySize = 1;
+	screenshotSceneDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	screenshotSceneDesc.SampleDesc.Count = 1;
+	screenshotSceneDesc.Usage = D3D11_USAGE_DEFAULT;
+	screenshotSceneDesc.BindFlags =
+		D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	hr = g_D3DDevice->CreateTexture2D(
+		&screenshotSceneDesc,
+		nullptr,
+		&screenshotSceneTexture);
+	if (SUCCEEDED(hr))
+	{
+		hr = g_D3DDevice->CreateRenderTargetView(
+			screenshotSceneTexture,
+			nullptr,
+			&screenshotSceneRTV);
+	}
+	if (SUCCEEDED(hr))
+	{
+		hr = g_D3DDevice->CreateShaderResourceView(
+			screenshotSceneTexture,
+			nullptr,
+			&screenshotSceneSRV);
+	}
+
+	D3D11_TEXTURE2D_DESC screenshotAoDesc = screenshotSceneDesc;
+	screenshotAoDesc.Width = (SCREENSHOT_WIDTH + 3) / 4;
+	screenshotAoDesc.Height = (SCREENSHOT_HEIGHT + 3) / 4;
+	screenshotAoDesc.Format = DXGI_FORMAT_R8_UNORM;
+	for (int i = 0; SUCCEEDED(hr) && i < 2; ++i)
+	{
+		hr = g_D3DDevice->CreateTexture2D(
+			&screenshotAoDesc,
+			nullptr,
+			&screenshotAoTexture[i]);
+		if (SUCCEEDED(hr))
+		{
+			hr = g_D3DDevice->CreateRenderTargetView(
+				screenshotAoTexture[i],
+				nullptr,
+				&screenshotAoRTV[i]);
+		}
+		if (SUCCEEDED(hr))
+		{
+			hr = g_D3DDevice->CreateShaderResourceView(
+				screenshotAoTexture[i],
+				nullptr,
+				&screenshotAoSRV[i]);
+		}
+	}
+	if (FAILED(hr))
+	{
+		SAFE_RELEASE(screenshotSceneSRV);
+		SAFE_RELEASE(screenshotSceneRTV);
+		SAFE_RELEASE(screenshotSceneTexture);
+		for (int i = 0; i < 2; ++i)
+		{
+			SAFE_RELEASE(screenshotAoSRV[i]);
+			SAFE_RELEASE(screenshotAoRTV[i]);
+			SAFE_RELEASE(screenshotAoTexture[i]);
+		}
+		SAFE_RELEASE(pSSDepthSRV);
+		SAFE_RELEASE(pSSDSView);
+		SAFE_RELEASE(pSSDepthBuffer);
+		SAFE_RELEASE(pSSRTView);
+		SAFE_RELEASE(pSSTexture);
+		g_ClientWidth = prevClientWidth;
+		g_ClientHeight = prevClientHeight;
+		g_BackBufferDesc = prevBackBufferDesc;
+		g_SceneWidth = prevSceneWidth;
+		g_SceneHeight = prevSceneHeight;
+		SAFE_RELEASE(pPrevRTView);
+		SAFE_RELEASE(pPrevDSView);
+		return;
+	}
+
+	g_SceneTexture = screenshotSceneTexture;
+	g_SceneRenderTargetView = screenshotSceneRTV;
+	g_SceneShaderView = screenshotSceneSRV;
+	for (int i = 0; i < 2; ++i)
+	{
+		g_SsaoTexture[i] = screenshotAoTexture[i];
+		g_SsaoRenderTargetView[i] = screenshotAoRTV[i];
+		g_SsaoShaderView[i] = screenshotAoSRV[i];
+	}
+	g_DepthStencilView = pSSDSView;
+	g_DepthShaderView = pSSDepthSRV;
 
 	// スクリーンショット撮影中フラグとターゲットの設定
 	g_IsTakingScreenshot = true;
@@ -2495,6 +2679,18 @@ void TakeScreenshot(void)
 	g_SSTargetView = nullptr;
 	g_SSDepthView = nullptr;
 
+	g_SceneTexture = previousSceneTexture;
+	g_SceneRenderTargetView = previousSceneRTV;
+	g_SceneShaderView = previousSceneSRV;
+	g_DepthStencilView = previousDepthDSV;
+	g_DepthShaderView = previousDepthSRV;
+	for (int i = 0; i < 2; ++i)
+	{
+		g_SsaoTexture[i] = nullptr;
+		g_SsaoRenderTargetView[i] = nullptr;
+		g_SsaoShaderView[i] = nullptr;
+	}
+
 	g_ClientWidth = prevClientWidth;
 	g_ClientHeight = prevClientHeight;
 	g_BackBufferDesc = prevBackBufferDesc;
@@ -2507,10 +2703,20 @@ void TakeScreenshot(void)
 	// リソースを解放
 	SAFE_RELEASE(pPrevRTView);
 	SAFE_RELEASE(pPrevDSView);
+	SAFE_RELEASE(pSSDepthSRV);
 	SAFE_RELEASE(pSSDSView);
 	SAFE_RELEASE(pSSDepthBuffer);
 	SAFE_RELEASE(pSSRTView);
 	SAFE_RELEASE(pSSTexture);
+	SAFE_RELEASE(screenshotSceneSRV);
+	SAFE_RELEASE(screenshotSceneRTV);
+	SAFE_RELEASE(screenshotSceneTexture);
+	for (int i = 0; i < 2; ++i)
+	{
+		SAFE_RELEASE(screenshotAoSRV[i]);
+		SAFE_RELEASE(screenshotAoRTV[i]);
+		SAFE_RELEASE(screenshotAoTexture[i]);
+	}
 }
 
 bool Direct3D_IsTakingScreenshot(void)

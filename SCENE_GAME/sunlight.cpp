@@ -529,6 +529,28 @@ void Sunlight_Apply(void)
 	ApplySunlightState();
 }
 
+void Sunlight_GetPhotoSettings(SunlightPhotoSettings* settings)
+{
+	if (!settings)
+	{
+		return;
+	}
+	settings->azimuth = g_Azimuth;
+	settings->elevation = g_Elevation;
+	settings->color = g_Color;
+	settings->intensity = g_Intensity;
+	settings->ambientScale = g_AmbientScale;
+}
+
+void Sunlight_SetPhotoSettings(const SunlightPhotoSettings& settings)
+{
+	g_Azimuth = settings.azimuth;
+	g_Elevation = settings.elevation;
+	g_Color = settings.color;
+	g_Intensity = settings.intensity;
+	g_AmbientScale = settings.ambientScale;
+}
+
 static bool BuildShadowCascade(
 	Camera* camera,
 	const XMVECTOR& lightDir,

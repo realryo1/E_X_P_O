@@ -4,6 +4,7 @@
 #include "gameaudio.h"
 #include "player.h"
 #include "playercamera.h"
+#include "photomode.h"
 #include "renderer.h"
 #include "sunlight.h"
 #include "envprobe.h"
@@ -129,7 +130,11 @@ void Game_Update(void)
 	Player_Update();
 	if (fieldReady)
 	{
-		Course_Update();
+		PhotoMode_Update();
+		if (!PhotoMode_IsActive())
+		{
+			Course_Update();
+		}
 	}
 	PlayerCamera_Update();
 	Ui_Update();
@@ -225,13 +230,17 @@ void Game_Draw(void)
 
 	Ui_ResetMaterial();
 	SetDepthEnable(false);
-	Ui_Draw();
-	Course_DrawHud();
-	Player_DrawDebug();
-	Field_DrawDebug();
-	Course_DrawMenu();
-	Sunlight_DrawDebug();
-	PlayerCamera_DrawDebug();
+	if (!PhotoMode_IsActive())
+	{
+		Ui_Draw();
+		Course_DrawHud();
+		Player_DrawDebug();
+		Field_DrawDebug();
+		Course_DrawMenu();
+		Sunlight_DrawDebug();
+		PlayerCamera_DrawDebug();
+	}
+	PhotoMode_DrawOverlay();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_UI);
 #endif
@@ -239,6 +248,7 @@ void Game_Draw(void)
 
 void Game_Finalize(void)
 {
+	PhotoMode_Exit();
 	Course_Finalize();
 	Player_Finalize();
 	GameAudio_Finalize();

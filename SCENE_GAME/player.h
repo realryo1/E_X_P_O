@@ -22,3 +22,4 @@ void Player_WarpTo(DirectX::XMFLOAT3 pos);
 void Player_SetFacingYaw(float yaw);
 void Player_SetControlEnabled(bool enabled);
 void Player_ActivateDash(void);
+void Player_SetVisible(bool visible);

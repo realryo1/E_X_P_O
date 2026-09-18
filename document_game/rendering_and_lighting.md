@@ -34,7 +34,7 @@ flowchart TD
     taxiDraw["空飛ぶタクシー (S_PBR, Cast/Receive=ON)"]
     skyboxDraw --> floorDraw --> tileDraw --> ringDraw --> taxiDraw
   end
-  ssaoPass["7. シーン色をバックバッファへ合成<br>(SSAOは既定オフ。オン時は1/4解像度AO)"]
+  ssaoPass["7. シーン色をバックバッファへ合成<br>(SSAO + フォトエフェクト)"]
   subgraph uiPass ["8. UI & デバッグ描画"]
     uiReset["Ui_ResetMaterial"]
     depthDisable["SetDepthEnable(false)"]
@@ -63,6 +63,7 @@ flowchart TD
    - スワップチェーンはウィンドウ実サイズ。3Dのシーン色と深度も同じ解像度でドットバイドットに描き、合成パスでバックバッファへコピーする。UI も実ウィンドウ解像度。
    - SSAO の起動既定はオフ。オフ時は AO 生成とぼかしを走らせず、合成パスだけをコピーに使う。オン時の AO はシーンの 1/4 解像度。
    - `Expo Sunlight` の `SSAO`、`SSAO Intensity`、`SSAO Radius`、`SSAO Bias`、`SSAO Power` で調整できる。AOは3D色だけに適用し、HUD / ImGuiは対象外とする。
+   - フォトモードでは合成シェーダー（`SsaoCompositePS`）へポスタライズ、ノイズ、フィルムグレイン、RGBずらしを追加適用する。F2の1920×1080オフスクリーン撮影も同じ合成経路を使用する。
 8. **2D・UI・デバッグパス**:
    - `Ui_ResetMaterial`: マテリアル色を白（ディフューズ 1.0）へ戻す。
    - `SetDepthEnable(false)`: 2D 用 UI ビューポート（1280×720）へ切り替え。
@@ -324,6 +325,7 @@ DirectX 11 パイプラインにおけるシェーダースロットの割り当
 | **b7** | `g_PlayerLightBuffer` | `LIGHT[3]` | `PlayerLightBuffer` | PBR 3点照明（現在は未使用・単一ライトフォールバック） |
 | **b8** | `g_ShadowBuffer` | `SHADOW_CONSTANT` | `ShadowBuffer` | 3段分のライト行列 `LightViewProjection[3]`、カスケード境界、深度バイアス、影輝度 |
 | **b10** | `g_SsaoBuffer` | `SSAO_CONSTANT` | `SsaoBuffer` | 逆射影行列、AOサンプルのテクセルサイズ・半径・バイアス、強度・カーブ |
+| **b13** | `g_PhotoBuffer` | `PHOTO_CONSTANT` | `PhotoBuffer` | ポスタライズ段階、ノイズ、フィルムグレイン、RGBずらし、経過時間 |
 | **b11** | `g_FogBuffer` | `FOG_CONSTANT` | `FogBuffer` | 距離・高度フォグ。Color.w は密度、Param は start/end/heightMin/heightRange |
 | **b12** | `g_Null2Buffer` | `XMFLOAT4` | `Null2Buffer` | null2 膜。x:振幅 y:速さ z:頂点変位 w:法線傾き |
 
