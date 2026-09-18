@@ -26,7 +26,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 ---
 
-## タスク一覧
+## タスク一覧（時系列順に並べる。後から行間に挿入しない）
 
 - [x] `fetch-expo-data`: 公式3D Tiles ZIPを取得・展開し、利用条件と実データ構成を記録する
 - [x] `prepare-first-tile`: `tileset.json`を走査し、参照切れを検出して最初の`b3dm`からGLBを抽出する
@@ -68,8 +68,6 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] skydome
 - [x] `pbr-sun-directional`: HDR輝度抽出による平行太陽と連動環境光。場のモデル・プレースホルダ・タクシーを `S_PBR` 化。スカイドームはHDRを表示用変換した `S_SKYBOX`。方位既定値は `-170.0°` で、HDR抽出方位との差分により見た目の太陽位置を維持する。DebugビルドのみImGui `Expo Sunlight`
 - [x] `pbr-local-shadow`: 全対象モデルへ受影を適用し、床・LOD2・リング・空飛ぶタクシーを投影元にする。LOD3表示中も建物影はLOD2ベース。3段CSM（既定 `0–20m / 20–70m / 70–160m`、第1段は投影余白8m）。会場GLBは近傍XZセル、タクシーは 8MB 以下の結合シャドウ
-- [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
-- [x] `photo-mode`: ゲームメニューからReleaseでも使えるフリーカメラ、ライティング調整、ポスタライズ・ノイズ・フィルムグレイン・RGBずらし、およびエフェクト込みのF2撮影を追加
 - [x] `pbr-maps-all-models`: セルビア館で先行していた glTF の metallic/roughness factor、packed ORM、法線、エミッシブのPBR経路を全GLBへ適用。マップ無しモデルは係数と既定値へフォールバック
 - [x] `pbr-distance-height-fog`: PBR描画へ距離＋高度フォグを適用。`Expo Sunlight` から色、距離、高度、密度を調整可能
 - [x] `billboard-course-race`: `SCENE_GAME` 内にフリー飛行・コース作成・レースを追加。`P`配置、`asset/course/*.yml`保存、`asset/texture/makulogo.png`のビルボード輪、カウントダウン、タイマー、通過判定、ゴールログに対応
@@ -85,11 +83,14 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `streaming-vram-retry`: 失敗backoff（最大3回）、VRAM 85%でPresent後ポンプ停止、GPU時間はReleaseでも計測、インポート／デコードは各1スレッド
 - [x] `taxi-merged-shadow`: `flytaxi.glb` を0フレーム焼きのあとマテリアル結合。8MB以下だけ結合シャドウ
 - [x] `cursor-no-debugger-run`: 実行とデバッグの `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
-- [x] `photomode`: 既存フリーカムを進化し、ライティングやポスタライズ、ノイズ、フィルムグレイン、グリッジなどのプリプロセス活用のフォトモード
+- [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
+- [x] `photo-mode`: ゲームメニューからReleaseでも使えるフリーカメラ、ライティング調整、ポスタライズ・ノイズ・フィルムグレイン・RGBずらし、およびエフェクト込みのF2撮影を追加
 - [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [ ] GLB直接読み込み失敗の謎に迫る
 - [ ] オルソ床に起伏を付ける
 - [ ] ウォータープラザに波と噴水を
+- [ ] LOD3モデルの読み込みをさらに高速化したい
+- [ ] ロード短縮
 
 ---
 
