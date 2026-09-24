@@ -145,6 +145,9 @@
     <ClCompile Include="SCENE_DEBUG\debugscene.cpp">
       <Filter>デバッグ</Filter>
     </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debugwave.cpp">
+      <Filter>デバッグ</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework\camera.h">
@@ -223,6 +226,9 @@
       <Filter>デバッグ</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_DEBUG\debugcamera.h">
+      <Filter>デバッグ</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debugwave.h">
       <Filter>デバッグ</Filter>
     </ClInclude>
     <ClInclude Include="framework\debug_ostream.h">
