@@ -13,6 +13,15 @@
 #include <cstdio>
 #include <windows.h>
 
+#if defined(_DEBUG)
+#include "renderer.h"
+#include "shadermanager.h"
+#include "camera.h"
+#include "texture.h"
+#include "main.h"
+#include "imgui/imgui.h"
+#endif
+
 using namespace DirectX;
 
 namespace
@@ -82,6 +91,33 @@ namespace
 	std::atomic<size_t> g_ProgressTotal{ 0 };
 	std::atomic<int> g_ProgressStage{ COLLISION_STAGE_IDLE };
 	std::vector<std::string> g_FrameHitNames;
+
+#if defined(_DEBUG)
+	enum WireMeshKind
+	{
+		WIRE_KIND_FLOOR = 0,
+		WIRE_KIND_RING,
+		WIRE_KIND_LOD2,
+		WIRE_KIND_GATE,
+		WIRE_KIND_OTHER
+	};
+
+	bool g_WireEnabled = false;
+	bool g_WireShowFloor = true;
+	bool g_WireShowRing = true;
+	bool g_WireShowLod2 = true;
+	bool g_WireShowGate = true;
+	bool g_WireShowPlayerAabb = true;
+	float g_WireRadius = 4.0f;
+	int g_WireTriCount = 0;
+	int g_WireLineCount = 0;
+
+	ID3D11Buffer* g_WireVertexBuffer = nullptr;
+	UINT g_WireVertexCapacity = 0;
+	ID3D11ShaderResourceView* g_WireTexture = nullptr;
+
+	const int WIRE_MAX_TRIANGLES = 12000;
+#endif
 
 	std::string PathStem(const std::string& path)
 	{
@@ -1026,6 +1062,251 @@ namespace
 			}
 		}
 	}
+
+#if defined(_DEBUG)
+	WireMeshKind ClassifyWireMesh(const CollisionMesh& mesh)
+	{
+		if (mesh.sourceName == "expo_floor")
+		{
+			return WIRE_KIND_FLOOR;
+		}
+		if (mesh.sourceName == "expo_ring")
+		{
+			return WIRE_KIND_RING;
+		}
+		if (IsHighDetailGate(mesh))
+		{
+			return WIRE_KIND_GATE;
+		}
+		if (IsLod2Mesh(mesh))
+		{
+			return WIRE_KIND_LOD2;
+		}
+		return WIRE_KIND_OTHER;
+	}
+
+	bool WireKindEnabled(WireMeshKind kind)
+	{
+		switch (kind)
+		{
+		case WIRE_KIND_FLOOR: return g_WireShowFloor;
+		case WIRE_KIND_RING: return g_WireShowRing;
+		case WIRE_KIND_LOD2: return g_WireShowLod2;
+		case WIRE_KIND_GATE: return g_WireShowGate;
+		default: return true;
+		}
+	}
+
+	XMFLOAT4 WireKindColor(WireMeshKind kind)
+	{
+		switch (kind)
+		{
+		case WIRE_KIND_FLOOR: return XMFLOAT4(0.25f, 1.0f, 0.35f, 1.0f);
+		case WIRE_KIND_RING: return XMFLOAT4(0.25f, 0.85f, 1.0f, 1.0f);
+		case WIRE_KIND_LOD2: return XMFLOAT4(1.0f, 0.85f, 0.2f, 1.0f);
+		case WIRE_KIND_GATE: return XMFLOAT4(1.0f, 0.35f, 1.0f, 1.0f);
+		default: return XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+		}
+	}
+
+	void PushWireVertex(std::vector<VERTEX_3D>& verts, const XMFLOAT3& pos, const XMFLOAT4& color)
+	{
+		VERTEX_3D v{};
+		v.Position = pos;
+		v.Normal = XMFLOAT3(0.0f, 1.0f, 0.0f);
+		v.Diffuse = color;
+		v.TexCoord = XMFLOAT2(0.0f, 0.0f);
+		verts.push_back(v);
+	}
+
+	void PushWireLine(
+		std::vector<VERTEX_3D>& verts,
+		const XMFLOAT3& a,
+		const XMFLOAT3& b,
+		const XMFLOAT4& color)
+	{
+		PushWireVertex(verts, a, color);
+		PushWireVertex(verts, b, color);
+	}
+
+	void PushWireTriangle(
+		std::vector<VERTEX_3D>& verts,
+		const CollisionTriangle& tri,
+		float yBias,
+		const XMFLOAT4& color)
+	{
+		XMFLOAT3 a = tri.a;
+		XMFLOAT3 b = tri.b;
+		XMFLOAT3 c = tri.c;
+		a.y += yBias;
+		b.y += yBias;
+		c.y += yBias;
+		PushWireLine(verts, a, b, color);
+		PushWireLine(verts, b, c, color);
+		PushWireLine(verts, c, a, color);
+	}
+
+	void PushWireAabb(
+		std::vector<VERTEX_3D>& verts,
+		const XMFLOAT3& center,
+		const XMFLOAT3& half,
+		const XMFLOAT4& color)
+	{
+		const XMFLOAT3 p[8] = {
+			{ center.x - half.x, center.y - half.y, center.z - half.z },
+			{ center.x + half.x, center.y - half.y, center.z - half.z },
+			{ center.x + half.x, center.y + half.y, center.z - half.z },
+			{ center.x - half.x, center.y + half.y, center.z - half.z },
+			{ center.x - half.x, center.y - half.y, center.z + half.z },
+			{ center.x + half.x, center.y - half.y, center.z + half.z },
+			{ center.x + half.x, center.y + half.y, center.z + half.z },
+			{ center.x - half.x, center.y + half.y, center.z + half.z }
+		};
+		static const int edges[12][2] = {
+			{ 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 },
+			{ 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 },
+			{ 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
+		};
+		for (int i = 0; i < 12; ++i)
+		{
+			PushWireLine(verts, p[edges[i][0]], p[edges[i][1]], color);
+		}
+	}
+
+	bool EnsureWireVertexBuffer(UINT vertexCount)
+	{
+		if (vertexCount == 0)
+		{
+			return false;
+		}
+		if (g_WireVertexBuffer && g_WireVertexCapacity >= vertexCount)
+		{
+			return true;
+		}
+
+		SAFE_RELEASE(g_WireVertexBuffer);
+		UINT capacity = vertexCount;
+		if (capacity < 4096)
+		{
+			capacity = 4096;
+		}
+		ID3D11Device* device = GetDevice();
+		if (!device)
+		{
+			g_WireVertexCapacity = 0;
+			return false;
+		}
+
+		D3D11_BUFFER_DESC desc{};
+		desc.ByteWidth = sizeof(VERTEX_3D) * capacity;
+		desc.Usage = D3D11_USAGE_DYNAMIC;
+		desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		if (FAILED(device->CreateBuffer(&desc, nullptr, &g_WireVertexBuffer)))
+		{
+			g_WireVertexCapacity = 0;
+			return false;
+		}
+		g_WireVertexCapacity = capacity;
+		return true;
+	}
+
+	void CollectNearbyWireTriangles(
+		CollisionMesh& mesh,
+		const XMFLOAT3& aabbMin,
+		const XMFLOAT3& aabbMax,
+		const XMFLOAT4& color,
+		std::vector<VERTEX_3D>& verts,
+		int* triCount)
+	{
+		if (!triCount || *triCount >= WIRE_MAX_TRIANGLES)
+		{
+			return;
+		}
+
+		auto consider = [&](int triIndex)
+		{
+			if (*triCount >= WIRE_MAX_TRIANGLES)
+			{
+				return;
+			}
+			if (triIndex < 0 || triIndex >= static_cast<int>(mesh.worldTris.size()))
+			{
+				return;
+			}
+			if (triIndex < static_cast<int>(mesh.visitStamp.size()))
+			{
+				if (mesh.visitStamp[triIndex] == mesh.visitGen)
+				{
+					return;
+				}
+				mesh.visitStamp[triIndex] = mesh.visitGen;
+			}
+			if (triIndex < static_cast<int>(mesh.triMin.size())
+				&& !AabbOverlap(
+					aabbMin,
+					aabbMax,
+					XMFLOAT3(mesh.triMin[triIndex].x, mesh.triMin[triIndex].y + mesh.yBias, mesh.triMin[triIndex].z),
+					XMFLOAT3(mesh.triMax[triIndex].x, mesh.triMax[triIndex].y + mesh.yBias, mesh.triMax[triIndex].z)))
+			{
+				return;
+			}
+			PushWireTriangle(verts, mesh.worldTris[triIndex], mesh.yBias, color);
+			*triCount += 1;
+		};
+
+		if (!mesh.useGrid)
+		{
+			for (int i = 0; i < static_cast<int>(mesh.worldTris.size()); ++i)
+			{
+				consider(i);
+			}
+			return;
+		}
+
+		mesh.visitGen += 1;
+		if (mesh.visitGen == 0)
+		{
+			if (!mesh.visitStamp.empty())
+			{
+				memset(mesh.visitStamp.data(), 0, mesh.visitStamp.size() * sizeof(unsigned int));
+			}
+			mesh.visitGen = 1;
+		}
+
+		for (int triIndex : mesh.largeTris)
+		{
+			consider(triIndex);
+		}
+
+		if (mesh.gridW <= 0 || mesh.gridH <= 0 || mesh.cellSize <= 0.0f)
+		{
+			return;
+		}
+
+		int x0 = GridCell(aabbMin.x, mesh.cellSize) - mesh.gridOriginX;
+		int x1 = GridCell(aabbMax.x, mesh.cellSize) - mesh.gridOriginX;
+		int z0 = GridCell(aabbMin.z, mesh.cellSize) - mesh.gridOriginZ;
+		int z1 = GridCell(aabbMax.z, mesh.cellSize) - mesh.gridOriginZ;
+		if (x0 < 0) x0 = 0;
+		if (z0 < 0) z0 = 0;
+		if (x1 >= mesh.gridW) x1 = mesh.gridW - 1;
+		if (z1 >= mesh.gridH) z1 = mesh.gridH - 1;
+		for (int gx = x0; gx <= x1; ++gx)
+		{
+			for (int gz = z0; gz <= z1; ++gz)
+			{
+				const int cell = gz * mesh.gridW + gx;
+				const int start = mesh.cellStart[static_cast<size_t>(cell)];
+				const int end = mesh.cellStart[static_cast<size_t>(cell) + 1];
+				for (int it = start; it < end; ++it)
+				{
+					consider(mesh.cellItems[static_cast<size_t>(it)]);
+				}
+			}
+		}
+	}
+#endif
 }
 
 bool Collision_StartAdd(
@@ -1245,6 +1526,13 @@ void Collision_Clear(void)
 	g_ProgressDone = 0;
 	g_ProgressTotal = 0;
 	g_ProgressStage = COLLISION_STAGE_IDLE;
+#if defined(_DEBUG)
+	SAFE_RELEASE(g_WireVertexBuffer);
+	g_WireVertexCapacity = 0;
+	g_WireTexture = nullptr;
+	g_WireTriCount = 0;
+	g_WireLineCount = 0;
+#endif
 }
 
 bool Collision_GetBounds(int meshId, XMFLOAT3* bmin, XMFLOAT3* bmax)
@@ -1288,4 +1576,170 @@ bool Collision_MoveAABB(
 	}
 	*outCenter = center;
 	return true;
+}
+
+void Collision_DrawWire(XMFLOAT3 center, XMFLOAT3 halfExtents)
+{
+#if defined(_DEBUG)
+	g_WireTriCount = 0;
+	g_WireLineCount = 0;
+	if (!g_WireEnabled)
+	{
+		return;
+	}
+	if (!GetCamera() || !GetDeviceContext())
+	{
+		return;
+	}
+
+	const float radius = (g_WireRadius < 0.4f) ? 0.4f : g_WireRadius;
+	const XMFLOAT3 aabbMin = {
+		center.x - radius,
+		center.y - radius,
+		center.z - radius
+	};
+	const XMFLOAT3 aabbMax = {
+		center.x + radius,
+		center.y + radius,
+		center.z + radius
+	};
+
+	std::vector<VERTEX_3D> verts;
+	verts.reserve(4096);
+
+	int triCount = 0;
+	for (CollisionMesh& mesh : g_Meshes)
+	{
+		if (mesh.worldTris.empty())
+		{
+			continue;
+		}
+		const WireMeshKind kind = ClassifyWireMesh(mesh);
+		if (!WireKindEnabled(kind))
+		{
+			continue;
+		}
+		if (!AabbOverlap(
+			aabbMin,
+			aabbMax,
+			XMFLOAT3(mesh.boundsMin.x, mesh.boundsMin.y + mesh.yBias, mesh.boundsMin.z),
+			XMFLOAT3(mesh.boundsMax.x, mesh.boundsMax.y + mesh.yBias, mesh.boundsMax.z)))
+		{
+			continue;
+		}
+		CollectNearbyWireTriangles(
+			mesh,
+			aabbMin,
+			aabbMax,
+			WireKindColor(kind),
+			verts,
+			&triCount);
+	}
+
+	if (g_WireShowPlayerAabb)
+	{
+		PushWireAabb(verts, center, halfExtents, XMFLOAT4(1.0f, 0.2f, 0.2f, 1.0f));
+	}
+
+	g_WireTriCount = triCount;
+	g_WireLineCount = static_cast<int>(verts.size() / 2);
+	if (verts.empty() || !EnsureWireVertexBuffer(static_cast<UINT>(verts.size())))
+	{
+		return;
+	}
+
+	ID3D11DeviceContext* context = GetDeviceContext();
+	D3D11_MAPPED_SUBRESOURCE mapped{};
+	if (FAILED(context->Map(g_WireVertexBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+	{
+		return;
+	}
+	memcpy(mapped.pData, verts.data(), sizeof(VERTEX_3D) * verts.size());
+	context->Unmap(g_WireVertexBuffer, 0);
+
+	if (!g_WireTexture)
+	{
+		g_WireTexture = LoadTexture(L"asset\\texture\\fade.png");
+	}
+	if (!g_WireTexture)
+	{
+		return;
+	}
+
+	MATERIAL material = {};
+	material.Diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	material.Ambient = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	SetMaterial(material);
+
+	SetDepthEnable(true);
+	SetCullState(CULLSTATE_NONE);
+	SetWorldMatrix(XMMatrixIdentity());
+	SetViewMatrix(GetCamera()->GetView());
+	SetProjectionMatrix(GetCamera()->GetProjection());
+
+	ShaderManager* shader = GetShader(S_UNLIT);
+	if (!shader)
+	{
+		return;
+	}
+	context->IASetInputLayout(shader->GetVertexLayout());
+	context->VSSetShader(shader->GetVertexShader(), nullptr, 0);
+	context->PSSetShader(shader->GetPixelShader(), nullptr, 0);
+	context->PSSetShaderResources(0, 1, &g_WireTexture);
+	SetDefaultSampler();
+
+	UINT stride = sizeof(VERTEX_3D);
+	UINT offset = 0;
+	context->IASetVertexBuffers(0, 1, &g_WireVertexBuffer, &stride, &offset);
+	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+	context->Draw(static_cast<UINT>(verts.size()), 0);
+	context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+#else
+	(void)center;
+	(void)halfExtents;
+#endif
+}
+
+void Collision_DrawDebug(void)
+{
+#if defined(_DEBUG)
+	if (Direct3D_IsTakingScreenshot())
+	{
+		return;
+	}
+
+	ImGui::Begin("Expo Collision");
+	if (ImGui::Checkbox("Wireframe", &g_WireEnabled))
+	{
+		RequestRedraw();
+	}
+	if (ImGui::SliderFloat("Radius", &g_WireRadius, 0.4f, 40.0f, "%.1f"))
+	{
+		RequestRedraw();
+	}
+	if (ImGui::Checkbox("Floor", &g_WireShowFloor))
+	{
+		RequestRedraw();
+	}
+	ImGui::SameLine();
+	if (ImGui::Checkbox("Ring", &g_WireShowRing))
+	{
+		RequestRedraw();
+	}
+	if (ImGui::Checkbox("LOD2", &g_WireShowLod2))
+	{
+		RequestRedraw();
+	}
+	ImGui::SameLine();
+	if (ImGui::Checkbox("Gate", &g_WireShowGate))
+	{
+		RequestRedraw();
+	}
+	if (ImGui::Checkbox("Player AABB", &g_WireShowPlayerAabb))
+	{
+		RequestRedraw();
+	}
+	ImGui::Text("Tris %d / Lines %d", g_WireTriCount, g_WireLineCount);
+	ImGui::End();
+#endif
 }

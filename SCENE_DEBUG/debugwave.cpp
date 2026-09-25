@@ -215,7 +215,7 @@ void DebugWaveScene_Draw(void)
 	light.Position = XMFLOAT4(0.0f, 20.0f, 0.0f, 1.0f);
 	light.Diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	light.Ambient = XMFLOAT4(0.85f, 0.90f, 0.95f, 1.0f);
-	light.PointLightParam = XMFLOAT4(80.0f, 0.8f, 0.0f, 0.0f);
+	light.PointLightParam = XMFLOAT4(80.0f, 0.8f, 0.0f, 0.0f);//ここを変えると明るくなる
 	SetLight(light);
 
 	MATERIAL material = {};

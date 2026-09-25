@@ -14,6 +14,7 @@ void Player_DrawLocalShadow(
 void Player_DrawDebug(void);
 bool Player_IsReady(void);
 DirectX::XMFLOAT3 Player_GetPos(void);
+DirectX::XMFLOAT3 Player_GetHalfExtents(void);
 float Player_GetMoveSpeed(void);
 void Player_SetMoveSpeed(float speed);
 void Player_ResetMoveSpeed(void);

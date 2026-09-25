@@ -1,5 +1,6 @@
 ﻿#include "game.h"
 #include "field.h"
+#include "collision.h"
 #include "course.h"
 #include "gameaudio.h"
 #include "player.h"
@@ -222,6 +223,12 @@ void Game_Draw(void)
 #endif
 	Player_Draw();
 	Course_Draw();
+#if defined(_DEBUG)
+	if (Player_IsReady())
+	{
+		Collision_DrawWire(Player_GetPos(), Player_GetHalfExtents());
+	}
+#endif
 	Direct3D_ApplySsao();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_OBJECTS);
@@ -236,6 +243,7 @@ void Game_Draw(void)
 		Course_DrawHud();
 		Player_DrawDebug();
 		Field_DrawDebug();
+		Collision_DrawDebug();
 		Course_DrawMenu();
 		Sunlight_DrawDebug();
 		PlayerCamera_DrawDebug();

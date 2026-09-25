@@ -589,16 +589,12 @@ static void SetPostProcessViewport(UINT width, UINT height)
 
 static void BindSceneTarget(void)
 {
-	if (g_IsTakingScreenshot)
+	if (!g_ImmediateContext || !g_SceneRenderTargetView)
 	{
-		g_ImmediateContext->OMSetRenderTargets(
-			1, &g_SSTargetView, g_SSDepthView);
+		return;
 	}
-	else
-	{
-		g_ImmediateContext->OMSetRenderTargets(
-			1, &g_SceneRenderTargetView, g_DepthStencilView);
-	}
+	g_ImmediateContext->OMSetRenderTargets(
+		1, &g_SceneRenderTargetView, g_DepthStencilView);
 }
 
 static void CreateSsaoQuad(void)
@@ -1181,15 +1177,8 @@ void BeginShadowMapSlice(int slice)
 
 void EndShadowMap(void)
 {
-	// ShadowMapへの描画を終えたので、通常の画面描画用RenderTargetへ戻す。
-	if (g_IsTakingScreenshot)
-	{
-		g_ImmediateContext->OMSetRenderTargets(1, &g_SSTargetView, g_SSDepthView);
-	}
-	else
-	{
-		BindSceneTarget();
-	}
+	// ShadowMapへの描画を終えたので、シーン色RTへ戻す。
+	BindSceneTarget();
 	SetDepthEnable(true);
 
 	// 以降のピクセルシェーダーがShadowMapを読めるように、t1/s1へセットする。
@@ -1242,15 +1231,8 @@ void BeginFaceShadowMap(int slice)
 
 void EndFaceShadowMap(void)
 {
-	// 通常の画面描画用RenderTargetへ戻す（SetDepthEnableでビューポートも3Dへ復帰）。
-	if (g_IsTakingScreenshot)
-	{
-		g_ImmediateContext->OMSetRenderTargets(1, &g_SSTargetView, g_SSDepthView);
-	}
-	else
-	{
-		BindSceneTarget();
-	}
+	// シーン色RTへ戻す（SetDepthEnableでビューポートも3Dへ復帰）。
+	BindSceneTarget();
 	SetDepthEnable(true);
 
 	// 受け手が4面ShadowMap配列を読めるように、t6へセット（サンプラーはs1を流用）。
@@ -1449,14 +1431,7 @@ void EndEnvCubeFace(void)
 {
 	ID3D11ShaderResourceView* nullSRV = nullptr;
 	g_ImmediateContext->PSSetShaderResources(6, 1, &nullSRV);
-	if (g_IsTakingScreenshot)
-	{
-		g_ImmediateContext->OMSetRenderTargets(1, &g_SSTargetView, g_SSDepthView);
-	}
-	else
-	{
-		BindSceneTarget();
-	}
+	BindSceneTarget();
 	SetDepthEnable(true);
 	if (g_ShadowMapShaderView)
 	{
@@ -2507,6 +2482,15 @@ void TakeScreenshot(void)
 	ID3D11ShaderResourceView* previousSceneSRV = g_SceneShaderView;
 	ID3D11DepthStencilView* previousDepthDSV = g_DepthStencilView;
 	ID3D11ShaderResourceView* previousDepthSRV = g_DepthShaderView;
+	ID3D11Texture2D* previousSsaoTexture[2] = {};
+	ID3D11RenderTargetView* previousSsaoRTV[2] = {};
+	ID3D11ShaderResourceView* previousSsaoSRV[2] = {};
+	for (int i = 0; i < 2; ++i)
+	{
+		previousSsaoTexture[i] = g_SsaoTexture[i];
+		previousSsaoRTV[i] = g_SsaoRenderTargetView[i];
+		previousSsaoSRV[i] = g_SsaoShaderView[i];
+	}
 	ID3D11Texture2D* screenshotSceneTexture = nullptr;
 	ID3D11RenderTargetView* screenshotSceneRTV = nullptr;
 	ID3D11ShaderResourceView* screenshotSceneSRV = nullptr;
@@ -2625,6 +2609,7 @@ void TakeScreenshot(void)
 	// レンダーターゲットと深度バッファをクリア (背景色をゲーム本来の色に統一)
 	float clearColor[4] = { 181.0f / 255.0f, 200.0f / 255.0f, 211.0f / 255.0f, 1.0f }; // #B5C8D3
 	g_ImmediateContext->ClearRenderTargetView(pSSRTView, clearColor);
+	g_ImmediateContext->ClearRenderTargetView(screenshotSceneRTV, clearColor);
 	g_ImmediateContext->ClearDepthStencilView(pSSDSView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
 	// 2D投影行列を 1920x1080 に適応させる
@@ -2686,9 +2671,9 @@ void TakeScreenshot(void)
 	g_DepthShaderView = previousDepthSRV;
 	for (int i = 0; i < 2; ++i)
 	{
-		g_SsaoTexture[i] = nullptr;
-		g_SsaoRenderTargetView[i] = nullptr;
-		g_SsaoShaderView[i] = nullptr;
+		g_SsaoTexture[i] = previousSsaoTexture[i];
+		g_SsaoRenderTargetView[i] = previousSsaoRTV[i];
+		g_SsaoShaderView[i] = previousSsaoSRV[i];
 	}
 
 	g_ClientWidth = prevClientWidth;

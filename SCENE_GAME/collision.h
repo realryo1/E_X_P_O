@@ -36,3 +36,7 @@ bool Collision_MoveAABB(
 	DirectX::XMFLOAT3 delta,
 	DirectX::XMFLOAT3* outCenter,
 	bool* grounded);
+void Collision_DrawWire(
+	DirectX::XMFLOAT3 center,
+	DirectX::XMFLOAT3 halfExtents);
+void Collision_DrawDebug(void);

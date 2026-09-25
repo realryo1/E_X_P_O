@@ -77,7 +77,7 @@ flowchart TD
 
 | アセット | モデルファイル | 適用シェーダー | シャドウ投光 (Cast) | 影受け (Receive) | テクスチャ仕様 / 解像度 | 固定配置オフセット | 備考 |
 | :--- | :--- | :--- | :---: | :---: | :--- | :--- | :--- |
-| **オルソ床** | `asset/expomodel/expo_floor.glb` | `S_PBR` | **○** (近傍セル) | **○** | 最大 8192×3640（縮小例外、VRAM約256MB） | Y: `-0.080` (`EXPO_FLOOR_SINK`) | 大屋根リングと同一の PBR（拡散 `/π`、頂点法線、ピーク正規化）。法線は ECEF 三角形を glTF Y-up へ変換したもの。定数 `(0,1,0)` は使わない |
+| **オルソ床** | `asset/expomodel/expo_floor.glb` | `S_PBR` | **○** (近傍セル) | **○** | 最大 8192×3640（縮小例外、VRAM約256MB） | Y: `-0.080` (`EXPO_FLOOR_SINK`) | 大屋根リングと同一の PBR（拡散 `/π`、頂点法線、ピーク正規化）。法線は ECEF 三角形を glTF Y-up へ変換したもの。定数 `(0,1,0)` は使わない。床は四隅クアッドではなく CityGML dem の相対起伏を焼いた4mグリッド（約79万面）。アルベドと PBR 式は不変 |
 | **大屋根リング** | `asset/expomodel/expo_ring.glb` | `S_PBR` | **○** (近傍セル) | **○** | 公式 appearance JPEG 22枚 + 単色 4枚 | Y: `-1.550` (`EXPO_RING_Y_OFFSET`) | 約90.6万ポリゴン。XZセル分割で影パスをカリング |
 | **LOD2タイル** | `asset/expomodel/expo_tile_lod2.glb` | `S_PBR` | **○** (近傍セル) | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | パンチ済みタイル4枚 |
 | **未パンチLOD2遠景** | `asset/expomodel/expo_tile_far.glb` | `S_PBR` | **○**（メッシュ単位） | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | LOD3常駐時にバッチ単位で排他非表示。メインは hidden 変更時に可視IBを連続化。影はセル無しの1発行 |

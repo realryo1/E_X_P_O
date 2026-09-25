@@ -79,12 +79,15 @@ bool Collision_StartAdd(
 CollisionPumpResult Collision_Pump(int* outMeshId);
 void Collision_GetPumpProgress(size_t* done, size_t* total, int* stage);
 void Collision_GetSourceStatus(char* out, size_t outSize);
+void Collision_GetLastHitStatus(char* out, size_t outSize);
 void Collision_SetWorld(int meshId, const XMMATRIX& world);
 void Collision_Clear(void);
 bool Collision_GetBounds(int meshId, XMFLOAT3* bmin, XMFLOAT3* bmax);
 bool Collision_MoveAABB(
     XMFLOAT3 center, XMFLOAT3 halfExtents, XMFLOAT3 delta,
     XMFLOAT3* outCenter, bool* grounded);
+void Collision_DrawWire(XMFLOAT3 center, XMFLOAT3 halfExtents);
+void Collision_DrawDebug(void);
 ```
 
 `Collision_StartAdd` は複数回呼べる。第3引数 `filterLattice` はリングだけ `true` にし、ワーカーはキューを順に処理する。
@@ -101,7 +104,14 @@ LOD2の衝突を通常どおり維持する。
 
 HUD の `衝突 AABB 床:BIN リング:BIN` 表示で、各メッシュが bin と GLB のどちらから読み込まれたかを確認できる。
 
-`Collision_Clear` はワーカーを合流してから全メッシュを捨てる。シーン終了で呼ぶ。
+Debug ビルドでは `Collision_DrawDebug` の ImGui 窓 `Expo Collision` で `Wireframe` をオンにできる。
+`Collision_DrawWire` がプレイヤー周辺の衝突三角形をラインリストで描き、プレイヤー AABB も赤枠で出す。
+全会場を一度に出さず、半径内かつ最大 12000 三角形まで。色は床=緑、リング=水色、LOD2=黄、ゲート=紫。
+
+`Collision_Clear` はワーカーを合流してから全メッシュを捨てる。シーン終了で呼ぶ。ワイヤ用の GPU バッファもここで解放する。
+
+`Collision_DrawWire` は Debug のみ実描画する。実行時の格子と同じ近傍参照で三角形辺を集め、`S_UNLIT` の `LINELIST` として場とプレイヤーのあと、SSAO の前に描く。
+`Collision_DrawDebug` は `Wireframe`、`Radius`、`Floor` / `Ring` / `LOD2` / `Gate` / `Player AABB` の表示切替。ImGui 窓だけスクリーンショット再描画では出さない（`NewFrame` の外のため）。ワイヤ自体は撮影に含める。
 
 ---
 
@@ -207,8 +217,8 @@ python tool/prepare_collision.py asset/model/foo.glb
 | ファイル | 役割 |
 | :--- | :--- |
 | [`SCENE_GAME/collision.h`](../SCENE_GAME/collision.h) | API |
-| [`SCENE_GAME/collision.cpp`](../SCENE_GAME/collision.cpp) | bin/GLB読込、ベイク、格子、AABB |
-| [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | ホバー移動、衝突押し出し、ImGui `スロープへ` |
+| [`SCENE_GAME/collision.cpp`](../SCENE_GAME/collision.cpp) | bin/GLB読込、ベイク、格子、AABB、Debug ワイヤ |
+| [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | ホバー移動、衝突押し出し、ImGui `Warp to Slope` |
 | [`SCENE_GAME/field.cpp`](../SCENE_GAME/field.cpp) | ロード時の `StartAdd`、固定Yオフセット |
 | [`tool/prepare_collision.py`](../tool/prepare_collision.py) | GLB → EXCL |
 

@@ -43,9 +43,10 @@ static const char* EXPO_MODEL_LOD1_PATH = "asset\\expomodel\\expo_tile.glb";
 static const float EXPO_MODEL_SCALE = 0.002f;
 static const float EXPO_SHADOW_CELL_WORLD = 8.0f;
 static const float EXPO_GLB_GLOBAL_SCALE = 100.0f;
-static const float EXPO_FLOOR_SINK = 0.08f;
-static const float EXPO_BUILDING_Y_OFFSET = -9.010f;
-static const float EXPO_RING_Y_OFFSET = -1.550f;
+static float EXPO_FLOOR_SINK = 0.08f;
+static float EXPO_BUILDING_Y_OFFSET = -9.010f;
+static float EXPO_RING_Y_OFFSET = -1.550f;
+// 上3値は Debug ビルドの ImGui「Expo Height」で変更できる。const にしないこと。
 static const char* EXPO_SKYBOX_PATH = "asset\\model\\basic_skybox_3d.fbx";
 static const float EXPO_SKYBOX_SCALE = 1000.0f;
 static const float EXPO_SKYBOX_PITCH = 0.0f;
@@ -135,6 +136,7 @@ static std::vector<float> g_TileBaseY;
 static std::vector<float> g_FarTileBaseY;
 static std::vector<float> g_PavilionBaseY;
 static float g_RingBaseY = 0.0f;
+static float g_FloorBaseY = 0.0f;
 static XMMATRIX g_MeshRotation = XMMatrixIdentity();
 static bool g_HasMeshRotation = false;
 static int g_FloorCollisionId = -1;
@@ -205,6 +207,21 @@ static bool g_CollisionFinished = false;
 static int g_CollisionSlot = 0;
 static int g_CollisionTargetCount = 0;
 static int* g_CollisionTargets[EXPO_COLLISION_TARGET_MAX] = {};
+enum class ExpoCollisionEntryKind
+{
+	Floor,
+	Ring,
+	Tile,
+	Far,
+	Gate,
+};
+struct ExpoCollisionEntry
+{
+	ExpoCollisionEntryKind kind;
+	int index;
+	int meshId;
+};
+static std::vector<ExpoCollisionEntry> g_CollisionEntries;
 static XMFLOAT3 g_PreviousCameraPos = { 0.0f, 0.0f, 0.0f };
 static bool g_HasPreviousCameraPos = false;
 static XMFLOAT3 g_PrefetchPosition = { 0.0f, 0.0f, 0.0f };
@@ -609,6 +626,8 @@ static void ClearExpoTiles(void)
 	g_ExpoSkyboxYaw = 0.0f;
 	g_ExpoSkyboxEnabled = true;
 	g_RingBaseY = 0.0f;
+	g_FloorBaseY = 0.0f;
+	g_CollisionEntries.clear();
 	Collision_Clear();
 	g_FloorCollisionId = -1;
 	g_RingCollisionId = -1;
@@ -1246,6 +1265,63 @@ static void ApplyFixedYOffsets(void)
 			Collision_SetWorld(g_RingCollisionId, MakeModelWorld(g_ExpoRing, g_MeshRotation));
 		}
 	}
+	if (g_ExpoFloor)
+	{
+		g_ExpoFloor->SetPosY(g_FloorBaseY - EXPO_FLOOR_SINK);
+		if (g_FloorCollisionId >= 0 && g_HasEcefToEnu && g_HasMeshRotation && g_TileSet.hasFloor)
+		{
+			XMFLOAT3 floorPos = RtcToWorldPosition(g_TileSet, g_TileSet.floor, g_EcefToEnu);
+			floorPos.y -= EXPO_FLOOR_SINK;
+			Collision_SetWorld(g_FloorCollisionId, MakeWorldAt(floorPos, g_MeshRotation));
+		}
+	}
+}
+
+static void RefreshCollisionWorlds(void)
+{
+	if (!g_HasEcefToEnu || !g_HasMeshRotation)
+	{
+		return;
+	}
+	for (const ExpoCollisionEntry& entry : g_CollisionEntries)
+	{
+		if (entry.meshId < 0)
+		{
+			continue;
+		}
+		const ExpoTileDesc* desc = nullptr;
+		switch (entry.kind)
+		{
+		case ExpoCollisionEntryKind::Tile:
+			if (entry.index >= 0 && entry.index < g_TileSet.count)
+			{
+				desc = &g_TileSet.tiles[entry.index];
+			}
+			break;
+		case ExpoCollisionEntryKind::Far:
+			if (entry.index >= 0 && entry.index < g_TileSet.farCount)
+			{
+				desc = &g_TileSet.farTiles[entry.index];
+			}
+			break;
+		case ExpoCollisionEntryKind::Gate:
+			if (entry.index >= 0 &&
+				static_cast<size_t>(entry.index) < g_TileSet.pavilions.size())
+			{
+				desc = &g_TileSet.pavilions[static_cast<size_t>(entry.index)];
+			}
+			break;
+		default:
+			break;
+		}
+		if (!desc)
+		{
+			continue;
+		}
+		XMFLOAT3 position = RtcToWorldPosition(g_TileSet, *desc, g_EcefToEnu);
+		position.y += EXPO_BUILDING_Y_OFFSET;
+		Collision_SetWorld(entry.meshId, MakeWorldAt(position, g_MeshRotation));
+	}
 }
 
 static ExpoDrawJob* AddDrawJob(
@@ -1320,6 +1396,7 @@ static void CommitDrawJob(ExpoDrawJob* job)
 	{
 	case ExpoDrawKind::Floor:
 		g_ExpoFloor = model;
+		g_FloorBaseY = model->GetPos().y + EXPO_FLOOR_SINK;
 		break;
 	case ExpoDrawKind::Lod2:
 	case ExpoDrawKind::FallbackLod2:
@@ -1930,6 +2007,11 @@ static void PumpCollisionLoad(void)
 		{
 			*g_CollisionTargets[g_CollisionSlot] = meshId;
 		}
+		if (g_CollisionSlot >= 0 &&
+			static_cast<size_t>(g_CollisionSlot) < g_CollisionEntries.size())
+		{
+			g_CollisionEntries[static_cast<size_t>(g_CollisionSlot)].meshId = meshId;
+		}
 		g_CollisionSlot += 1;
 	}
 	else if (result == COLLISION_PUMP_FAILED)
@@ -2157,7 +2239,8 @@ static void KickoffLoad(void)
 	g_CollisionSlot = 0;
 	g_CollisionTargetCount = 0;
 	g_CollisionFinished = false;
-	auto QueueCollision = [](const ExpoTileDesc& desc, int* target) -> bool
+	g_CollisionEntries.clear();
+	auto QueueCollision = [](ExpoCollisionEntryKind kind, int index, const ExpoTileDesc& desc, int* target) -> bool
 	{
 		if (!FileExists(desc.path) ||
 			g_CollisionTargetCount >= EXPO_COLLISION_TARGET_MAX)
@@ -2174,6 +2257,7 @@ static void KickoffLoad(void)
 			return false;
 		}
 		g_CollisionTargets[g_CollisionTargetCount++] = target;
+		g_CollisionEntries.push_back({ kind, index, -1 });
 		return true;
 	};
 	if (g_HasEcefToEnu && g_HasMeshRotation)
@@ -2188,6 +2272,7 @@ static void KickoffLoad(void)
 				false))
 			{
 				g_CollisionTargets[g_CollisionTargetCount++] = &g_FloorCollisionId;
+				g_CollisionEntries.push_back({ ExpoCollisionEntryKind::Floor, 0, -1 });
 			}
 		}
 		if (g_TileSet.hasRing && FileExists(g_TileSet.ring.path))
@@ -2199,24 +2284,26 @@ static void KickoffLoad(void)
 				true))
 			{
 				g_CollisionTargets[g_CollisionTargetCount++] = &g_RingCollisionId;
+				g_CollisionEntries.push_back({ ExpoCollisionEntryKind::Ring, 0, -1 });
 			}
 		}
 		if (g_HasLod2)
 		{
 			for (int i = 0; i < g_TileSet.count; ++i)
 			{
-				QueueCollision(g_TileSet.tiles[i], nullptr);
+				QueueCollision(ExpoCollisionEntryKind::Tile, i, g_TileSet.tiles[i], nullptr);
 			}
 		}
 		for (int i = 0; i < g_TileSet.farCount; ++i)
 		{
-			QueueCollision(g_TileSet.farTiles[i], nullptr);
+			QueueCollision(ExpoCollisionEntryKind::Far, i, g_TileSet.farTiles[i], nullptr);
 		}
-		for (const ExpoTileDesc& pavilion : g_TileSet.pavilions)
+		for (int i = 0; i < static_cast<int>(g_TileSet.pavilions.size()); ++i)
 		{
+			const ExpoTileDesc& pavilion = g_TileSet.pavilions[static_cast<size_t>(i)];
 			if (IsHighDetailGatePath(pavilion.path))
 			{
-				QueueCollision(pavilion, nullptr);
+				QueueCollision(ExpoCollisionEntryKind::Gate, i, pavilion, nullptr);
 			}
 		}
 	}
@@ -2747,6 +2834,7 @@ void Field_Initialize(void)
 	g_CollisionFinished = false;
 	g_CollisionSlot = 0;
 	g_CollisionTargetCount = 0;
+	g_CollisionEntries.clear();
 	g_LoadedTiles = 0;
 	g_LoadedFarTiles = 0;
 	g_LoadedPavilions = 0;
@@ -3187,6 +3275,18 @@ void Field_DrawDebug(void)
 	ImGui::SliderFloat("Size", &g_PavilionLabelSize, 0.05f, 20.0f, "%.2f");
 	ImGui::ColorEdit4("Color", &g_PavilionLabelColor.x);
 	ImGui::SliderFloat("Height", &g_PavilionLabelWorldY, -50.0f, 0.0f, "%.2f");
+	ImGui::End();
+
+	ImGui::Begin("Expo Height");
+	bool heightChanged = false;
+	heightChanged |= ImGui::SliderFloat("Building Y", &EXPO_BUILDING_Y_OFFSET, -12.0f, -6.0f, "%.3f");
+	heightChanged |= ImGui::SliderFloat("Ring Y", &EXPO_RING_Y_OFFSET, -5.0f, 2.0f, "%.3f");
+	heightChanged |= ImGui::SliderFloat("Floor Sink", &EXPO_FLOOR_SINK, 0.0f, 0.5f, "%.3f");
+	if (heightChanged)
+	{
+		ApplyFixedYOffsets();
+		RefreshCollisionWorlds();
+	}
 	ImGui::End();
 #endif
 }

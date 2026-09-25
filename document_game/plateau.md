@@ -151,7 +151,7 @@ CityGML ZIP（v4）の内訳（エントリ約1161、うち appearance 画像866
 - 部分展開: `data_original/citygml/`（必要なJPGだけ。ZIP全展開はしない）
 - `udx/bldg/`: 建築物GML 5本。`gml:name`に「大屋根リング」は無い
 - `udx/frn/`: 都市設備。`51357370` と `51357380` に `gml:name`「大屋根リング」が156件
-- `udx/dem/`: 地形。床の初回実装では使わない（夢洲はほぼ平坦）
+- `udx/dem/`: 地形。床の起伏焼き付けに使う（6.5節）。会場の大半は緩いが北東に橋梁由来の高さがあるため起伏は±3.0mで切り詰める
 
 GML:
 
@@ -401,7 +401,7 @@ python tool/prepare_expo_floor.py
 python tool/prepare_expo_ring.py
 ```
 
-- 床: GeoTIFF 6枚を地理参照でつなぎ、公式範囲へ切り出してJPEG化した水平クアッドGLB。頂点は ECEF 相対を glTF Y-up に入れ、法線は大屋根リングと同じく ECEF 三角形から変換する。定数 `(0,1,0)` は実行時 ENU 後に横を向き太陽光が乗らないため使わない
+- 床: GeoTIFF 6枚を地理参照でつなぎ、公式範囲へ切り出してJPEG化したDEM起伏グリッドGLB。4m間隔（860x463、793,716面）で、頂点高は `2.0 + (dem - 中央値)` m。DEMは同じCityGML ZIPの `udx/dem/` 2本（TIN 47,551三角形）をZIPから直接読み、緯度経度格子で重心補間する。`srsName` はEPSG:6697と書かれているが実座標は緯度・経度・標高の順である。中央値は会場範囲内サンプルの `7.522` mで、`expo_floor.metadata.json` に残す。橋梁などのスパイクが壁にならないよう起伏は±3.0mで切り詰め、DEM被覆端では40m幅で起伏を0へなじませる。頂点は ECEF 相対を glTF Y-up に入れ、法線は大屋根リングと同じく ECEF 三角形から変換する。定数 `(0,1,0)` は実行時 ENU 後に横を向き太陽光が乗らないため使わない
 - リング: 同じ CityGML ZIP の `frn`。`gml:name`「大屋根リング」156件の `lod3Geometry` をECEF相対GLB化し、`appearance` の `ParameterizedTexture` / `TexCoordList` を `gml:id` で結合する。`LinearRing` に `gml:id` がある屋根面も対象にし、外形のIDが省略された面は `Polygon` IDから補完する
 - リングの画像は `4000_all.jpg` など、対象面が実際に参照する公式JPEGだけをZIPから読み、GLBへ埋め込む。画像付き面は公式UV、画像のない柵・階段などは `X3DMaterial` の `diffuseColor` を使う
 - CityGMLのUVは画像左下原点。glTFと実行時DirectXは左上原点なので、変換時に `v' = 1 - v` する。床オルソは最初から左上原点で書いている
@@ -568,8 +568,9 @@ ENUなしだと地面が傾き、`Y_UP_TO_Z_UP`なしだと建物が横倒しに
 次の機能は今後のタスクである。チェックリストは [task_list.md](task_list.md)。
 
 - `tileset.json`のLOD選択と、LOD3ストリーミングへの`boundingVolume`連携
-- CityGML `dem` による起伏
 - `null2` のミラーメンブレン（起動既定 512² 動的キューブマップと膜の揺れ。実装済み）
+
+CityGML `dem` による床起伏は実装済みである（6.5節。オルソ床へ相対起伏を焼く）。
 
 複数タイルの相対配置とENU水平化は実装済みである。読み込み済みの各 `Sprite3D` には
 モデルサイズから求めた境界球による保守的な視錐台カリングを適用する。

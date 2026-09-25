@@ -124,6 +124,11 @@ XMFLOAT3 Player_GetPos(void)
 	return g_Pos;
 }
 
+XMFLOAT3 Player_GetHalfExtents(void)
+{
+	return g_HalfExtents;
+}
+
 float Player_GetMoveSpeed(void)
 {
 	return g_MoveSpeed;
@@ -372,13 +377,13 @@ void Player_DrawDebug(void)
 	{
 		Player_ResetMoveSpeed();
 	}
-	if (ImGui::Button("原点に戻る"))
+	if (ImGui::Button("Warp to Origin"))
 	{
 		Player_WarpToStart();
 	}
 
 	const int ringCollisionId = Field_GetRingCollisionId();
-	if (ringCollisionId >= 0 && ImGui::Button("スロープへ"))
+	if (ringCollisionId >= 0 && ImGui::Button("Warp to Slope"))
 	{
 		XMFLOAT3 bmin = {};
 		XMFLOAT3 bmax = {};
