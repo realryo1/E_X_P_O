@@ -11,7 +11,7 @@
 ## 1. いまできること
 
 - 当たる対象は床、大屋根リング、LOD2建物、東西ゲート本体。東西ゲートだけは `expo_pavilion_east_gate.glb` / `expo_pavilion_west_gate.glb` の高精細形状を使い、そのワールドAABB内では重複するLOD2衝突を無効にする。それ以外のLOD3パビリオンは衝突対象にせずLOD2形状へ当てる。
-- 実行時は `asset/collision/*.bin` を優先して fread し、bin が無いときだけ対応する描画GLBを Assimp で読み込む。どちらもワーカーでワールド変換と XZ 格子を一括構築する。
+- 実行時は `asset/collision/*.bin` を優先して fread し、bin が無いときだけ対応する描画GLBを直接デコードする。どちらもワーカーでワールド変換と XZ 格子を一括構築する。初期ロードは最大2本。
 - 実動作の近傍判定は格子参照だけで、計測ではおよそ 300us。
 - リングの確定 Y オフセット `-1.550` は、ロード完了時の `Collision_SetWorld` が `yBias` だけずらす。実行時の高さスライダーは無い。
 - bin が無いときだけ描画GLBへフォールバックする（Assimp は三角形化・左手化・GlobalScale のみ。頂点結合はしない）。
@@ -37,12 +37,12 @@ LOD2建物の間引きによる簡略メッシュは未導入。リングだけ�
   └─ 描画GLBは別ワーカーで直接デコード
         │
         ▼
-ワーカー（1本、キュー順）
-  bin fread（無ければ Assimp）→ ローカル三角形化 → ワールド変換
+ワーカー（初期ロードは最大2本。完成は連番でキュー順へ戻す）
+  bin fread（無ければ描画GLBの直接デコード）→ ローカル三角形化 → ワールド変換
   → リングだけ格子桟を捨てる → XZ フラット格子
         │
         ▼
-Collision_Pump が完成メッシュを g_Meshes へ移す
+Collision_Pump が次の連番の完成メッシュを g_Meshes へ移す
         │
         ▼
 全描画と衝突が終わったら ApplyFixedYOffsets
@@ -90,8 +90,9 @@ void Collision_DrawWire(XMFLOAT3 center, XMFLOAT3 halfExtents);
 void Collision_DrawDebug(void);
 ```
 
-`Collision_StartAdd` は複数回呼べる。第3引数 `filterLattice` はリングだけ `true` にし、ワーカーはキューを順に処理する。
-`Collision_Pump` は完成したメッシュを1つ取り出す。戻り値は `IDLE` / `BUSY` / `DONE` / `FAILED`。
+`Collision_StartAdd` は複数回呼べる。第3引数 `filterLattice` はリングだけ `true` にする。
+初期ロードはワーカー2本で並列ベイクし、完成列はジョブ連番でキュー順へ戻してから `Collision_Pump` が取り出す。
+戻り値は `IDLE` / `BUSY` / `DONE` / `FAILED`。
 進捗の `stage` は `LOAD` / `TRANSFORM` / `GRID`。
 
 `Collision_SetWorld` は線形部分と XZ が同じなら Y 差分だけ `yBias` に足す。

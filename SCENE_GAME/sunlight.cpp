@@ -79,6 +79,8 @@ struct SunlightExtractedData
 
 static SunlightExtractedData g_ExtractedSunlight;
 static bool g_HasExtractedSunlight = false;
+static bool g_SunlightAssetsPrepared = false;
+static ID3D11ShaderResourceView* g_SkyTexture = nullptr;
 static float g_Azimuth = SUN_AZIMUTH_DEFAULT;
 static float g_Elevation = SUN_ELEVATION_DEFAULT;
 static XMFLOAT3 g_Color = SUN_FALLBACK_COLOR;
@@ -448,10 +450,57 @@ static void ApplySunlightState(void)
 	Field_SetSkyboxYaw(skyYaw);
 }
 
-void Sunlight_Initialize(void)
+static void PrepareSunlightAssets(void)
 {
+	if (g_SunlightAssetsPrepared)
+	{
+		Field_SetSkyboxTexture(g_SkyTexture);
+		return;
+	}
+
 	g_ExtractedSunlight = SunlightExtractedData();
 	g_HasExtractedSunlight = false;
+
+	HDRImageData hdrImage;
+	ID3D11ShaderResourceView* skyTexture = nullptr;
+	int pathLength = MultiByteToWideChar(
+		CP_ACP,
+		0,
+		SUN_HDR_TEXTURE_PATH,
+		-1,
+		nullptr,
+		0);
+	std::vector<wchar_t> widePath(
+		pathLength > 0 ? static_cast<size_t>(pathLength) : 1,
+		L'\0');
+	if (pathLength > 0 &&
+		MultiByteToWideChar(
+			CP_ACP,
+			0,
+			SUN_HDR_TEXTURE_PATH,
+			-1,
+			widePath.data(),
+			pathLength) > 0 &&
+		LoadHDRTextureForSky(widePath.data(), &hdrImage, &skyTexture))
+	{
+		g_SkyTexture = skyTexture;
+		Field_SetSkyboxTexture(g_SkyTexture);
+		if (ExtractSunlightFromHDR(hdrImage, &g_ExtractedSunlight))
+		{
+			g_HasExtractedSunlight = true;
+		}
+	}
+
+	g_SunlightAssetsPrepared = true;
+}
+
+void Sunlight_PrepareAssets(void)
+{
+	PrepareSunlightAssets();
+}
+
+void Sunlight_Initialize(void)
+{
 	g_Azimuth = SUN_AZIMUTH_DEFAULT;
 	g_Elevation = SUN_ELEVATION_DEFAULT;
 	g_Color = SUN_FALLBACK_COLOR;
@@ -482,35 +531,10 @@ void Sunlight_Initialize(void)
 	g_Null2Displace = NULL2_DISPLACE_DEFAULT;
 	g_Null2Normal = NULL2_NORMAL_DEFAULT;
 	g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
-
-	HDRImageData hdrImage;
-	ID3D11ShaderResourceView* skyTexture = nullptr;
-	int pathLength = MultiByteToWideChar(
-		CP_ACP,
-		0,
-		SUN_HDR_TEXTURE_PATH,
-		-1,
-		nullptr,
-		0);
-	std::vector<wchar_t> widePath(
-		pathLength > 0 ? static_cast<size_t>(pathLength) : 1,
-		L'\0');
-	if (pathLength > 0 &&
-		MultiByteToWideChar(
-			CP_ACP,
-			0,
-			SUN_HDR_TEXTURE_PATH,
-			-1,
-			widePath.data(),
-			pathLength) > 0 &&
-		LoadHDRTextureForSky(widePath.data(), &hdrImage, &skyTexture))
+	PrepareSunlightAssets();
+	if (g_HasExtractedSunlight)
 	{
-		Field_SetSkyboxTexture(skyTexture);
-		if (ExtractSunlightFromHDR(hdrImage, &g_ExtractedSunlight))
-		{
-			g_HasExtractedSunlight = true;
-			g_Azimuth = SUN_AZIMUTH_DEFAULT;
-		}
+		g_Azimuth = SUN_AZIMUTH_DEFAULT;
 	}
 	ApplySunlightState();
 }

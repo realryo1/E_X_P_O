@@ -34,6 +34,9 @@ private:
 	Sprite2D* m_pLoadProgressTrack;
 	Sprite2D* m_pLoadProgressFill;
 	DrawFont* m_pLoadProgressText;
+#if defined(_DEBUG)
+	DrawFont* m_pLoadDebugStatus;
+#endif
 
 public:
 	// コンストラクタ・デストラクタ

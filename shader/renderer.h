@@ -146,6 +146,7 @@ void FinalizeRenderer(void);
 
 void Clear(void);
 void Present(void);
+void Direct3D_WaitFrameLatency(void);
 
 ID3D11Device *GetDevice( void );
 ID3D11DeviceContext *GetDeviceContext( void );

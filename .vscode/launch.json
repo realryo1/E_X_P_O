@@ -30,6 +30,16 @@
             "preLaunchTask": "Build Release"
         },
         {
+            "name": "Debug (No Debugger)",
+            "type": "node-terminal",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "_NO_DEBUG_HEAP": "1"
+            },
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/tool/build.ps1\" -Configuration Debug -Run"
+        },
+        {
             "name": "Debug Clean (No Debugger)",
             "type": "node-terminal",
             "request": "launch",

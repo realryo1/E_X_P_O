@@ -134,7 +134,10 @@ public:
 
 	// ワーカーから呼ぶ。埋め込みテクスチャを CPU デコードする。D3D は触らない。
 	// skipTextureResize=true の場合は長辺2048pxへの縮小を行わない。
-	bool DecodeEmbeddedTextures(bool skipTextureResize = false);
+	// decodeWorkerCount=0 は従来の単一ワーカー、1以上は指定数で分割する。
+	bool DecodeEmbeddedTextures(
+		bool skipTextureResize = false,
+		unsigned int decodeWorkerCount = 0);
 
 	// テクスチャまたはメッシュを itemBudget 個まで GPU 化する。0=継続, 1=完了, -1=失敗。
 	int PumpGpu(ID3D11Device* pDevice, int itemBudget);

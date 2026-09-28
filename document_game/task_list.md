@@ -2,8 +2,7 @@
 
 基準日: 2026年9月15日
 
-いま何ができて、どう操作し、どのファイルを触るかは
-[game_specification.md](game_specification.md) に書く。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、ドットバイドット3D＋既定オフのSSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA 向け DrawIndexed 削減、Present 後ストリーミング、高性能GPU選択、VRAM予算と失敗backoff、タイトル中の初期ロード先行まで実装完了。Cursor での実速度計測は CodeLLDB ではなく `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 この資料は進捗と、次に何をするかだけを持つ。
 描画・ライティング仕様は [rendering_and_lighting.md](rendering_and_lighting.md)、
 BGM / SE は [audio_needs.md](audio_needs.md)、
@@ -11,7 +10,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 
 ## いまここ
 
-会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、ドットバイドット3D＋既定オフのSSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA 向け DrawIndexed 削減、Present 後ストリーミング、高性能GPU選択、VRAM予算と失敗backoffまで実装完了。Cursor での実速度計測は CodeLLDB ではなく `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
+会場都市モデル（LOD2/未パンチ遠景/LOD3ストリーミング）、描画モデル単位および3D Tiles単位の視錐台カリング、空飛ぶタクシーのホバー飛行と床・リングAABB衝突、全モデルのPBRシェーディング、局所3段CSMシャドウ、ドットバイドット3D＋既定オフのSSAO、HDR太陽光抽出・スカイドーム同期、コース作成およびレース計測、ゲーム内 BGM / SE、NVIDIA 向け DrawIndexed 削減、Present 後ストリーミング、高性能GPU選択、VRAM予算と失敗backoff、タイトル中の初期ロード先行まで実装完了。Cursor での実速度計測は CodeLLDB ではなく `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。確定仕様は [game_specification.md](game_specification.md) と [rendering_and_lighting.md](rendering_and_lighting.md) を参照。
 
 現在保留・未着手の主要項目は、衝突メッシュ間引き、機体アニメーション、会場全体のIBL・昼夜サイクルである。距離＋高度フォグは実装済み。`null2` は動的キューブマップ鏡面を実装済み。メニュー BGM と一部 SE（ワープ、中断、着地、出現）はファイル未配置のため無音。
 
@@ -22,7 +21,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - 衝突メッシュの間引きは未着手（必要に応じて検討）。
 - 機体アニメーション（`flytaxi.glb` のアニメーション接続）は未着手。
 - IBL、昼夜サイクル、プレイヤーへの環境マッピングは未着手。距離＋高度フォグと null2 の動的キューブマップ鏡面は実装済み。
-- `SCENE_TITLE` と `SCENE_RESULT` はプレースホルダーのまま。
+- `SCENE_TITLE` と `SCENE_RESULT` は本編画面として実装済み。タイトルは初期フィールドの先行ロードも行う。
 
 ---
 
@@ -80,7 +79,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] 諸々整備してgithubへ上げる（手動）
 - [x] `gpu-adapter-high-performance`: Auto でも `EnumAdapterByGpuPreference(HIGH_PERFORMANCE)`。出力所有権では選ばない
 - [x] `internal-3d-resolution`: 3Dはバックバッファと同解像度（ドットバイドット）。UIはウィンドウ実サイズ
-- [x] `streaming-vram-retry`: 失敗backoff（最大3回）、VRAM 85%でPresent後ポンプ停止、GPU時間はReleaseでも計測、インポート／デコードは各1スレッド
+- [x] `streaming-vram-retry`: 失敗backoff（最大3回）、VRAM 85%でPresent後ポンプ停止、GPU時間はReleaseでも計測、初期ロードはインポート3・テクスチャデコード2・衝突2、ストリーミングは各1スレッド
 - [x] `taxi-merged-shadow`: `flytaxi.glb` を0フレーム焼きのあとマテリアル結合。8MB以下だけ結合シャドウ
 - [x] `cursor-no-debugger-run`: 実行とデバッグの `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
 - [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
@@ -90,7 +89,8 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] オルソ床に起伏を付ける（CityGML dem TINの相対起伏を4mグリッドへ焼く。中央値基準、±3.0m切詰、被覆端40mなじませ）
 - [ ] ウォータープラザに波と噴水を
 - [ ] LOD3モデルの読み込みをさらに高速化したい
-- [ ] ロード短縮
+- [x] ロード短縮（タイトル中のフィールド／HDR／スカイドーム先行、初期ロードのインポート3・テクスチャ2・衝突2ワーカー化）
+- [x] Debug専用ロード進捗表示（タイトル左下 `TITLE PRELOAD`、フェード前面 `GAME LOAD`。`Field_GetLoadStatus`）
 
 ---
 

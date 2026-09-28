@@ -14,6 +14,7 @@ struct SunlightPhotoSettings
 
 void Sunlight_Initialize(void);
 void Sunlight_Finalize(void);
+void Sunlight_PrepareAssets(void);
 void Sunlight_Update(void);
 void Sunlight_Apply(void);
 void Sunlight_DrawDebug(void);

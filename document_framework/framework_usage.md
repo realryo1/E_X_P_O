@@ -87,14 +87,14 @@ SAFE_DELETE(g_pNaiyo);
 - バックバッファ: クライアント領域サイズ、Flipモデル2枚（`DXGI_SWAP_EFFECT_FLIP_DISCARD`）
 - 目標固定更新: `FPS` = `60`
 - 実行時パス基準: カレントディレクトリ
-- 現在の初期シーン: `SCENE_GAME`（`app/scene.cpp`）。`SCENE_TITLE`はプレースホルダーとして残っている
+- 現在の初期シーン: `SCENE_TITLE`（`app/scene.cpp`）。タイトル表示中にフィールド初期ロード、4K HDR、スカイドームを先行し、決定後に `SCENE_GAME` へ引き渡す
 
 | ディレクトリ | 内容 |
 | :--- | :--- |
 | `app/` | 共通定数とシーン管理 |
 | `framework/` | 入力、カメラ、モデル、テクスチャ、音声、メインループ |
 | `shader/` | Direct3D 11 レンダラー、シェーダー |
-| `SCENE_TITLE/` `SCENE_GAME/` `SCENE_RESULT/` | 通常シーン。`SCENE_GAME` は `game.cpp` が呼び出し列、場は `field.cpp`、ホバー移動は `player.cpp`、三人称は `playercamera.cpp`、HUD は `ui.cpp` |
+| `SCENE_TITLE/` `SCENE_GAME/` `SCENE_RESULT/` | 通常シーン。`SCENE_TITLE` は `title.cpp` が先行ロード、`SCENE_GAME` は `game.cpp` が呼び出し列、場は `field.cpp`、ホバー移動は `player.cpp`、三人称は `playercamera.cpp`、HUD は `ui.cpp` |
 | `SCENE_DEBUG/` | Debugビルド専用の検証シーン |
 | `asset/` | 実行時アセット |
 | `tool/` | 開発用ツール |
@@ -137,7 +137,7 @@ SAFE_DELETE(g_pNaiyo);
 
 描画は論理更新が1回以上あり、かつ `NeedsPresent` が真のときだけ。要求されるのは起動ウォームアップ、`RequestRedraw`、フェード中、Debug の `SCENE_DEBUG`。静止した通常シーンは `Clear` / `Present` を間引く。
 
-描画フレームの順: ImGui開始 → `Clear` → `SetWorldViewProjection2D` → シーン `Draw` → `SetDepthEnable(false)` とフェード → ImGui → `Present(1, 0)` → シーンの `PumpAfterPresent`（`SCENE_GAME` のみ。初期ロード完了後の GLB GPU 化）。
+描画フレームの順: ImGui開始の前に `Direct3D_WaitFrameLatency`（Flip の待ちハンドル、最大1フレーム） → ImGui開始 → `Clear` → `SetWorldViewProjection2D` → シーン `Draw` → `SetDepthEnable(false)` とフェード → ImGui → `Present(1, 0)` → シーンの `PumpAfterPresent`（`SCENE_GAME` のみ。初期ロード完了後の GLB GPU 化）。
 スワップチェーンは Flip モデルのため、`Present()` 成功後に `IDXGISwapChain3::GetCurrentBackBufferIndex()` で次のバックバッファを取得し、
 対応する RTV を `OMSetRenderTargets()` へ再設定する。次フレームの `Clear` と描画は、その RTV に対して行われる。
 
@@ -320,11 +320,13 @@ Assimpの法線生成フラグも付けず、GLBに法線が無ければ既定�
 ただし `expo_floor.glb` は例外として縮小せず、生成時の最大8192pxを維持する。
 8192×8192のRGBAテクスチャはGPU上で約256MBを使用するため、床以外のGLBにはこの例外を適用しない。
 ゲーム側のストリーミングでは、初期ロード中のGPU化とリソース破棄を1フレーム6ms
-（フェード中は最大40ms）で進める。初期完了後は `Present` のあと最大3ms。
-直前フレームの CPU 描画が 8ms 超、または GPU が 8ms 超ならそのフレームはポンプしない。
-GPU タイムスタンプ Query は Release でも有効である。ローカル VRAM 使用量が予算の 85% を超えたら
-Present 後の追加アップロードを止める。パビリオン失敗は最大 3 回、5 秒単位の間隔で再試行する。
-同時インポートとテクスチャデコードは各 1 スレッド。
+（フェード中は最大40ms）で進める。初期完了後は `Present` のあと通常最大3ms。
+直前フレームの CPU 描画またはGPUが 8ms 超でも、1msの縮退予算で破棄とGPU化を継続する。
+DXGIのLOCALとNON_LOCALを合算したVRAM使用量が予算の85%を超えたら追加GPU化だけを止め、
+範囲外パビリオンの破棄は続ける。GPU タイムスタンプ Query は Release でも有効である。
+パビリオン失敗は最大 3 回、5 秒単位の間隔で再試行する。
+タイトル中およびフェード中の初期ロードはインポート最大3、テクスチャデコード最大2、
+衝突ベイク2ワーカーで進め、初期ロード完了後のストリーミングは各1スレッドへ戻す。
 描画と同じフレームの先頭で `UpdateSubresource` すると、NVIDIA では続く `DrawIndexed` が待ちやすい。
 `SCENE_GAME`の万博GLBは `GlbModel::ImportPreparedFile` がGLB 2.0のJSON/BIN、
 `bufferView.byteStride`、Accessorの`byteOffset`、u8/u16/u32インデックスを直接検証する。
@@ -349,9 +351,10 @@ GLB のテクスチャが無い、または SRV を作れないマテリアル�
 `Sprite3D::DrawShadowMap` は `SetCastShadow(true)` のモデルだけ深度を書く。GLB は `GlbModel::DrawShadowMap` へ渡し、影用 XZ セルがある場合は注視点周辺のセルだけを描く。`SetReceiveShadow(true)` の GLB は `S_PBR` の `Parameter.w` で ShadowMap を読む。
 
 万博GLBの直接デコードに失敗した場合は、壊れた頂点バッファを作らずロード失敗として扱う。
-`SCENE_GAME`のロード表示には、CPU実行中の`IN`、CPU準備済みの`READY`、
-GPU転送中の`GPU`を分けて表示する。カタールと中国は、stride付き属性と32bitインデックスの
-回帰確認用モデルである。
+`SCENE_GAME`のロード表示には、CPU実行中のインポート、CPU準備済み、GPU転送中を分けて表示する。
+Debugビルドではタイトル左下に `TITLE PRELOAD |` と `Field_GetLoadStatus`、フェード前面に
+`GAME LOAD |` と同じ文字列を `DrawFont` で出す。Releaseでは出さない。カタールと中国は、
+stride付き属性と32bitインデックスの回帰確認用モデルである。
 
 `Sprite3D::Draw()` の先頭では、モデル空間の AABB 中心・サイズをワールド変換して保守的な境界球を計算し、
 視錐台の外側にあるモデルを描画しない。FBX と GLB の両方に共通で適用され、画面外・カメラの
@@ -369,13 +372,13 @@ Near / Far 外にある大きなモデルの描画コストを抑える。`AnimS
 GPU化と破棄はゲーム更新中（初期ロード）または Present 後（ストリーミング継続）の
 時間予算に分割するため、移動先の建物がロードされても更新と描画を長時間占有しない。
 
-LOD3パビリオンの距離判定はカメラ、視線先予測点、移動先予測点のXZ距離に、既知のモデルXZ半径を足す。
-開始はロード半径 48、破棄は半径 72（ワールド単位）。視線方向（半頂角60°）は半径をさらに32足して
-先行開始する。初期優先ロードは `expo_pavilion_null2.glb`、`expo_pavilion_dynamic_equilibrium.glb`、
+LOD3パビリオンの開始判定はカメラ、視線先予測点、移動先予測点のXZ距離に、モデルXZ半径か `streamRadius` を足す。
+開始はロード半径 48、常駐破棄はカメラXZのみ半径 72（ワールド単位）。視線方向（半頂角60°）は半径をさらに32足して
+先行開始するが、破棄には使わない。初期優先ロードは `expo_pavilion_null2.glb`、`expo_pavilion_dynamic_equilibrium.glb`、
 `expo_pavilion_expo_related_31.glb`、`expo_pavilion_expo_related_25.glb`、`expo_pavilion_angola.glb`、
 `expo_pavilion_czech.glb` をこの順で床・LOD2・リングと
 同じ初期完了条件に含め、明転前に最優先でGPU化する。CPUインポートはロード半径内だけ始め、
-GPU化は破棄半径内まで進める。
+GPU化はカメラの破棄半径内まで進める。
 ヒステリシス帯に残った READY はインポート枠を塞がず、視線先と近い棟の新規開始を優先する。
 範囲外で無効化した未完了ジョブは、再び範囲内へ戻ったら同じジョブを再開する。
 ファイル無し以外の失敗も、再接近でやり直す。
@@ -597,6 +600,7 @@ FADESTAT state = GetFadeState();
 通知後に通常のウォームアップを経て `FADE_IN` へ進む。
 保留中に `Fade_SetLoadProgress()` を更新すると、`Fade_Draw()` が全画面フェードの
 前面へプログレスバーと残り割合を描画する。ロード完了後は表示を終了する。
+Debugビルドでは同じ前面へ `GAME LOAD |` と `Field_GetLoadStatus` を追加する。Releaseでは出さない。
 
 シーン列挙は [`app/scene.h`](../app/scene.h):
 
@@ -611,6 +615,7 @@ SCENE_DEBUG
 
 `SCENE_DEBUG` は `SCENE_MAX` より後ろなので、通常シーン用のキャッシュ配列に含まれない。
 公開遷移は `SetSceneFade`。完了後に `ApplySceneInternal` が旧シーン `Finalize`、ID更新、新シーン `Init`、`RequestRedraw` を実行する。
+`SCENE_TITLE` から `SCENE_GAME` だけは `Title_Finalize` のみ行い、先行した `Field` を破棄しない。DEBUGへ行くときは先行データを破棄する。RESULTからTITLEへ戻ったあとは、ゲーム終了時の `Field_Finalize` のあとで再度先行する。
 ゲーム内容は [game_specification.md](../document_game/game_specification.md)。入力は [input.md](input.md)。
 
 ---
@@ -638,7 +643,7 @@ Present 後はバックバッファだけをバインドする。
 カリングで描画が軽くなっても、モデル単位カリングだけではリソースは解放されないため、
 距離ストリーミングが範囲外のGPUバッファとテクスチャを破棄する。
 CPU準備済みモデルはGPU待ちキューとして別に数え、ワーカー数をGPU待ちで塞がない。
-GPU待ちは破棄半径内だけを枠に数え、ロード半径外の READY が近景の開始を止めない。
+GPU待ちはカメラの破棄半径内だけを枠に数え、ロード半径外の READY が近景の開始を止めない。
 初期完了後の GPU アップロードは `Present` の後へ送る。
 
 LOD2本体と未パンチLOD2遠景では、`boundingVolume.region` による描画時タイルカリングを使う。

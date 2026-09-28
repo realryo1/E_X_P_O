@@ -6,9 +6,11 @@
 
 void Field_Initialize(void);
 void Field_Finalize(void);
+void Field_PumpPreload(void);
 void Field_PumpLoad(void);
 void Field_PumpAfterPresent(double lastDrawMs, float lastGpuMs);
 bool Field_IsLoadComplete(void);
+bool Field_IsInitialized(void);
 float Field_GetInitialLoadProgress(void);
 void Field_Draw(void);
 void Field_DrawProbeScene(void);

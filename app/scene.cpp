@@ -1,5 +1,6 @@
 ﻿#include "scene.h"
 #include "game.h"
+#include "field.h"
 #include "renderer.h"
 #include "keyboard.h"
 #include "texture.h"
@@ -125,6 +126,7 @@ void Finalize( void )
 	{
 		case SCENE_TITLE:
 		Title_Finalize();
+		Field_Finalize();
 		break;
 		case SCENE_GAME:
 		Game_Finalize();
@@ -154,7 +156,16 @@ void ApplySceneInternal( SCENE id )
 	}
 #endif
 
-	Finalize();
+	const SCENE previousScene = scene;
+	if (previousScene == SCENE_TITLE && id == SCENE_GAME)
+	{
+		// TITLE 先行ロードの結果を SCENE_GAME へ引き渡す。
+		Title_Finalize();
+	}
+	else
+	{
+		Finalize();
+	}
 
 	scene = id;
 

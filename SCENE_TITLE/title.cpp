@@ -7,32 +7,15 @@
 #include "scene.h"
 #include "sprite2d.h"
 #include "sound.h"
+#include "field.h"
+#include "sunlight.h"
 #include "main.h"
 #include <cmath>
 #include <Windows.h>
 #include <fstream>
+#include <string>
 
 using namespace DirectX;
-
-// #region agent log
-static void Title_DebugLog(
-	const char* hypothesisId,
-	const char* location,
-	const char* message,
-	const char* data)
-{
-	std::ofstream log(
-		"C:\\Users\\realryo1\\Desktop\\E_X_P_O\\debug-cd8cfb.log",
-		std::ios::app);
-	if (log)
-	{
-		log << "{\"sessionId\":\"cd8cfb\",\"runId\":\"pre-fix\",\"hypothesisId\":\""
-			<< hypothesisId << "\",\"location\":\"" << location
-			<< "\",\"message\":\"" << message << "\",\"data\":" << data
-			<< ",\"timestamp\":" << GetTickCount64() << "}\n";
-	}
-}
-// #endregion
 
 enum TitleAnimPhase
 {
@@ -48,6 +31,9 @@ static Sprite2D* g_pTaxi = nullptr;
 static DrawFont* g_pExpoText = nullptr;
 static DrawFont* g_pRaceText = nullptr;
 static DrawFont* g_pHintText = nullptr;
+#if defined(_DEBUG)
+static DrawFont* g_pLoadDebugText = nullptr;
+#endif
 static ClickFont* g_pDebugButton = nullptr;
 static SoundData* g_pTitleAppearSe = nullptr;
 static SoundData* g_pTitleBgm = nullptr;
@@ -86,6 +72,8 @@ void Title_Initialize(void)
 	g_AnimPhase = TITLE_ANIM_WAIT;
 	g_AnimT = 0.0f;
 	g_BobTime = 0.0f;
+	Field_Initialize();
+	Sunlight_PrepareAssets();
 
 	g_pBackground = new Sprite2D(
 		{ SCREEN_X / 2.0f, SCREEN_Y / 2.0f },
@@ -130,6 +118,16 @@ void Title_Initialize(void)
 	);
 
 #if defined(_DEBUG)
+	g_pLoadDebugText = new DrawFont(
+		{ 28.0f, SCREEN_Y - 82.0f },
+		16.0f,
+		0.0f,
+		{ 1.0f, 0.85f, 0.25f, 1.0f },
+		"TITLE PRELOAD",
+		TA_START);
+#endif
+
+#if defined(_DEBUG)
 	g_pDebugButton = new ClickFont(
 		{ SCREEN_X - 80.0f, 40.0f },
 		24.0f,
@@ -146,15 +144,27 @@ void Title_Initialize(void)
 
 void Title_Update(void)
 {
+	Field_PumpPreload();
+
+#if defined(_DEBUG)
+	if (g_pLoadDebugText)
+	{
+		char status[768] = {};
+		if (Field_IsLoadComplete())
+		{
+			Field_GetFinishedStatus(status, sizeof(status));
+		}
+		else
+		{
+			Field_GetLoadStatus(status, sizeof(status));
+		}
+		g_pLoadDebugText->SetText(
+			std::string("TITLE PRELOAD | ") + status);
+	}
+#endif
+
 	if (Input_IsActionTrigger(INPUT_ACTION_DECIDE))
 	{
-		// #region agent log
-		Title_DebugLog(
-			"H7",
-			"SCENE_TITLE/title.cpp:Title_Update",
-			"decide_triggered",
-			"{\"target\":\"SCENE_GAME\"}");
-		// #endregion
 		SetSceneFade(SCENE_GAME);
 	}
 
@@ -243,6 +253,9 @@ void Title_Draw(void)
 	if (g_pExpoText) g_pExpoText->Draw();
 	if (g_pRaceText) g_pRaceText->Draw();
 	if (g_pHintText) g_pHintText->Draw();
+#if defined(_DEBUG)
+	if (g_pLoadDebugText) g_pLoadDebugText->Draw();
+#endif
 	if (g_pDebugButton) g_pDebugButton->Draw();
 }
 
@@ -253,6 +266,9 @@ void Title_Finalize(void)
 	SAFE_DELETE(g_pExpoText);
 	SAFE_DELETE(g_pRaceText);
 	SAFE_DELETE(g_pHintText);
+#if defined(_DEBUG)
+	SAFE_DELETE(g_pLoadDebugText);
+#endif
 	SAFE_DELETE(g_pDebugButton);
 	StopSound(g_pTitleBgm);
 	UnloadSound(g_pTitleAppearSe);

@@ -10,11 +10,13 @@
 #include "renderer.h"
 #include "mouse.h"
 #include "debug_ostream.h"
+#include "../SCENE_GAME/field.h"
 #include <Windows.h>
 #include <psapi.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 using namespace DirectX;
 
 
@@ -43,6 +45,9 @@ Fade::Fade()
 	m_pLoadProgressTrack(nullptr),
 	m_pLoadProgressFill(nullptr),
 	m_pLoadProgressText(nullptr)
+#if defined(_DEBUG)
+	, m_pLoadDebugStatus(nullptr)
+#endif
 {
 	m_pLoadProgressTrack = new Sprite2D(
 		{ SCREEN_X / 2.0f, SCREEN_Y / 2.0f + 34.0f },
@@ -64,6 +69,15 @@ Fade::Fade()
 		0.0f,
 		{ 0.05f, 0.05f, 0.05f, 1.0f },
 		"残り 100%");
+#if defined(_DEBUG)
+	m_pLoadDebugStatus = new DrawFont(
+		{ SCREEN_X / 2.0f, SCREEN_Y / 2.0f + 78.0f },
+		16.0f,
+		0.0f,
+		{ 0.95f, 0.85f, 0.25f, 1.0f },
+		"GAME LOAD",
+		TA_MIDDLE);
+#endif
 }
 
 // デストラクタ
@@ -72,6 +86,9 @@ Fade::~Fade()
 	SAFE_DELETE(m_pLoadProgressTrack);
 	SAFE_DELETE(m_pLoadProgressFill);
 	SAFE_DELETE(m_pLoadProgressText);
+#if defined(_DEBUG)
+	SAFE_DELETE(m_pLoadDebugStatus);
+#endif
 }
 
 // 更新処理
@@ -248,6 +265,16 @@ void Fade::DrawLoadProgress()
 	{
 		m_pLoadProgressText->Draw();
 	}
+#if defined(_DEBUG)
+	if (m_pLoadDebugStatus)
+	{
+		char status[768] = {};
+		Field_GetLoadStatus(status, sizeof(status));
+		m_pLoadDebugStatus->SetText(
+			std::string("GAME LOAD | ") + status);
+		m_pLoadDebugStatus->Draw();
+	}
+#endif
 }
 
 // 状態取得

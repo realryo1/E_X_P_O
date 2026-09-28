@@ -66,7 +66,8 @@ bool Input_IsActionTrigger(Input_Action action);  // 押した瞬間
 ### SCENE_TITLE（`title.cpp`）
 * Decide で `SetSceneFade(SCENE_GAME)`
 * 使用アクション: `INPUT_ACTION_DECIDE`
-* プレースホルダ
+* 表示中に `Field_PumpPreload` を回し、初期フィールドを先行する
+* Debugビルドは右上 `DEBUG` で `SCENE_DEBUG`。左下に先行ロード状況を `DrawFont` で出す
 
 ### SCENE_GAME（ホバー移動は `player.cpp`、視点と旋回入力は `playercamera.cpp`）
 * `Course_Update` が `Esc` / パッドSTARTでゲーム内メニューを開閉する。ルート以外では同じキーで一覧から戻る。メニュー中の選択はクリック、矢印キー、十字キー。決定は `Enter` / パッドA / 行クリックで、いずれも `kettei.mp3` を鳴らす。`W` / `Space` / 左スティックと左右キーはコース切替に使わない。開いた直後とページ遷移直後は押しっぱなし入力を無視する
@@ -87,7 +88,6 @@ bool Input_IsActionTrigger(Input_Action action);  // 押した瞬間
 ### SCENE_RESULT（`result.cpp`）
 * Decide で `SetSceneFade(SCENE_TITLE)`
 * 使用アクション: `INPUT_ACTION_DECIDE`
-* プレースホルダ
 
 ### SCENE_DEBUG（`SCENE_DEBUG/debugscene.cpp`）
 * **Tab**: サブシーン切替（MODEL → LIGHTING）

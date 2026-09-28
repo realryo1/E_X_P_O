@@ -161,7 +161,7 @@ def unpack_indices(gltf: dict[str, Any], blob: bytes, index: int) -> list[int]:
 def extract_mesh(
     gltf: dict[str, Any],
     blob: bytes,
-) -> tuple[list[tuple[float, float, float]], list[int]]:
+) -> tuple[list[tuple[float, float, float]], list[int], list[int] | None]:
     nodes = gltf.get("nodes", [])
     meshes = gltf.get("meshes", [])
     scenes = gltf.get("scenes", [])
@@ -170,8 +170,11 @@ def extract_mesh(
 
     positions: list[tuple[float, float, float]] = []
     indices: list[int] = []
+    triangle_batch_ids: list[int] = []
+    has_batch_ids = False
 
     def visit(node_index: int, parent: list[float]) -> None:
+        nonlocal has_batch_ids
         node = nodes[node_index]
         world = mat4_mul(parent, node_matrix(node))
         if "mesh" in node:
@@ -184,6 +187,22 @@ def extract_mesh(
                 if "POSITION" not in attrs:
                     continue
                 pos_vals = unpack_values(gltf, blob, int(attrs["POSITION"]))
+                batch_attr = next(
+                    (
+                        name
+                        for name in ("_BATCHID", "_FEATURE_ID_0", "FEATURE_ID_0")
+                        if name in attrs
+                    ),
+                    None,
+                )
+                batch_vals = (
+                    unpack_values(gltf, blob, int(attrs[batch_attr]))
+                    if batch_attr is not None
+                    else None
+                )
+                if batch_vals is not None and len(batch_vals) != len(pos_vals):
+                    batch_vals = None
+                has_batch_ids |= batch_vals is not None
                 base = len(positions)
                 for px, py, pz, *rest in pos_vals:
                     positions.append(transform_point(world, px, py, pz))
@@ -194,29 +213,57 @@ def extract_mesh(
                 if len(local) % 3 != 0:
                     continue
                 indices.extend(base + i for i in local)
+                for i in range(0, len(local) - 2, 3):
+                    if batch_vals is None:
+                        triangle_batch_ids.append(0xFFFFFFFF)
+                        continue
+                    ids = [int(batch_vals[local[i + j]][0]) for j in range(3)]
+                    counts = {value: ids.count(value) for value in set(ids)}
+                    triangle_batch_ids.append(
+                        max(counts, key=counts.get)
+                        if max(counts.values()) >= 2
+                        else 0xFFFFFFFF
+                    )
         for child in node.get("children", []):
             visit(int(child), world)
 
     identity = mat4_identity()
     for root in roots:
         visit(int(root), identity)
-    return positions, indices
+    return positions, indices, triangle_batch_ids if has_batch_ids else None
 
 
 def write_collision_bin(
     path: Path,
     positions: list[tuple[float, float, float]],
     indices: list[int],
+    triangle_batch_ids: list[int] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     vertex_count = len(positions)
     triangle_count = len(indices) // 3
+    has_batch_ids = (
+        triangle_batch_ids is not None
+        and len(triangle_batch_ids) >= triangle_count
+    )
     with path.open("wb") as file:
-        file.write(struct.pack("<4sIIII", MAGIC, VERSION, vertex_count, triangle_count, 0))
+        file.write(
+            struct.pack(
+                "<4sIIII",
+                MAGIC,
+                VERSION,
+                vertex_count,
+                triangle_count,
+                1 if has_batch_ids else 0,
+            )
+        )
         for x, y, z in positions:
             file.write(struct.pack("<fff", x, y, z))
         for index in indices[: triangle_count * 3]:
             file.write(struct.pack("<I", index))
+        if has_batch_ids:
+            for batch_id in triangle_batch_ids[:triangle_count]:
+                file.write(struct.pack("<I", batch_id))
 
 
 def export_collision_bin(glb_path: Path, output_dir: Path | None = None) -> Path | None:
@@ -225,12 +272,18 @@ def export_collision_bin(glb_path: Path, output_dir: Path | None = None) -> Path
         print(f"GLBがありません: {glb_path}")
         return None
     gltf, blob = read_glb(glb_path)
-    positions, indices = extract_mesh(gltf, blob)
+    positions, indices, triangle_batch_ids = extract_mesh(gltf, blob)
     if not positions or len(indices) < 3:
         print(f"三角形がありません: {glb_path}")
         return None
     dest = collision_path_for_glb(glb_path, output_dir)
-    write_collision_bin(dest, positions, indices)
+    is_full_lod2 = glb_path.name.startswith("expo_tile_lod2_data")
+    write_collision_bin(
+        dest,
+        positions,
+        indices,
+        triangle_batch_ids if is_full_lod2 else None,
+    )
     print(f"{glb_path.name}: verts {len(positions)} tris {len(indices) // 3} -> {dest}")
     return dest
 

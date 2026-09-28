@@ -32,7 +32,7 @@ BGM / SE のパスと発火地点は
 
 進捗と次の作業は [task_list.md](task_list.md)。当たり判定は [collision.md](../document_framework/collision.md)。会場モデルは [plateau.md](plateau.md)。描画詳細は [rendering_and_lighting.md](rendering_and_lighting.md)。
 
-起動時は `SCENE_GAME`（`SCENE_TITLE` から決定入力で遷移した場合も同様）。オルソ床、パンチ済みLOD2葉タイル、未パンチLOD2遠景補完、大屋根リング、LOD3の全名前付き近景パビリオンを重ね、空飛ぶタクシーのホバー移動と床・リング・LOD2建物衝突まで利用できる。未パンチLOD2遠景はLOD3がGPU化されるまで表示し、対応するLOD3が常駐した棟のバッチ単位で排他表示するが、衝突メッシュは常時保持する。LOD3パビリオンは原則描画専用で、建物の衝突形状はLOD2を使う。ただし東西ゲート本体は高精細モデルを使い、ゲートのワールドAABB内では重複するLOD2衝突を無効にする。プレイヤーは `asset/model/flytaxi.glb` を表示長辺約0.8に調整する。スカイドーム以外のモデルは共通の `S_PBR` で描画し、glTFのPBRマテリアルを適用する。スカイドームはワールド方向からHDRの正距円筒UVを計算する `S_SKYBOX`。床、パンチ済みLOD2、リング、タクシーがShadowMapへ投影し、LOD3パビリオン・プレースホルダーを含む全対象モデルが影を受ける。遠景LOD2は影パスから除外する。LOD3表示中も建物の影はパンチ済みLOD2を投影元にする。3Dはウィンドウ実サイズのシーンRTへドットバイドットで描き、SSAOは既定オフ。オン時はシーンの1/4解像度AOを合成する。Player用ImGui「Warp to Slope」でリング上へワープできる。描画GLBはAccessor直接デコードを並列実行し、衝突は `asset/collision/*.bin` を優先し、無い場合はGLBフォールバックをワーカーでベイクする。`null2` は動的キューブマップで鏡面反射する。
+起動時は `SCENE_TITLE` から決定入力で `SCENE_GAME` へ遷移する。タイトル表示中に初期フィールド、HDR、スカイドームを先行ロードし、オルソ床、パンチ済みLOD2葉タイル、未パンチLOD2遠景補完、大屋根リング、LOD3の全名前付き近景パビリオンを重ね、空飛ぶタクシーのホバー移動と床・リング・LOD2建物衝突まで利用できる。未パンチLOD2遠景はLOD3がGPU化されるまで表示し、対応するLOD3が常駐した棟のバッチ単位で排他表示するが、衝突メッシュは常時保持する。LOD3パビリオンは原則描画専用で、建物の衝突形状はLOD2を使う。ただし東西ゲート本体は高精細モデルを使い、ゲートのワールドAABB内では重複するLOD2衝突を無効にする。プレイヤーは `asset/model/flytaxi.glb` を表示長辺約0.8に調整する。スカイドーム以外のモデルは共通の `S_PBR` で描画し、glTFのPBRマテリアルを適用する。スカイドームはワールド方向からHDRの正距円筒UVを計算する `S_SKYBOX`。床、パンチ済みLOD2、リング、タクシーがShadowMapへ投影し、LOD3パビリオン・プレースホルダーを含む全対象モデルが影を受ける。遠景LOD2は影パスから除外する。LOD3表示中も建物の影はパンチ済みLOD2を投影元にする。3Dはウィンドウ実サイズのシーンRTへドットバイドットで描き、SSAOは既定オフ。オン時はシーンの1/4解像度AOを合成する。Player用ImGui「Warp to Slope」でリング上へワープできる。描画GLBはAccessor直接デコードを並列実行し、衝突は `asset/collision/*.bin` を優先し、無い場合はGLBフォールバックをワーカーでベイクする。`null2` は動的キューブマップで鏡面反射する。
 
 ### できること
 
@@ -66,8 +66,9 @@ BGM / SE のパスと発火地点は
 
 | ファイル | 役割 |
 | :--- | :--- |
+| [`SCENE_TITLE/title.cpp`](../SCENE_TITLE/title.cpp) | タイトル2D。`Field_Initialize` / `Sunlight_PrepareAssets` / `Field_PumpPreload`。Debugビルドは左下に `TITLE PRELOAD` と `Field_GetLoadStatus` |
 | [`SCENE_GAME/game.cpp`](../SCENE_GAME/game.cpp) | シーン入口。Field / Player / PlayerCamera / Sunlight / Ui / GameAudio の呼び出し。`Game_PumpAfterPresent`。ゲーム内メニュー開閉中のマウスロックを制御 |
-| [`SCENE_GAME/field.cpp`](../SCENE_GAME/field.cpp) | マニフェスト、ENU、`ExpoDrawJob`、フェード中スキップ付き `Field_PumpLoad`、初期完了後は `Field_PumpAfterPresent`、マテリアル結合、固定Yオフセット、スカイドームヨー |
+| [`SCENE_GAME/field.cpp`](../SCENE_GAME/field.cpp) | マニフェスト、ENU、`ExpoDrawJob`、タイトル先行の `Field_PumpPreload`、フェード中スキップ付き `Field_PumpLoad`、初期完了後は `Field_PumpAfterPresent`、マテリアル結合、固定Yオフセット、スカイドームヨー |
 | [`SCENE_GAME/course.cpp`](../SCENE_GAME/course.cpp) | ゲーム内メニュー、コース一覧、YAML入出力、作成・レースモード、ビルボード輪の再利用、タイマー、ゴールログ、BGM 切替とメニュー／レース SE |
 | [`SCENE_GAME/gameaudio.cpp`](../SCENE_GAME/gameaudio.cpp) | BGM 切替と SE 再生。`LoadMP3` / `PlaySound`。欠損ファイルは無音 |
 | [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | 空飛ぶタクシーの出現、ホバー移動、描画、ホバー／ヒット／着地 SE、`Player_DrawDebug`（速度・ワープ・`Warp to Slope`） |
@@ -83,22 +84,22 @@ BGM / SE のパスと発火地点は
 ### 実装の要点
 
 #### 1. シーン実行制御と初期化フロー
-- 起動シーン: `SCENE_GAME`（`app/scene.cpp`）。`SCENE_TITLE`はプレースホルダーとして個別に利用可能。
+- 起動シーン: `SCENE_TITLE`（`app/scene.cpp`）。タイトル表示中に`Field_Initialize`、4K HDRの太陽抽出、初期フィールドロードを先行し、決定後に`SCENE_GAME`へ引き渡す。
 - 決定入力: `SCENE_TITLE`から`SCENE_GAME`へ遷移。`SCENE_GAME`からはシーン遷移しない。
 - 表示順序: 床 → パンチ済みLOD2 → 未パンチLOD2遠景 → 近景パビリオン → 大屋根リング → 空飛ぶタクシーの順で描画。
-- 初期ロード: `Game_Initialize` は `PlayerCamera_Initialize`、`Field_Initialize`（マニフェスト）、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。フェードが不透明なあいだに床、パンチ済みLOD2、未パンチLOD2遠景、リング、衝突メッシュ、および明示指定の初期優先LOD3（`expo_pavilion_null2.glb`、`expo_pavilion_dynamic_equilibrium.glb`、`expo_pavilion_expo_related_31.glb`、`expo_pavilion_expo_related_25.glb`、`expo_pavilion_angola.glb`、`expo_pavilion_czech.glb` の順）を進めて完了させる。進捗はフェード前面のプログレスバーに表示し、完了後に明転する。明転後もその他のLOD3近景はカメラ周辺、視線先、移動先を読み込む。
+- 初期ロード: タイトル中に`Field_Initialize`、`Sunlight_PrepareAssets`（4K HDRの太陽抽出）、スカイドームFBXの読み込みを先行する。`Game_Initialize` は `PlayerCamera_Initialize`、既存フィールドの引き継ぎ、`Course_Initialize`、`Sunlight_Initialize`、`Ui_Initialize` を呼ぶ。フェードが不透明なあいだに床、パンチ済みLOD2、未パンチLOD2遠景、リング、衝突メッシュ、および明示指定の初期優先LOD3（`expo_pavilion_null2.glb`、`expo_pavilion_dynamic_equilibrium.glb`、`expo_pavilion_expo_related_31.glb`、`expo_pavilion_expo_related_25.glb`、`expo_pavilion_angola.glb`、`expo_pavilion_czech.glb` の順）を進めて完了させる。進捗はフェード前面のプログレスバーに表示し、完了後に明転する。Debugビルドではタイトル左下とロード画面中央下へ、いま処理中のインポート／GPU化／衝突を `DrawFont` で出す。Releaseでは出さない。明転後もその他のLOD3近景はカメラ周辺、視線先、移動先を読み込む。
 - 衝突判定の初期化: `asset/collision/*.bin` を fread し、ワーカーで一括ベイクする。初期処理が終わってから建物のYオフセット（`-9.010`）、リングのYオフセット（`-1.550`）を適用する。DebugビルドのImGui `Expo Height` で高さを変更すると、描画モデルと衝突ワールド（Y差分は格子再構築なしの `yBias` 経路）へ即時反映する。
-- 継続的ロード: 初期完了後も `Field_PumpLoad` を論理更新あたり最大1回呼び、CPUインポート開始だけを行う。GPU化とパビリオン破棄は `Present` 後の `Field_PumpAfterPresent`（最大3ms、直前フレームが重いときはスキップ）へ送る。進捗は HUD へ `LOADING IMPORT ... PAV n/N ...` と表示。
+- 継続的ロード: 初期完了後も `Field_PumpLoad` を論理更新あたり最大1回呼び、CPUインポート開始だけを行う。GPU化とパビリオン破棄は `Present` 後の `Field_PumpAfterPresent`（通常最大3ms、DrawまたはGPUが重いフレームは最低1ms）へ送る。重いフレームでも破棄は止めず、GPU化はUMAメモリ予算が85%未満のときだけ進める。進捗は HUD へ `LOADING IMPORT ... PAV n/N ...` と表示。
 
 #### 2. 非同期ストリーミングとメモリ管理（描画復旧後の最適化）
 - 全LOD3常駐の解除: 全LOD3常駐は解除し、RAM／VRAM使用量を抑制。DXGI予算照会とHUDへのRAM/VRAMおよびキュー状況表示（`LOADING IMPORT ... IN n READY n GPU ...`）を行う。
-- Accessor直接デコード: 万博GLB（GLB 2.0）はワーカーでAccessor/BufferViewを直接展開し、埋め込みテクスチャ（WebP等）のCPUデコードも行う。同時インポートとデコードワーカーは暫定で各1。
-- 6msタイムスライス予算: 初期ロード中の GPU化（SRV / VB / IB転送）およびリソース破棄はメインスレッドで1フレーム6ms（フェード中は最大40ms）の予算内に進める。初期完了後の GPU 転送は Present 後 3ms。頂点・インデックス・テクスチャの大きな転送はチャンク化する。
+- Accessor直接デコード: 万博GLB（GLB 2.0）はワーカーでAccessor/BufferViewを直接展開し、埋め込みテクスチャ（WebP等）のCPUデコードも行う。タイトル中およびフェード中の初期ロードはインポート最大3、テクスチャデコード最大2、衝突ベイク2ワーカーで進め、初期ロード完了後のストリーミングは各1へ戻す。
+- 6msタイムスライス予算: 初期ロード中の GPU化（SRV / VB / IB転送）およびリソース破棄はメインスレッドで1フレーム6ms（フェード中は最大40ms）の予算内に進める。初期完了後のGPU転送と破棄はPresent後へ分割し、通常3ms、DrawまたはGPUが8msを超えるフレームは1msで継続する。頂点・インデックス・テクスチャの大きな転送はチャンク化する。
 - マテリアル結合: ワーカーが `MergePreparedMeshesByMaterial` で同一アルベドのプリミティブを結合し、遠景LOD2はさらに `CollapsePreparedMeshes(1)` でタイル1メッシュにする。`expo_batch_id` は描画時の範囲として残す。詳細は [rendering_and_lighting.md](rendering_and_lighting.md) の 5.6。
 - 停止スパイク対策（先読みとプレースホルダー）: カメラの視線方向と移動方向へ先読みしてジョブを追加し、ロード中およびGPU化中はサイズ調整済みの `cube.fbx` プレースホルダーを表示することで、新規建物ロード時の約5秒停止を解消。視線方向の棟は開始順も優先する。
-- 近接時の欠落防止: 破棄半径内のREADY状態モデルを優先してGPU化し新規インポート枠を空ける。カメラ距離判定（ロード半径 48、破棄半径 72）にはモデルXZ半径を加算する。
+- 近接時の欠落防止: 破棄半径内のREADY状態モデルを優先してGPU化し新規インポート枠を空ける。開始判定（ロード半径 48、視線先読み+32）にはモデルXZ半径を加算する。常駐の破棄はカメラXZと破棄半径 72 のみで行い、視線・移動先読みでは維持しない。
 - 外周ランドマークの近景補完: 日本館、パナソニック、住友館、三菱未来館などリング外側の8棟は `expo_pavilion_west_outer.glb` へ統合し、GLB内の重心を基準にLOD3を先読みする。NTT Pavilionもランドマーク半径を適用する。LOD2遠景の対応バッチは維持し、影パスへは追加しない。
-- 世代番号による無効化: カメラ範囲外へ移動した未完了ジョブは世代番号で無効化し、遅延完了したモデルを採用しない。ファイル無し以外の失敗は最大3回、5秒・10秒・15秒の間隔で再試行する。ローカルVRAMが予算の85%を超えたら Present 後の追加アップロードを止める。
+- 世代番号による無効化: カメラ範囲外へ移動した未完了ジョブは世代番号で無効化し、遅延完了したモデルを採用しない。ファイル無し以外の失敗は最大3回、5秒・10秒・15秒の間隔で再試行する。DXGIのLOCALとNON_LOCALを合算したVRAM予算が85%を超えたらPresent後の追加GPU化を止めるが、範囲外モデルの破棄は続ける。
 - UV座標および頂点規約: 直接デコードのUVはglTFの値のまま使用し、不要なV反転を行わない（テクスチャずれを防止）。頂点スケール `*100` とZ反転は衝突binと一致させる。
 - 回帰確認の代表モデル: `asset/expomodel/expo_pavilion_qatar.glb`（stride付き属性）と `asset/expomodel/expo_pavilion_china.glb`（32bitインデックス）を共通の直接デコード経路で処理する。
 
@@ -110,7 +111,7 @@ BGM / SE のパスと発火地点は
 #### 4. PBRレンダリング・ライティング・シャドウ・スカイドーム
 - PBRシェーディング経路: スカイドームを除く床・LOD2・遠景LOD2・パビリオン・大屋根リング・プレースホルダー・空飛ぶタクシーは共通の `S_PBR` シェーダーを使用。glTFのMetallic-Roughness factor、packed ORM、法線、エミッシブを共通経路で処理し、テクスチャを持たないモデルは係数および既定値へフォールバックする。ピークが1を超えた画素のみトーンマッピング畳み込みを行う。詳細は [rendering_and_lighting.md](rendering_and_lighting.md)。
 - スカイドーム: `asset/model/basic_skybox_3d.fbx` に `asset/texture/pizzo_pernice_puresky_4k.hdr` をReinhard変換して貼った `S_SKYBOX`。ワールド方向からHDRの正距円筒UVを計算する。
-- HDR太陽光抽出: 起動時にHDRの線形輝度からしきい値 \(0.5 \times L_{\max}\) と4連結セグメンテーション（U方向の円周ラップ接続）により太陽領域を抽出し、仰角と色を決定する。
+- HDR太陽光抽出: タイトル先行中にHDRの線形輝度からしきい値 \(0.5 \times L_{\max}\) と4連結セグメンテーション（U方向の円周ラップ接続）により太陽領域を抽出し、仰角と色を決定する。`Sunlight_Initialize` は抽出済み結果を適用する。
 - 太陽方位とスカイ同期: 方位の既定値は `-170.0°`。HDR抽出方位との差分によってスカイドームのYaw回転を同期させ、背景の見た目太陽位置と平行光を一致させる（仰角ではドームを傾けない）。
 - 近傍シャドウマップ（CSM）: カメラ視錐台を3段（既定 `0–20m / 20–70m / 70–160m`、第1段は投影余白8m）に分けた直交ShadowMap。全対象モデルが影を受け（Receive）、投影元（Cast）は床、パンチ済みLOD2、大屋根リング、空飛ぶタクシー。遠景LOD2は影パスから除外する。LOD3表示中もパンチ済みLOD2を投影元にする。会場GLBは近傍XZセル単位でカリングし、タクシーは結合シャドウ（8MB以下）でカスケードあたり1発行。既定の影描画距離は160m。
 - リアルタイム調整（`Expo Sunlight`）: 強度 `2.0`、環境光倍率 `0.8`、スカイドームヨーオフセット `0`、粗さ `0.81`、金属度 `0`、シャドウ範囲 `0–20m / 20–70m / 70–160m`、バイアス `0.0005`、影の明るさ `0.25`、SSAOはOFF・強度 `0.85`・半径 `1.25m`・バイアス `0.04m`・Power `1.20`。
@@ -126,8 +127,10 @@ BGM / SE のパスと発火地点は
 ### `SCENE_TITLE`
 
 - ゲームタイトルと開始案内を表示する。
+- `Title_Initialize` で `Field_Initialize` と `Sunlight_PrepareAssets` を開始し、`Title_Update` で `Field_PumpPreload` を回す。決定後は `ApplySceneInternal` がタイトル2Dだけ破棄し、フィールド先行結果を `SCENE_GAME` へ渡す。
 - `Space`、`Enter`、ゲームパッドAの決定入力で`SCENE_GAME`へ遷移する。
-- Debugビルドでは右上の`DEBUG`から`SCENE_DEBUG`へ遷移できる。
+- Debugビルドでは右上の`DEBUG`から`SCENE_DEBUG`へ遷移できる。DEBUGへ行くときは先行フィールドを破棄する。
+- Debugビルドでは左下に `TITLE PRELOAD |` と `Field_GetLoadStatus`（完了後は `Field_GetFinishedStatus`）を `DrawFont` で出す。Releaseでは出さない。
 
 ### `SCENE_GAME`
 
@@ -135,10 +138,10 @@ BGM / SE のパスと発火地点は
 3D Tiles の `boundingVolume.region` によるタイル単位カリングを描画時に行う。LOD3はカメラ距離でロード・破棄し、各 `Sprite3D` の描画時にはモデル単位の視錐台カリングも働く。タイル境界カリングはストリーミング判定とは分離する。
 `null2` は動的キューブマップ鏡面。モデルと座標は [plateau.md](plateau.md)。描画は [rendering_and_lighting.md](rendering_and_lighting.md)。
 
-- `Game_Initialize`: `PlayerCamera_Initialize`、`Field_Initialize`、`GameAudio_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`EnvProbe_Initialize`、`Ui_Initialize` を呼ぶ。`GameAudio_Initialize` で散策 BGM を開始する。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
+- `Game_Initialize`: `PlayerCamera_Initialize`、既にタイトルで初期化済みなら何もしない `Field_Initialize`、`GameAudio_Initialize`、`Course_Initialize`、`Sunlight_Initialize`、`EnvProbe_Initialize`、`Ui_Initialize` を呼ぶ。`GameAudio_Initialize` で散策 BGM を開始する。`PlayerCamera_Initialize` が `Camera_Initialize` と Far 2000 を設定する。
 - `Game_Update`: `Field_PumpLoad`、マウスロック切替、`PlayerCamera_UpdateInput`、`Player_Update`、`Course_Update`、`PlayerCamera_Update`、`Ui_Update`、`Sunlight_Update` の順。初期完了後の `Field_PumpLoad` はインポート開始のみ。カメラ入力を先に更新し、プレイヤーが最新のヨーを使用する。メニュー開閉とコース操作は`Course_Update`で処理し、メニュー中は操作を停止する。ロック中は `game.cpp` が `Mouse_GetState` しない（相対移動量は視点側が一度だけ読む）。
 - `Game_Draw`: 初期ロード中は場の3DとSSAOを描かず、フェードとHUDだけにする。完了後は `Direct3D_BeginScene` でシーン色RTへ切り替え、`PlayerCamera_Draw` のあと、深度ありで `Sunlight_Apply`、注視点周辺の局所 ShadowMap（床・パンチ済みLOD2・遠景LOD2・リング・タクシーを投影。遠景はセル無しのメッシュ単位）、null2 の環境キューブ1面、場とプレイヤーの描画を行う。続いて `Direct3D_ApplySsao` でシーンRTをバックバッファへコピーする。SSAOがオンのときだけ1/4解像度AOを合成する。マテリアルを白へ戻してから `Ui_Draw`、HUD、ゲーム内メニュー、Debugビルド用の`Player_DrawDebug` / `Field_DrawDebug` / `Collision_DrawDebug` / `Sunlight_DrawDebug` / `PlayerCamera_DrawDebug`を描画する。Debug の衝突ワイヤは `Player_Draw` / `Course_Draw` のあと、SSAO の前に `Collision_DrawWire` する。SSAOは3D色だけを対象とし、UIには適用しない。
-- 初期ロード制御: フェードが不透明なあいだも `Field_PumpLoad` を実行し、コア初期ロード完了まで明転を保留する。スカイドーム FBX は完了フラグを立てる直前（まだ3Dを描かないフレーム）に読む。描画が終わるまで同じフレームでは再ポンプしない。初期完了後の GPU ポンプは `Present` 後。
+- 初期ロード制御: タイトル中は `Field_PumpPreload` でロードを先行し、フェード中も `Field_PumpLoad` を実行してコア初期ロード完了まで明転を保留する。スカイドームFBXはキックオフ直後に読み、GLBワーカーと重ねる。描画が終わるまで同じフレームでは再ポンプしない。初期完了後のGPUポンプは `Present` 後。Debugビルドのロード画面は `Fade_DrawLoadProgress` がバーに加え `GAME LOAD |` と `Field_GetLoadStatus` を出す。
 - プレイヤー出現: `asset/model/flytaxi.glb`。読み込み後に表示長辺約0.8へ一様スケールし、`Field_GetSpawnPos()`（`-16.2099, -7.95906, -59.6799`）でホバーを開始する。出現時にマウスロックする。メニューの「スタート地点へ戻る」も同じ座標。
 - レース処理: `Course_Draw` は1つ目の座標へスタート用ビルボード、2つ目以降へカメラ方向を向く両面ビルボードを描く。マーカーは `cube.fbx` を使わない（レース開始フレームで Assimp を走らせない）。リングオブジェクトは再利用し、通過済みと遠いゲートは描画しない。スタート付近にいるときはワープしない。レースではプレイヤーの前フレーム位置から現フレーム位置への線分が、次の輪の平面を半径内で通過した場合だけ次の輪へ進む。コースの点は1つ目をスタート位置、2つ目以降を配列順の輪として使用する。レースのカウントダウン中は`Player_SetControlEnabled(false)`で移動を停止する。ゴール時は `logs` からタイムを読み、TOP5ランキングと自己ベスト更新表示を HUD に出す。BGM はモードに合わせて `gameaudio.cpp` が切り替える。 SE の一覧は [audio_needs.md](audio_needs.md)。
 - コースYAML入出力: `Course` のYAMLは`name`、`points`、`logs`で構成する。保存時に`asset/course`を作成し、新規コース名とファイル名を自動生成する。
@@ -150,7 +153,7 @@ BGM / SE のパスと発火地点は
 
 ### `SCENE_RESULT`
 
-- 結果または終了案内を表示する（現状はプレースホルダー）。
+- 結果または終了案内を表示する。決定入力で `SCENE_TITLE` へ戻る。戻ったタイトルはフィールドを再度先行する。
 - 決定入力で`SCENE_TITLE`へ戻る。
 
 ### `SCENE_DEBUG`
@@ -193,7 +196,7 @@ asset/
 ## 7. 実装上の制約
 
 - 会場全体の`boundingVolume.region`によるタイル単位カリングは描画時のみ実装済み。未パンチLOD2遠景はタイル4枚の常駐とLOD3とのバッチ単位排他、マテリアル結合による発行削減まで実装済み。カメラ距離によるLOD3ストリーミング、範囲外破棄、近くても始まらない欠落の修正、Present後GPUポンプ、RAM／VRAM表示も実装済み。詳細は [plateau.md](plateau.md) と [rendering_and_lighting.md](rendering_and_lighting.md)。
-- 新規建物のCPUデコードはワーカーへ移す。初期ロード中のGPU／破棄は1フレーム6ms、完了後は Present 後3ms。カメラの視線方向と移動方向への先読みと、`cube.fbx` のプレースホルダー表示も実装済みである。直接デコードのUVはglTFのままとする。
+- 新規建物のCPUデコードはワーカーへ移す。初期ロード中のGPU／破棄は1フレーム6ms、完了後はPresent後3ms（重いフレームも1ms継続）。カメラの視線方向と移動方向への先読みと、`cube.fbx` のプレースホルダー表示も実装済みである。直接デコードのUVはglTFのままとする。
 - 公式データのZIPや元の`b3dm`、テクスチャは配布物へ含めない。
 - 利用条件と出典表記は [plateau.md](plateau.md) に従う。
 

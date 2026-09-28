@@ -94,6 +94,7 @@ struct ExpoTileDesc
 	double streamRtcY;
 	double streamRtcZ;
 	float streamRadius;
+	float yOffset;
 };
 
 struct ExpoFarBatchMap
@@ -146,6 +147,7 @@ static bool g_HasLod2 = false;
 static XMMATRIX g_EcefToEnu = XMMatrixIdentity();
 static bool g_HasEcefToEnu = false;
 static bool g_LoadComplete = false;
+static bool g_FieldInitialized = false;
 static bool g_PumpedThisFrame = false;
 static bool g_HasPresentedInitialLoadFrame = false;
 static int g_LoadedTiles = 0;
@@ -639,6 +641,24 @@ static void ClearExpoTiles(void)
 	g_LoadedFarTiles = 0;
 }
 
+static void ParseYOffsetSuffix(const char* line, ExpoTileDesc* outDesc)
+{
+	if (!line || !outDesc)
+	{
+		return;
+	}
+	const char* yoff = strstr(line, "yoff");
+	if (!yoff)
+	{
+		return;
+	}
+	float value = 0.0f;
+	if (sscanf_s(yoff + 4, "%f", &value) == 1 && std::isfinite(value))
+	{
+		outDesc->yOffset = value;
+	}
+}
+
 static bool ParseRtcLine(const char* line, ExpoTileDesc* outDesc)
 {
 	if (!line || !outDesc)
@@ -657,6 +677,7 @@ static bool ParseRtcLine(const char* line, ExpoTileDesc* outDesc)
 	outDesc->streamRtcY = 0.0;
 	outDesc->streamRtcZ = 0.0;
 	outDesc->streamRadius = 0.0f;
+	outDesc->yOffset = 0.0f;
 	double numeric[13] = {};
 	const int parsed = sscanf_s(
 		values + 1,
@@ -680,11 +701,16 @@ static bool ParseRtcLine(const char* line, ExpoTileDesc* outDesc)
 		outDesc->streamRtcY = numeric[4];
 		outDesc->streamRtcZ = numeric[5];
 		outDesc->streamRadius = static_cast<float>(numeric[6]);
-		return std::isfinite(outDesc->streamRtcX) &&
-			std::isfinite(outDesc->streamRtcY) &&
-			std::isfinite(outDesc->streamRtcZ) &&
-			std::isfinite(outDesc->streamRadius) &&
-			outDesc->streamRadius >= 0.0f;
+		if (!std::isfinite(outDesc->streamRtcX) ||
+			!std::isfinite(outDesc->streamRtcY) ||
+			!std::isfinite(outDesc->streamRtcZ) ||
+			!std::isfinite(outDesc->streamRadius) ||
+			outDesc->streamRadius < 0.0f)
+		{
+			return false;
+		}
+		ParseYOffsetSuffix(line, outDesc);
+		return true;
 	}
 	if (parsed == 10 &&
 		std::isfinite(numeric[3]) &&
@@ -703,6 +729,7 @@ static bool ParseRtcLine(const char* line, ExpoTileDesc* outDesc)
 		}
 		outDesc->hasRegion = true;
 	}
+	ParseYOffsetSuffix(line, outDesc);
 	return true;
 }
 
@@ -1226,6 +1253,111 @@ static bool IsHighDetailGatePath(const char* path)
 		 strstr(path, "expo_pavilion_west_gate.glb") != nullptr);
 }
 
+static bool IsBatchMapForTile(
+	const ExpoFarBatchMap& map,
+	const ExpoTileDesc& tile)
+{
+	if (!map.farPath[0] || !tile.path[0])
+	{
+		return false;
+	}
+	std::string fullPath = map.farPath;
+	const size_t farMarker = fullPath.find("_far_");
+	if (farMarker != std::string::npos)
+	{
+		fullPath.erase(farMarker, 4);
+	}
+	return fullPath == tile.path;
+}
+
+static std::vector<CollisionBatchYOffset> BuildTileBatchYOffsets(
+	const ExpoTileDesc& tile)
+{
+	std::vector<CollisionBatchYOffset> offsets;
+	for (const ExpoFarBatchMap& map : g_TileSet.farBatchMaps)
+	{
+		if (!IsBatchMapForTile(map, tile))
+		{
+			continue;
+		}
+		const ExpoTileDesc* pavilion = nullptr;
+		for (const ExpoTileDesc& candidate : g_TileSet.pavilions)
+		{
+			if (strcmp(candidate.path, map.pavilionPath) == 0)
+			{
+				pavilion = &candidate;
+				break;
+			}
+		}
+		if (!pavilion)
+		{
+			continue;
+		}
+		auto existing = std::find_if(
+			offsets.begin(),
+			offsets.end(),
+			[&map](const CollisionBatchYOffset& item)
+			{
+				return item.batchId == static_cast<unsigned int>(map.batchId);
+			});
+		if (existing == offsets.end())
+		{
+			offsets.push_back({
+				static_cast<unsigned int>(map.batchId),
+				pavilion->yOffset});
+		}
+		else
+		{
+			existing->yOffset = pavilion->yOffset;
+		}
+	}
+	return offsets;
+}
+
+static void AdjustPavilionCollisionBatchY(
+	const char* pavilionPath,
+	float deltaY)
+{
+	if (!pavilionPath || deltaY == 0.0f)
+	{
+		return;
+	}
+	for (const ExpoFarBatchMap& map : g_TileSet.farBatchMaps)
+	{
+		if (strcmp(map.pavilionPath, pavilionPath) != 0)
+		{
+			continue;
+		}
+		for (const ExpoCollisionEntry& entry : g_CollisionEntries)
+		{
+			if (entry.kind != ExpoCollisionEntryKind::Tile ||
+				entry.meshId < 0 ||
+				entry.index < 0 ||
+				entry.index >= g_TileSet.count)
+			{
+				continue;
+			}
+			if (!IsBatchMapForTile(map, g_TileSet.tiles[entry.index]))
+			{
+				continue;
+			}
+			Collision_AdjustBatchY(
+				entry.meshId,
+				static_cast<unsigned int>(map.batchId),
+				deltaY);
+		}
+	}
+}
+
+static float PavilionYOffset(size_t index)
+{
+	if (index < g_TileSet.pavilions.size())
+	{
+		return g_TileSet.pavilions[index].yOffset;
+	}
+	return 0.0f;
+}
+
 static void ApplyFixedYOffsets(void)
 {
 	const size_t count = (g_ExpoTiles.size() < g_TileBaseY.size()) ? g_ExpoTiles.size() : g_TileBaseY.size();
@@ -1255,7 +1387,7 @@ static void ApplyFixedYOffsets(void)
 		{
 			continue;
 		}
-		g_ExpoPavilions[i]->SetPosY(g_PavilionBaseY[i] + EXPO_BUILDING_Y_OFFSET);
+		g_ExpoPavilions[i]->SetPosY(g_PavilionBaseY[i] + EXPO_BUILDING_Y_OFFSET + PavilionYOffset(i));
 	}
 	if (g_ExpoRing)
 	{
@@ -1319,7 +1451,14 @@ static void RefreshCollisionWorlds(void)
 			continue;
 		}
 		XMFLOAT3 position = RtcToWorldPosition(g_TileSet, *desc, g_EcefToEnu);
-		position.y += EXPO_BUILDING_Y_OFFSET;
+		if (entry.kind == ExpoCollisionEntryKind::Gate)
+		{
+			position.y += EXPO_BUILDING_Y_OFFSET + desc->yOffset;
+		}
+		else
+		{
+			position.y += EXPO_BUILDING_Y_OFFSET;
+		}
 		Collision_SetWorld(entry.meshId, MakeWorldAt(position, g_MeshRotation));
 	}
 }
@@ -1438,7 +1577,7 @@ static void CommitDrawJob(ExpoDrawJob* job)
 		}
 		g_ExpoPavilions[static_cast<size_t>(job->index)] = model;
 		g_PavilionBaseY[static_cast<size_t>(job->index)] = model->GetPos().y;
-		model->SetPosY(g_PavilionBaseY[static_cast<size_t>(job->index)] + EXPO_BUILDING_Y_OFFSET);
+		model->SetPosY(g_PavilionBaseY[static_cast<size_t>(job->index)] + EXPO_BUILDING_Y_OFFSET + PavilionYOffset(static_cast<size_t>(job->index)));
 		if (IsNull2Path(job->path.c_str()))
 		{
 			model->SetMirrorEnv(true);
@@ -1455,7 +1594,7 @@ static void CommitDrawJob(ExpoDrawJob* job)
 
 static int MaxImportWorkers(void)
 {
-	return 1;
+	return g_LoadComplete ? 1 : 3;
 }
 
 static bool IsCoreDrawJob(const ExpoDrawJob* job)
@@ -1495,6 +1634,9 @@ static float GetDistanceSquaredXZ(const XMFLOAT3& left, const XMFLOAT3& right)
 	return dx * dx + dz * dz;
 }
 
+static bool IsModelLoaded(Sprite3D* model);
+static XMFLOAT3 GetPavilionStreamOrigin(const ExpoDrawJob* job);
+
 static float GetPavilionLoadScore(const ExpoDrawJob* job)
 {
 	if (!job || job->kind != ExpoDrawKind::Pavilion)
@@ -1511,9 +1653,7 @@ static float GetPavilionLoadScore(const ExpoDrawJob* job)
 		return FLT_MAX;
 	}
 	const XMFLOAT3 cameraPos = camera->GetPos();
-	const XMFLOAT3& streamOrigin = job->hasStreamCenter
-		? job->streamPosition
-		: job->position;
+	const XMFLOAT3 streamOrigin = GetPavilionStreamOrigin(job);
 	float score = GetDistanceSquaredXZ(streamOrigin, cameraPos);
 	if (g_HasPrefetchPosition)
 	{
@@ -1558,6 +1698,48 @@ static void RememberPavilionStreamPadding(ExpoDrawJob* job, const XMFLOAT3& mode
 	}
 }
 
+static XMFLOAT3 GetPavilionStreamOrigin(const ExpoDrawJob* job)
+{
+	if (job && job->result && IsModelLoaded(job->result))
+	{
+		const XMFLOAT3 center = job->result->GetWorldCenter();
+		return { center.x, job->position.y, center.z };
+	}
+	if (job && job->hasStreamCenter)
+	{
+		return job->streamPosition;
+	}
+	return job ? job->position : XMFLOAT3{ 0.0f, 0.0f, 0.0f };
+}
+
+static float GetPavilionRangeExtent(const ExpoDrawJob* job)
+{
+	if (!job)
+	{
+		return 0.0f;
+	}
+	// マニフェストの streamRadius は既にXZ半径。AABBパディングと二重加算しない。
+	if (job->streamRadius > 0.0f)
+	{
+		return job->streamRadius;
+	}
+	return job->streamPadding;
+}
+
+static bool IsPavilionNearPoint(
+	const ExpoDrawJob* job,
+	const XMFLOAT3& point,
+	float radius)
+{
+	if (!job)
+	{
+		return false;
+	}
+	const XMFLOAT3 origin = GetPavilionStreamOrigin(job);
+	const float paddedRadius = radius + GetPavilionRangeExtent(job);
+	return GetDistanceSquaredXZ(origin, point) <= paddedRadius * paddedRadius;
+}
+
 static bool IsPavilionInLoadRange(const ExpoDrawJob* job, float radius)
 {
 	if (!job || job->kind != ExpoDrawKind::Pavilion)
@@ -1574,33 +1756,30 @@ static bool IsPavilionInLoadRange(const ExpoDrawJob* job, float radius)
 		return false;
 	}
 	const XMFLOAT3 cameraPos = camera->GetPos();
-	const XMFLOAT3& streamOrigin = job->hasStreamCenter
-		? job->streamPosition
-		: job->position;
-	const float paddedRadius = radius + job->streamPadding + job->streamRadius;
-	const float radiusSquared = paddedRadius * paddedRadius;
-	if (GetDistanceSquaredXZ(streamOrigin, cameraPos) <= radiusSquared)
+	if (IsPavilionNearPoint(job, cameraPos, radius))
 	{
 		return true;
 	}
 	if (g_HasPrefetchPosition &&
-		GetDistanceSquaredXZ(streamOrigin, g_PrefetchPosition) <= radiusSquared)
+		IsPavilionNearPoint(job, g_PrefetchPosition, radius))
 	{
 		return true;
 	}
 	if (g_HasLookPrefetchPosition &&
-		GetDistanceSquaredXZ(streamOrigin, g_LookPrefetchPosition) <= radiusSquared)
+		IsPavilionNearPoint(job, g_LookPrefetchPosition, radius))
 	{
 		return true;
 	}
 
-	const float lookRadius = paddedRadius + EXPO_PAVILION_LOOK_EXTRA_RADIUS;
-	if (GetDistanceSquaredXZ(streamOrigin, cameraPos) > lookRadius * lookRadius)
+	const XMFLOAT3 origin = GetPavilionStreamOrigin(job);
+	const float lookRadius =
+		radius + GetPavilionRangeExtent(job) + EXPO_PAVILION_LOOK_EXTRA_RADIUS;
+	if (GetDistanceSquaredXZ(origin, cameraPos) > lookRadius * lookRadius)
 	{
 		return false;
 	}
-	const float dx = streamOrigin.x - cameraPos.x;
-	const float dz = streamOrigin.z - cameraPos.z;
+	const float dx = origin.x - cameraPos.x;
+	const float dz = origin.z - cameraPos.z;
 	const float length = sqrtf(dx * dx + dz * dz);
 	if (length <= 0.001f)
 	{
@@ -1609,6 +1788,20 @@ static bool IsPavilionInLoadRange(const ExpoDrawJob* job, float radius)
 	const float lookDot =
 		(dx / length) * g_LookDirX + (dz / length) * g_LookDirZ;
 	return lookDot >= EXPO_PAVILION_LOOK_COS;
+}
+
+static bool ShouldKeepPavilionResident(const ExpoDrawJob* job)
+{
+	Camera* camera = GetCamera();
+	if (!camera || !job)
+	{
+		return false;
+	}
+	// 破棄はカメラXZだけ。視線・移動先読みは開始専用で、周回中の常駐を膨らませない。
+	return IsPavilionNearPoint(
+		job,
+		camera->GetPos(),
+		EXPO_PAVILION_UNLOAD_RADIUS);
 }
 
 static void StartDrawWorker(ExpoDrawJob* job)
@@ -1664,7 +1857,9 @@ static void StartDrawWorker(ExpoDrawJob* job)
 			model->PrepareShadowCells(EXPO_SHADOW_CELL_WORLD / EXPO_MODEL_SCALE);
 		}
 		model->TryBuildSmallCombinedShadow();
-		if (!model->DecodeEmbeddedTextures(raw->kind == ExpoDrawKind::Floor))
+		if (!model->DecodeEmbeddedTextures(
+			raw->kind == ExpoDrawKind::Floor,
+			g_LoadComplete ? 1u : 2u))
 		{
 			raw->failureReason = "テクスチャCPUデコード失敗";
 			delete model;
@@ -1699,7 +1894,7 @@ static void StartPendingImports(void)
 			inFlight += 1;
 		}
 		if (job && job->workerDone && job->gpuModel && !job->finished &&
-			IsPavilionInLoadRange(job.get(), EXPO_PAVILION_UNLOAD_RADIUS))
+			ShouldKeepPavilionResident(job.get()))
 		{
 			ready += 1;
 		}
@@ -1845,7 +2040,7 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 		{
 			continue;
 		}
-		if (IsPavilionInLoadRange(job, EXPO_PAVILION_UNLOAD_RADIUS))
+		if (ShouldKeepPavilionResident(job))
 		{
 			if (job->workerDone && job->workerCancelled)
 			{
@@ -1912,13 +2107,9 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 			continue;
 		}
 
-		// 破棄は一度に一棟だけにし、GPU解放が同じフレームに集中しないようにする。
+		// 破棄は一度に一棟だけ。常駐モデルは予算切れでも外し、周回で積み上がらないようにする。
 		if (job->result)
 		{
-			if (!HasLoadTime(deadline))
-			{
-				return;
-			}
 			Sprite3D* old = job->result;
 			if (job->index >= 0 && job->index < static_cast<int>(g_ExpoPavilions.size()) &&
 				g_ExpoPavilions[job->index] == old)
@@ -2080,7 +2271,8 @@ static void EnsurePavilionPlaceholder(ExpoDrawJob* job)
 		};
 	}
 	placeholder->SetSize(placeholderScale);
-	placeholder->SetPosY(job->position.y + EXPO_BUILDING_Y_OFFSET);
+	const size_t placeholderPavilion = job->index >= 0 ? static_cast<size_t>(job->index) : 0;
+	placeholder->SetPosY(job->position.y + EXPO_BUILDING_Y_OFFSET + PavilionYOffset(placeholderPavilion));
 	placeholder->SetColor(0.35f, 0.38f, 0.42f, 1.0f);
 	ConfigureExpoShadowModel(placeholder, false);
 	if (job->hasRotation)
@@ -2123,7 +2315,7 @@ static ExpoDrawJob* FindNextGpuJob(void)
 		{
 			// 開始はロード半径、GPU化は破棄半径まで進める。
 			// ヒステリシス帯でREADYが残ると、新しい近景のインポート枠を塞ぐ。
-			if (!IsPavilionInLoadRange(job, EXPO_PAVILION_UNLOAD_RADIUS))
+			if (!ShouldKeepPavilionResident(job))
 			{
 				continue;
 			}
@@ -2219,6 +2411,8 @@ static bool HasAnyModel(void)
 		g_LoadedPavilions > 0 || g_ExpoRing;
 }
 
+static void EnsureSkyboxLoaded(void);
+
 static void FinishLoad(void)
 {
 	if (g_LoadComplete)
@@ -2248,11 +2442,17 @@ static void KickoffLoad(void)
 			return false;
 		}
 		XMFLOAT3 position = RtcToWorldPosition(g_TileSet, desc, g_EcefToEnu);
-		position.y += EXPO_BUILDING_Y_OFFSET;
+		position.y += EXPO_BUILDING_Y_OFFSET + desc.yOffset;
+		std::vector<CollisionBatchYOffset> batchYOffsets;
+		if (kind == ExpoCollisionEntryKind::Tile)
+		{
+			batchYOffsets = BuildTileBatchYOffsets(desc);
+		}
 		if (!Collision_StartAdd(
 			desc.path,
 			MakeWorldAt(position, g_MeshRotation),
-			false))
+			false,
+			&batchYOffsets))
 		{
 			return false;
 		}
@@ -2312,6 +2512,7 @@ static void KickoffLoad(void)
 		g_CollisionFinished = true;
 	}
 	StartPendingImports();
+	EnsureSkyboxLoaded();
 }
 
 static void BuildDrawJobs(void)
@@ -2678,8 +2879,6 @@ bool Field_GetNearestHighDetailName(
 	return true;
 }
 
-static void EnsureSkyboxLoaded(void);
-
 void Field_PumpLoad(void)
 {
 	if (g_PumpedThisFrame)
@@ -2765,6 +2964,21 @@ void Field_PumpLoad(void)
 	}
 }
 
+void Field_PumpPreload(void)
+{
+	if (!g_FieldInitialized)
+	{
+		return;
+	}
+
+	// TITLE は Field_Draw を通らないため、初期ロードの最初の描画待ちを
+	// 先行ロード専用に解除し、1回の更新ごとにポンプを再開する。
+	g_HasPresentedInitialLoadFrame = true;
+	g_PumpedThisFrame = false;
+	Field_PumpLoad();
+	g_PumpedThisFrame = false;
+}
+
 static void EnsureSkyboxLoaded(void)
 {
 	if (g_SkyboxLoadAttempted)
@@ -2795,37 +3009,45 @@ void Field_PumpAfterPresent(double lastDrawMs, float lastGpuMs)
 	{
 		return;
 	}
-	if (lastDrawMs > EXPO_STREAM_SKIP_DRAW_MS)
-	{
-		return;
-	}
-	if (lastGpuMs > EXPO_STREAM_SKIP_GPU_MS)
-	{
-		return;
-	}
+	const bool heavyFrame =
+		lastDrawMs > EXPO_STREAM_SKIP_DRAW_MS ||
+		lastGpuMs > EXPO_STREAM_SKIP_GPU_MS;
+	const double pumpBudgetMs =
+		heavyFrame ? 1.0 : EXPO_STREAM_AFTER_PRESENT_BUDGET_MS;
 	unsigned long long localBudgetMb = 0;
 	unsigned long long localUsageMb = 0;
 	unsigned long long nonLocalBudgetMb = 0;
 	unsigned long long nonLocalUsageMb = 0;
-	if (Direct3D_GetMemoryInfo(
+	const bool hasMemoryInfo = Direct3D_GetMemoryInfo(
 		&localBudgetMb,
 		&localUsageMb,
 		&nonLocalBudgetMb,
-		&nonLocalUsageMb) &&
-		localBudgetMb > 0 &&
-		localUsageMb * 100ull > localBudgetMb * 85ull)
-	{
-		return;
-	}
-	const LONGLONG deadline = GetLoadDeadline(
-		EXPO_STREAM_AFTER_PRESENT_BUDGET_MS);
+		&nonLocalUsageMb);
+	const unsigned long long totalBudgetMb =
+		localBudgetMb + nonLocalBudgetMb;
+	const unsigned long long totalUsageMb =
+		localUsageMb + nonLocalUsageMb;
+	const bool overMemoryBudget =
+		hasMemoryInfo &&
+		totalBudgetMb > 0 &&
+		totalUsageMb * 100ull > totalBudgetMb * 85ull;
+	const LONGLONG deadline = GetLoadDeadline(pumpBudgetMs);
 	UpdatePrefetchPosition();
 	PumpPavilionStreaming(deadline);
-	PumpOneGpu(deadline);
+	// メモリ超過中も先に破棄を進める。GPU化だけを止めて枠を空ける。
+	if (!overMemoryBudget)
+	{
+		PumpOneGpu(deadline);
+	}
 }
 
 void Field_Initialize(void)
 {
+	if (g_FieldInitialized)
+	{
+		return;
+	}
+	g_FieldInitialized = true;
 	g_LoadComplete = false;
 	g_PumpedThisFrame = false;
 	g_HasPresentedInitialLoadFrame = false;
@@ -2889,11 +3111,18 @@ void Field_Initialize(void)
 void Field_Finalize(void)
 {
 	ClearExpoTiles();
+	g_LoadComplete = false;
+	g_FieldInitialized = false;
 }
 
 bool Field_IsLoadComplete(void)
 {
 	return g_LoadComplete;
+}
+
+bool Field_IsInitialized(void)
+{
+	return g_FieldInitialized;
 }
 
 float Field_GetInitialLoadProgress(void)
@@ -3260,6 +3489,317 @@ bool Field_ArePavilionLabelsVisible(void)
 	return g_PavilionLabelsVisible;
 }
 
+#if defined(_DEBUG)
+static bool g_PavilionHeightMeasuring = false;
+static size_t g_PavilionHeightCursor = 0;
+static int g_PavilionHeightApplied = 0;
+static int g_PavilionHeightSkipped = 0;
+static char g_PavilionHeightStatus[256] = {};
+static const float PAVILION_HEIGHT_BOTTOM_BAND = 0.05f;
+static const int PAVILION_HEIGHT_MIN_SAMPLES = 8;
+static const int PAVILION_HEIGHT_MAX_SAMPLES = 1024;
+static const float PAVILION_HEIGHT_MAX_MEDIAN = 5.0f;
+static const float PAVILION_HEIGHT_CLAMP = 6.0f;
+
+static void PavilionHeight_ApplyToScene(size_t index)
+{
+	if (index < g_ExpoPavilions.size() &&
+		index < g_PavilionBaseY.size() &&
+		g_ExpoPavilions[index])
+	{
+		g_ExpoPavilions[index]->SetPosY(
+			g_PavilionBaseY[index] + EXPO_BUILDING_Y_OFFSET + PavilionYOffset(index));
+	}
+	if (!g_HasEcefToEnu || !g_HasMeshRotation ||
+		index >= g_TileSet.pavilions.size())
+	{
+		return;
+	}
+	for (const ExpoCollisionEntry& entry : g_CollisionEntries)
+	{
+		if (entry.kind != ExpoCollisionEntryKind::Gate ||
+			entry.index != static_cast<int>(index) ||
+			entry.meshId < 0)
+		{
+			continue;
+		}
+		XMFLOAT3 position = RtcToWorldPosition(g_TileSet, g_TileSet.pavilions[index], g_EcefToEnu);
+		position.y += EXPO_BUILDING_Y_OFFSET + g_TileSet.pavilions[index].yOffset;
+		Collision_SetWorld(entry.meshId, MakeWorldAt(position, g_MeshRotation));
+	}
+}
+
+static bool PavilionHeight_MeasureOne(size_t index)
+{
+	if (index >= g_TileSet.pavilions.size() ||
+		!g_HasEcefToEnu || !g_HasMeshRotation ||
+		g_FloorCollisionId < 0)
+	{
+		return false;
+	}
+	ExpoTileDesc& desc = g_TileSet.pavilions[index];
+	if (!FileExists(desc.path))
+	{
+		return false;
+	}
+	std::vector<XMFLOAT3> localVerts;
+	if (!GlbModel::ImportCollisionTriangles(desc.path, &localVerts) ||
+		localVerts.size() < 3)
+	{
+		return false;
+	}
+	XMFLOAT3 basePos = RtcToWorldPosition(g_TileSet, desc, g_EcefToEnu);
+	basePos.y += EXPO_BUILDING_Y_OFFSET + desc.yOffset;
+	const XMMATRIX world = MakeWorldAt(basePos, g_MeshRotation);
+	float minY = FLT_MAX;
+	for (const XMFLOAT3& local : localVerts)
+	{
+		XMFLOAT3 worldPos;
+		XMStoreFloat3(
+			&worldPos,
+			XMVector3TransformCoord(XMLoadFloat3(&local), world));
+		if (!std::isfinite(worldPos.x) ||
+			!std::isfinite(worldPos.y) ||
+			!std::isfinite(worldPos.z))
+		{
+			continue;
+		}
+		if (worldPos.y < minY)
+		{
+			minY = worldPos.y;
+		}
+	}
+	if (minY == FLT_MAX)
+	{
+		return false;
+	}
+	const float bottomTop = minY + PAVILION_HEIGHT_BOTTOM_BAND;
+	std::vector<XMFLOAT3> bottomVerts;
+	bottomVerts.reserve(512);
+	for (const XMFLOAT3& local : localVerts)
+	{
+		XMFLOAT3 worldPos;
+		XMStoreFloat3(
+			&worldPos,
+			XMVector3TransformCoord(XMLoadFloat3(&local), world));
+		if (!std::isfinite(worldPos.x) ||
+			!std::isfinite(worldPos.y) ||
+			!std::isfinite(worldPos.z))
+		{
+			continue;
+		}
+		if (worldPos.y <= bottomTop)
+		{
+			bottomVerts.push_back(worldPos);
+		}
+	}
+	if (bottomVerts.empty())
+	{
+		return false;
+	}
+	const size_t stride =
+		bottomVerts.size() / static_cast<size_t>(PAVILION_HEIGHT_MAX_SAMPLES) + 1;
+	std::vector<float> diffs;
+	diffs.reserve(256);
+	for (size_t i = 0; i < bottomVerts.size(); i += stride)
+	{
+		float floorY = 0.0f;
+		if (!Collision_SampleTopY(
+			g_FloorCollisionId,
+			bottomVerts[i].x,
+			bottomVerts[i].z,
+			&floorY))
+		{
+			continue;
+		}
+		const float diff = floorY - bottomVerts[i].y;
+		if (std::isfinite(diff))
+		{
+			diffs.push_back(diff);
+		}
+	}
+	if (static_cast<int>(diffs.size()) < PAVILION_HEIGHT_MIN_SAMPLES)
+	{
+		return false;
+	}
+	std::nth_element(
+		diffs.begin(),
+		diffs.begin() + diffs.size() / 2,
+		diffs.end());
+	const float median = diffs[diffs.size() / 2];
+	if (!std::isfinite(median) || fabsf(median) > PAVILION_HEIGHT_MAX_MEDIAN)
+	{
+		return false;
+	}
+	const float previousYOffset = desc.yOffset;
+	desc.yOffset += median;
+	if (desc.yOffset > PAVILION_HEIGHT_CLAMP)
+	{
+		desc.yOffset = PAVILION_HEIGHT_CLAMP;
+	}
+	if (desc.yOffset < -PAVILION_HEIGHT_CLAMP)
+	{
+		desc.yOffset = -PAVILION_HEIGHT_CLAMP;
+	}
+	AdjustPavilionCollisionBatchY(
+		desc.path,
+		desc.yOffset - previousYOffset);
+	PavilionHeight_ApplyToScene(index);
+	return true;
+}
+
+static bool PavilionHeight_Save(void)
+{
+	FILE* file = nullptr;
+	if (fopen_s(&file, EXPO_FIELD_PATH, "r") != 0 || !file)
+	{
+		sprintf_s(
+			g_PavilionHeightStatus,
+			sizeof(g_PavilionHeightStatus),
+			"保存失敗: %s を開けない",
+			EXPO_FIELD_PATH);
+		return false;
+	}
+	std::vector<std::string> lines;
+	char buffer[2048];
+	while (fgets(buffer, sizeof(buffer), file))
+	{
+		size_t length = strlen(buffer);
+		while (length > 0 && (buffer[length - 1] == '\n' || buffer[length - 1] == '\r'))
+		{
+			buffer[length - 1] = '\0';
+			length -= 1;
+		}
+		lines.emplace_back(buffer);
+	}
+	fclose(file);
+
+	int rewritten = 0;
+	for (std::string& line : lines)
+	{
+		if (line.compare(0, 9, "pavilion ") != 0)
+		{
+			continue;
+		}
+		const size_t pathBegin = 9;
+		const size_t pathEnd = line.find(' ', pathBegin);
+		if (pathEnd == std::string::npos)
+		{
+			continue;
+		}
+		const std::string path = line.substr(pathBegin, pathEnd - pathBegin);
+		const ExpoTileDesc* desc = nullptr;
+		for (const ExpoTileDesc& candidate : g_TileSet.pavilions)
+		{
+			if (path == candidate.path)
+			{
+				desc = &candidate;
+				break;
+			}
+		}
+		if (!desc || desc->hasRegion)
+		{
+			continue;
+		}
+		char rebuilt[2048];
+		if (desc->hasStreamCenter)
+		{
+			sprintf_s(
+				rebuilt,
+				sizeof(rebuilt),
+				"pavilion %s %.15f %.15f %.15f %.15f %.15f %.15f %.6f yoff %.3f",
+				desc->path,
+				desc->rtcX, desc->rtcY, desc->rtcZ,
+				desc->streamRtcX, desc->streamRtcY, desc->streamRtcZ,
+				static_cast<double>(desc->streamRadius),
+				static_cast<double>(desc->yOffset));
+		}
+		else
+		{
+			sprintf_s(
+				rebuilt,
+				sizeof(rebuilt),
+				"pavilion %s %.15f %.15f %.15f yoff %.3f",
+				desc->path,
+				desc->rtcX, desc->rtcY, desc->rtcZ,
+				static_cast<double>(desc->yOffset));
+		}
+		line = rebuilt;
+		rewritten += 1;
+	}
+	if (fopen_s(&file, EXPO_FIELD_PATH, "w") != 0 || !file)
+	{
+		sprintf_s(
+			g_PavilionHeightStatus,
+			sizeof(g_PavilionHeightStatus),
+			"保存失敗: %s に書けない",
+			EXPO_FIELD_PATH);
+		return false;
+	}
+	for (const std::string& line : lines)
+	{
+		fputs(line.c_str(), file);
+		fputc('\n', file);
+	}
+	fclose(file);
+
+	static const char* convertedPath = "data_converted\\meshes\\expo_field.txt";
+	if (fopen_s(&file, convertedPath, "w") == 0 && file)
+	{
+		for (const std::string& line : lines)
+		{
+			fputs(line.c_str(), file);
+			fputc('\n', file);
+		}
+		fclose(file);
+	}
+	sprintf_s(
+		g_PavilionHeightStatus,
+		sizeof(g_PavilionHeightStatus),
+		"保存完了: %d 行 (適用 %d / スキップ %d)",
+		rewritten,
+		g_PavilionHeightApplied,
+		g_PavilionHeightSkipped);
+	return true;
+}
+
+static void PavilionHeight_PumpOne(void)
+{
+	if (!g_PavilionHeightMeasuring)
+	{
+		return;
+	}
+	if (g_PavilionHeightCursor >= g_TileSet.pavilions.size())
+	{
+		g_PavilionHeightMeasuring = false;
+		PavilionHeight_Save();
+		return;
+	}
+	if (PavilionHeight_MeasureOne(g_PavilionHeightCursor))
+	{
+		g_PavilionHeightApplied += 1;
+	}
+	else
+	{
+		g_PavilionHeightSkipped += 1;
+	}
+	g_PavilionHeightCursor += 1;
+	sprintf_s(
+		g_PavilionHeightStatus,
+		sizeof(g_PavilionHeightStatus),
+		"測定中: %d / %d (適用 %d / スキップ %d)",
+		static_cast<int>(g_PavilionHeightCursor),
+		static_cast<int>(g_TileSet.pavilions.size()),
+		g_PavilionHeightApplied,
+		g_PavilionHeightSkipped);
+	if (g_PavilionHeightCursor >= g_TileSet.pavilions.size())
+	{
+		g_PavilionHeightMeasuring = false;
+		PavilionHeight_Save();
+	}
+}
+#endif
+
 void Field_DrawDebug(void)
 {
 #if defined(_DEBUG)
@@ -3287,7 +3827,48 @@ void Field_DrawDebug(void)
 		ApplyFixedYOffsets();
 		RefreshCollisionWorlds();
 	}
+	ImGui::Separator();
+	if (!g_LoadComplete)
+	{
+		ImGui::TextDisabled("Loading models...");
+	}
+	else if (!g_HasEcefToEnu || !g_HasMeshRotation || g_FloorCollisionId < 0)
+	{
+		ImGui::TextDisabled("Floor collision not ready");
+	}
+	else if (g_PavilionHeightMeasuring)
+	{
+		ImGui::Text(
+			"Measuring %d / %d...",
+			static_cast<int>(g_PavilionHeightCursor),
+			static_cast<int>(g_TileSet.pavilions.size()));
+	}
+	else
+	{
+		ImGui::Text(
+			"Pavilions: %d",
+			static_cast<int>(g_TileSet.pavilions.size()));
+		if (ImGui::Button("Measure pavilion heights"))
+		{
+			g_PavilionHeightMeasuring = true;
+			g_PavilionHeightCursor = 0;
+			g_PavilionHeightApplied = 0;
+			g_PavilionHeightSkipped = 0;
+			sprintf_s(
+				g_PavilionHeightStatus,
+				sizeof(g_PavilionHeightStatus),
+				"測定開始: %d 件",
+				static_cast<int>(g_TileSet.pavilions.size()));
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Save yoff"))
+		{
+			PavilionHeight_Save();
+		}
+	}
+	ImGui::TextWrapped("%s", g_PavilionHeightStatus);
 	ImGui::End();
+	PavilionHeight_PumpOne();
 #endif
 }
 

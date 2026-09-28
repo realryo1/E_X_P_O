@@ -38,6 +38,8 @@ ID3D11Device*           g_D3DDevice = NULL;
 ID3D11DeviceContext*    g_ImmediateContext = NULL;
 IDXGISwapChain*         g_SwapChain = NULL;
 static IDXGISwapChain3* g_SwapChain3 = nullptr;
+static HANDLE g_FrameLatencyWaitable = nullptr;
+static UINT g_SwapChainFlags = 0;
 ID3D11RenderTargetView* g_RenderTargetView = NULL;
 static ID3D11RenderTargetView* g_RenderTargetViews[2] = {};
 static UINT g_CurrentBackBufferIndex = 0;
@@ -1573,6 +1575,7 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 		swapDesc.Scaling = DXGI_SCALING_NONE;
 		swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		swapDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+		swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
 
 		IDXGISwapChain1* swapChain1 = nullptr;
 		hr = dxgiFactory->CreateSwapChainForHwnd(
@@ -1593,12 +1596,34 @@ HRESULT InitRenderer(HINSTANCE hInstance, HWND hWnd, BOOL bWindow)
 				nullptr,
 				&swapChain1);
 		}
+		if (FAILED(hr) && (swapDesc.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT))
+		{
+			swapDesc.Flags = 0;
+			hr = dxgiFactory->CreateSwapChainForHwnd(
+				g_D3DDevice,
+				hWnd,
+				&swapDesc,
+				nullptr,
+				nullptr,
+				&swapChain1);
+		}
 		if (SUCCEEDED(hr))
 		{
 			hr = swapChain1->QueryInterface(IID_PPV_ARGS(&g_SwapChain));
 			if (SUCCEEDED(hr))
 			{
 				g_SwapChain->QueryInterface(IID_PPV_ARGS(&g_SwapChain3));
+				g_SwapChainFlags = swapDesc.Flags;
+				g_FrameLatencyWaitable = nullptr;
+				IDXGISwapChain2* swapChain2 = nullptr;
+				if ((g_SwapChainFlags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) &&
+					SUCCEEDED(g_SwapChain->QueryInterface(IID_PPV_ARGS(&swapChain2))) &&
+					swapChain2)
+				{
+					swapChain2->SetMaximumFrameLatency(1);
+					g_FrameLatencyWaitable = swapChain2->GetFrameLatencyWaitableObject();
+					swapChain2->Release();
+				}
 			}
 			swapChain1->Release();
 		}
@@ -1966,6 +1991,7 @@ void FinalizeRenderer(void)
 	ReleaseGpuTimingQueries();
 	if( g_ImmediateContext )	g_ImmediateContext->ClearState();
 	releaseBackBuffer();
+	g_FrameLatencyWaitable = nullptr;
 	SAFE_RELEASE(g_SwapChain3);
 	if( g_SwapChain )			g_SwapChain->Release();
 	if( g_ImmediateContext )	g_ImmediateContext->Release();
@@ -2057,6 +2083,15 @@ void Present(void)
 			&g_RenderTargetView,
 			nullptr);
 	}
+}
+
+void Direct3D_WaitFrameLatency(void)
+{
+	if (!g_FrameLatencyWaitable)
+	{
+		return;
+	}
+	WaitForSingleObjectEx(g_FrameLatencyWaitable, 1000, TRUE);
 }
 
 
@@ -2172,7 +2207,12 @@ void Direct3D_Resize(unsigned int width, unsigned int height)
 	if (width == 0 || height == 0) return;
 
 	releaseBackBuffer();
-	g_SwapChain->ResizeBuffers(2, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+	g_SwapChain->ResizeBuffers(
+		2,
+		width,
+		height,
+		DXGI_FORMAT_R8G8B8A8_UNORM,
+		g_SwapChainFlags);
 	configureBackBuffer();
 }
 

@@ -28,7 +28,7 @@ using namespace DirectX;
 using json = nlohmann::json;
 
 static const size_t GLB_MAX_TEXTURE_DIMENSION = 2048;
-static const unsigned int GLB_MAX_CELL_DRAW_INDEXED = 1;
+static const unsigned int GLB_MAX_CELL_DRAW_INDEXED = 64;
 static const std::size_t GLB_MAX_COMBINED_SHADOW_BYTES = 8u * 1024u * 1024u;
 static std::mutex g_AssimpMutex;
 
@@ -2994,16 +2994,27 @@ static void DecodeAssimpTexture(
 	GenerateMipMapsIfNeeded(decoded, skipTextureResize);
 }
 
-static unsigned int TextureDecodeWorkerCount(std::size_t)
+static unsigned int TextureDecodeWorkerCount(
+	std::size_t textureCount,
+	unsigned int requestedWorkerCount)
 {
-	return 1;
+	if (textureCount <= 1 || requestedWorkerCount <= 1)
+	{
+		return 1;
+	}
+	return (std::min)(
+		requestedWorkerCount,
+		static_cast<unsigned int>(textureCount));
 }
 
 static void RunTextureDecodeJobs(
 	std::size_t textureCount,
+	unsigned int requestedWorkerCount,
 	const std::function<void(std::size_t)>& decodeOne)
 {
-	const unsigned int workerCount = TextureDecodeWorkerCount(textureCount);
+	const unsigned int workerCount = TextureDecodeWorkerCount(
+		textureCount,
+		requestedWorkerCount);
 	if (workerCount <= 1)
 	{
 		HRESULT coHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -3057,7 +3068,9 @@ static void RunTextureDecodeJobs(
 //==============================================================================
 // 埋め込みテクスチャの CPU デコード（ワーカー可。D3Dは触らない）
 //==============================================================================
-bool GlbModel::DecodeEmbeddedTextures(bool skipTextureResize)
+bool GlbModel::DecodeEmbeddedTextures(
+	bool skipTextureResize,
+	unsigned int decodeWorkerCount)
 {
 	m_DecodedTextures.clear();
 	m_TexturesDecoded = false;
@@ -3070,6 +3083,7 @@ bool GlbModel::DecodeEmbeddedTextures(bool skipTextureResize)
 		}
 		RunTextureDecodeJobs(
 			m_pPreparedData->textures.size(),
+			decodeWorkerCount,
 			[this, skipTextureResize](std::size_t i)
 			{
 				DecodePreparedTexture(
@@ -3092,6 +3106,7 @@ bool GlbModel::DecodeEmbeddedTextures(bool skipTextureResize)
 	}
 	RunTextureDecodeJobs(
 		static_cast<std::size_t>(m_pScene->mNumTextures),
+		decodeWorkerCount,
 		[this, skipTextureResize](std::size_t i)
 		{
 			DecodeAssimpTexture(
@@ -3678,6 +3693,95 @@ static bool IsSphereVisibleFromCamera(
 	return true;
 }
 
+static bool DrawCulledShadowCells(
+	ID3D11DeviceContext* pContext,
+	const GlbMesh& mesh,
+	bool useCameraCull,
+	Camera* camera,
+	const XMFLOAT3* cullMin,
+	const XMFLOAT3* cullMax)
+{
+	if (!pContext ||
+		!mesh.pShadowIndexBuffer ||
+		mesh.shadowCells.empty())
+	{
+		return false;
+	}
+
+	auto cellVisible = [&](const GlbShadowCell& cell) -> bool
+	{
+		if (cell.indexCount == 0)
+		{
+			return false;
+		}
+		if (useCameraCull)
+		{
+			return IsSphereVisibleFromCamera(
+				cell.worldCenter,
+				cell.worldRadius,
+				camera);
+		}
+		if (!cullMin || !cullMax)
+		{
+			return true;
+		}
+		return WorldAabbOverlaps(
+			cell.worldAabbMin,
+			cell.worldAabbMax,
+			*cullMin,
+			*cullMax);
+	};
+
+	pContext->IASetIndexBuffer(
+		mesh.pShadowIndexBuffer,
+		DXGI_FORMAT_R32_UINT,
+		0);
+
+	unsigned int drawOffset = 0;
+	unsigned int drawCount = 0;
+	unsigned int issued = 0;
+	bool hasDrawRange = false;
+	auto flushDrawRange = [&]()
+	{
+		if (hasDrawRange && drawCount > 0 && issued < GLB_MAX_CELL_DRAW_INDEXED)
+		{
+			DrawIndexed(drawCount, drawOffset, 0);
+			issued += 1;
+		}
+		hasDrawRange = false;
+		drawOffset = 0;
+		drawCount = 0;
+	};
+	for (const GlbShadowCell& cell : mesh.shadowCells)
+	{
+		if (!cellVisible(cell))
+		{
+			flushDrawRange();
+			continue;
+		}
+		if (issued >= GLB_MAX_CELL_DRAW_INDEXED)
+		{
+			break;
+		}
+		const bool isAdjacent =
+			hasDrawRange &&
+			cell.indexOffset == drawOffset + drawCount;
+		if (!isAdjacent)
+		{
+			flushDrawRange();
+			if (issued >= GLB_MAX_CELL_DRAW_INDEXED)
+			{
+				break;
+			}
+			drawOffset = cell.indexOffset;
+			hasDrawRange = true;
+		}
+		drawCount += cell.indexCount;
+	}
+	flushDrawRange();
+	return true;
+}
+
 //==============================================================================
 // 描画処理 (pos/rot/scale指定版)
 //==============================================================================
@@ -3836,80 +3940,20 @@ void GlbModel::Draw(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 scale,
 			mesh.pShadowIndexBuffer &&
 			mesh.shadowIndexCount > 0)
 		{
-			unsigned int rangeCount = 0;
-			bool inRange = false;
-			for (const GlbShadowCell& cell : mesh.shadowCells)
-			{
-				const bool visible =
-					cell.indexCount > 0 &&
-					IsSphereVisibleFromCamera(
-						cell.worldCenter,
-						cell.worldRadius,
-						pCamera);
-				if (!visible)
-				{
-					inRange = false;
-					continue;
-				}
-				if (!inRange)
-				{
-					rangeCount += 1;
-					inRange = true;
-				}
-			}
-			if (rangeCount == 0)
+			UpdateShadowWorldBounds(mesh, World);
+			if (DrawCulledShadowCells(
+				pContext,
+				mesh,
+				true,
+				pCamera,
+				nullptr,
+				nullptr))
 			{
 				continue;
 			}
-			if (rangeCount > GLB_MAX_CELL_DRAW_INDEXED)
-			{
-				pContext->IASetIndexBuffer(
-					mesh.pIndexBuffer,
-					DXGI_FORMAT_R32_UINT,
-					0);
-				DrawIndexed(mesh.indexCount, 0, 0);
-				continue;
-			}
-			pContext->IASetIndexBuffer(
-				mesh.pShadowIndexBuffer,
-				DXGI_FORMAT_R32_UINT,
-				0);
-			unsigned int drawOffset = 0;
-			unsigned int drawCount = 0;
-			bool hasDrawRange = false;
-			auto flushDrawRange = [&]()
-			{
-				if (hasDrawRange && drawCount > 0)
-				{
-					DrawIndexed(drawCount, drawOffset, 0);
-				}
-				hasDrawRange = false;
-				drawOffset = 0;
-				drawCount = 0;
-			};
-			for (const GlbShadowCell& cell : mesh.shadowCells)
-			{
-				if (cell.indexCount == 0 ||
-					!IsSphereVisibleFromCamera(
-						cell.worldCenter,
-						cell.worldRadius,
-						pCamera))
-				{
-					flushDrawRange();
-					continue;
-				}
-				const bool isAdjacent =
-					hasDrawRange &&
-					cell.indexOffset == drawOffset + drawCount;
-				if (!isAdjacent)
-				{
-					flushDrawRange();
-					drawOffset = cell.indexOffset;
-					hasDrawRange = true;
-				}
-				drawCount += cell.indexCount;
-			}
-			flushDrawRange();
+			pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+			DrawIndexed(mesh.indexCount, 0, 0);
+			continue;
 		}
 		else if (!m_HiddenBatchIds.empty() &&
 			mesh.pVisibleIndexBuffer &&
@@ -4053,6 +4097,17 @@ void GlbModel::DrawShadowMap(XMFLOAT3 pos, const XMMATRIX& rotation, XMFLOAT3 sc
 		UINT stride = sizeof(Vertex3D);
 		UINT offset = 0;
 		pContext->IASetVertexBuffers(0, 1, &mesh.pVertexBuffer, &stride, &offset);
+		if (m_ShadowUseCells &&
+			DrawCulledShadowCells(
+				pContext,
+				mesh,
+				false,
+				nullptr,
+				&cullMin,
+				&cullMax))
+		{
+			continue;
+		}
 		pContext->IASetIndexBuffer(mesh.pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
 		DrawIndexed(mesh.indexCount, 0, 0);
 	}

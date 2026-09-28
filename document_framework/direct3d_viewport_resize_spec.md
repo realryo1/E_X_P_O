@@ -77,6 +77,8 @@
 - `BufferDesc.Width/Height` 相当: 初期クライアント領域サイズ
 - `BufferCount = 2`
 - `SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD`
+- `Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT`（作れない環境はフラグ無しへフォールバック）
+- `SetMaximumFrameLatency(1)` と描画前の `WaitForSingleObjectEx`
 - `Format = DXGI_FORMAT_R8G8B8A8_UNORM`
 
 アダプターはソフトウェアを除外し、`EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` を優先する。だめなら専用ビデオメモリが最も大きいハードウェアアダプターを選ぶ。`EnumOutputs()` の有無では選ばない。ハイブリッドノートでは内蔵パネルを持つ iGPU より dGPU を選ぶ。
@@ -98,7 +100,7 @@
 
 **手順**
 1. `releaseBackBuffer()` で既存 RTV / DSV 等を解放
-2. `g_SwapChain->ResizeBuffers(2, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0)`
+2. `g_SwapChain->ResizeBuffers(2, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 生成時と同じ Flags)`
 3. `configureBackBuffer()` で再生成
 
 **重要点**

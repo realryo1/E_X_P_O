@@ -79,6 +79,7 @@ def write_field_manifest(
     existing_lod2_far: list[list[str]] = []
     existing_lod2_far_batches: list[list[str]] = []
     existing_pavilions: list[list[str]] = []
+    existing_yoff: dict[str, float] = {}
     if FIELD_MANIFEST.is_file():
         for line in FIELD_MANIFEST.read_text(encoding="utf-8").splitlines():
             parts = line.split()
@@ -92,6 +93,11 @@ def write_field_manifest(
                 existing_lod2_far_batches.append(parts)
             if parts and parts[0] == "pavilion" and len(parts) >= 5:
                 existing_pavilions.append(parts)
+                if "yoff" in parts:
+                    try:
+                        existing_yoff[parts[1]] = float(parts[parts.index("yoff") + 1])
+                    except (ValueError, IndexError):
+                        pass
     if floor_path:
         existing_floor = _rtc_parts("floor", floor_path, floor_rtc)
     if ring_path:
@@ -111,6 +117,8 @@ def write_field_manifest(
                         f"{item[3]:.6f}",
                     ]
                 )
+            if path in existing_yoff and math.isfinite(existing_yoff[path]):
+                parts.extend(["yoff", f"{existing_yoff[path]:.3f}"])
             existing_pavilions.append(parts)
     if lod2_far is not None:
         existing_lod2_far = [_rtc_parts("lod2far", path, rtc) for path, rtc in lod2_far]

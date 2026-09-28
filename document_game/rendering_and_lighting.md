@@ -81,7 +81,7 @@ flowchart TD
 | **大屋根リング** | `asset/expomodel/expo_ring.glb` | `S_PBR` | **○** (近傍セル) | **○** | 公式 appearance JPEG 22枚 + 単色 4枚 | Y: `-1.550` (`EXPO_RING_Y_OFFSET`) | 約90.6万ポリゴン。XZセル分割で影パスをカリング |
 | **LOD2タイル** | `asset/expomodel/expo_tile_lod2.glb` | `S_PBR` | **○** (近傍セル) | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | パンチ済みタイル4枚 |
 | **未パンチLOD2遠景** | `asset/expomodel/expo_tile_far.glb` | `S_PBR` | **○**（メッシュ単位） | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | LOD3常駐時にバッチ単位で排他非表示。メインは hidden 変更時に可視IBを連続化。影はセル無しの1発行 |
-| **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 48、破棄 72、視線方向は+32）。初期優先は `null2` → `dynamic_equilibrium` → `expo_related_31` → `expo_related_25` → `angola` → `czech`。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理。`null2` は動的キューブマップ鏡面 |
+| **LOD3パビリオン** | `asset/expomodel/expo_pavilion_*.glb` | `S_PBR` | × | **○** | 長辺 2048px 上限（WIC縮小） | Y: `-9.010` (`EXPO_BUILDING_Y_OFFSET`) | 距離ストリーミング（開始 48、カメラ破棄 72、視線先読みは開始のみ+32）。初期優先は `null2` → `dynamic_equilibrium` → `expo_related_31` → `expo_related_25` → `angola` → `czech`。ワーカーでマテリアル結合。影は表示中もLOD2を投影元とする。全GLBでglTFのPBR係数・packed ORM・法線・エミッシブを共通処理。`null2` は動的キューブマップ鏡面 |
 | **null2** | `asset/expomodel/expo_pavilion_null2.glb` | `S_PBR` | × | **○** | 写真アルベドは使わず銀アルベド | Y: `-9.010` | 金属度 1、粗さ 0.08。起動既定 512² キューブを t6 で反射（ImGui で 128～1024）。膜は高周波の微振動。撮影半径約 72、1フレーム1面 |
 | **プレースホルダー** | `asset/model/cube.fbx` | `S_PBR` | × | **○** | 単色マテリアル | 各建物の配置座標 | LOD3 の GPU 化進行中に表示。影はLOD2を投影元とする |
 | **プレイヤー機体** | `asset/model/flytaxi.glb` | `S_PBR` | **○**（結合シャドウ） | **○** | 組み込みテクスチャ | ホバー移動座標 | 表示長辺約 0.8。Assimp でアニメーション0フレームを焼いたあとマテリアル結合。影は 8MB 以下の結合バッファでカスケードあたり1発行 |
@@ -227,7 +227,7 @@ flowchart LR
 - **インデックスの再構築**: 各三角形の重心位置から所属セルを決定し、セル単位でまとまったインデックス配列（`shadowIndices`）とセルメタデータ（`GlbShadowCell`）を構築。
 - **GPU 転送**: 通常の頂点・インデックスバッファとは別に、専用のシャドウインデックスバッファ（`pShadowIndexBuffer`）を 6ms のフレーム予算内でチャンク転送（約 3.6MB）。
 - **描画時カリング (`GlbModel::DrawShadowMap`)**:
-  注視点 \(\pm\) 半径で定義されるライトカリング AABB と、各LOD2セルのワールド AABB が交差するセルのみを `DrawIndexed` で発行する。可視範囲が8を超えたらメッシュ全体を1回描く。遠景LOD2はセルを使わずメッシュ全体を投影し、LOD3表示中もパンチ穴の建物影を維持する。タクシーは結合シャドウがあれば1発行、無ければメッシュ単位。
+  注視点 \(\pm\) 半径で定義されるライトカリング AABB と、各LOD2セルのワールド AABB が交差するセルのみを `DrawIndexed` で発行する。連続範囲は最大64。遠景LOD2はセルを使わずメッシュ全体を投影し、LOD3表示中もパンチ穴の建物影を維持する。タクシーは結合シャドウがあれば1発行、無ければメッシュ単位。
 
 ### 5.3 影サンプリングと範囲外処理 (`CalcShadow` in `Common.hlsl`)
 
@@ -265,7 +265,7 @@ flowchart LR
 - **デバッグ HUD の更新間隔**: プロセスメモリと DXGI メモリ予算を表示する HUD は 250ms 間隔で更新する。描画時の表示内容は維持したまま、毎フレームのメモリ照会を避ける。
 - **メインパスのメッシュカリング**: `GlbModel::Draw` は各メッシュのワールドAABBから作った保守的な境界球をカメラ視錐台と比較し、視界外のメッシュについてマテリアル設定・SRVバインド・`DrawIndexed` を省略する。境界球はシャドウパスと共有のワールド行列キャッシュを使う。
 - **リングのセルカリング**: `expo_ring.glb` はシャドウ用に準備済みのXZセルとインデックスバッファをメインパスでも共有する。セル単位で視錐台判定し、可視セルの連続範囲をまとめて描画する。
-- **床・LOD2・パビリオンのメインパスセル／バッチカリング**: `SetMainPassCellCulling(true)` を床、パンチ済みLOD2、フォールバックLOD2、リング、パビリオンに付ける。影用セルがあるモデルは可視セルが連続なら1つの `DrawIndexed`、分裂したら IB 全体を1回描く。遠景LOD2は hidden 変更時に可視インデックスを連続化する。
+- **床・LOD2・パビリオンのメインパスセル／バッチカリング**: `SetMainPassCellCulling(true)` を床、パンチ済みLOD2、フォールバックLOD2、リング、パビリオンに付ける。影用セルがあるモデルは可視セルの連続範囲だけを最大64回の `DrawIndexed` で描く。先頭〜末尾を1本にまとめて会場全体を描くフォールバックはしない。遠景LOD2は hidden 変更時に可視インデックスを連続化する。
 - **定数バッファの Map(DISCARD)**: ワールド／ビュー／射影などの定数バッファは `USAGE_DYNAMIC` と `Map(DISCARD)` で更新する。同一値の再発行は省略する。NVIDIA の dGPU では `UpdateSubresource` の既定バッファ更新がフレームを食いやすい。
 
 ### 5.6 NVIDIA dGPU での DrawIndexed 発行コスト（2026-09 対策）
@@ -276,11 +276,11 @@ flowchart LR
 
 1. **`GlbModel::MergePreparedMeshesByMaterial`**: CPU 準備済みメッシュを同一アルベド（埋め込みテクスチャ番号。テクスチャ無しは diffuse）で結合する。法線／ORM／エミッシブの違いでは割らない。元の `expo_batch_id` は `GlbBatchRange` として残す。
 2. **`GlbModel::Draw` の範囲結合**: hidden が無いときは隣接する可視範囲を1つの `DrawIndexed` にする。遠景LOD2は hidden batch の集合が変わったときだけ可視インデックスを連続バッファへ載せ替え、メッシュあたり1回発行する。
-3. **初期ロード完了後の GPU ポンプを Present 後へ**: `Field_PumpLoad` は CPU インポート開始だけを Update で行い、`PumpGpu` とパビリオン破棄は `Field_PumpAfterPresent` が `Present` の後に最大 3ms で進める。直前フレームの Draw が 8ms 超、または GPU が 8ms 超ならそのフレームはポンプしない。GPU タイムスタンプは Release でも取る。ローカル VRAM が予算の 85% を超えたら追加アップロードを止める。描画前の `UpdateSubresource` が `DrawIndexed` をブロックするのを避ける。
+3. **初期ロード完了後の GPU ポンプを Present 後へ**: `Field_PumpLoad` は CPU インポート開始だけを Update で行い、`PumpGpu` とパビリオン破棄は `Field_PumpAfterPresent` が `Present` の後に通常最大 3ms で進める。直前フレームの Draw または GPU が 8ms を超えても、1msの縮退予算で破棄とGPU化を継続する。DXGIのLOCALとNON_LOCALを合算したVRAM予算が85%を超えた場合は追加GPU化だけを止め、範囲外パビリオンの破棄は続ける。GPU タイムスタンプは Release でも取る。描画前の `UpdateSubresource` が `DrawIndexed` をブロックするのを避ける。
 4. **レース開始で FBX を読まない**: スタートマーカーは `cube.fbx` ではなくコース輪と同じビルボード。リングは毎回 new/delete せず位置だけ更新し、遠いゲートは描かない。スタート付近にいるときはワープしない。NVIDIA ではレース開始フレームの Assimp＋PBR 初回発行が Field 全体をキュー待ちに巻き込む。
 5. **遠景LOD2の影は結合バッファ**: パンチ穴の建物影は残し、マテリアルが複数でもモデルあたり1回の `DrawIndexed` にする。
-6. **セル描画の発行上限**: 床・パンチ済みLOD2・リングで、可視セル範囲が2以上に分裂したら IB 全体を1回描く。
-7. **初期ロード中は 2D のみ**: `Game_Draw` はコア完了まで SSAO とシーンRTを使わない。スカイドーム FBX は `FinishLoad` の直前（まだ3Dを描かないフレーム）に読む。
+6. **セル描画の発行上限**: 床・パンチ済みLOD2・リングのメインパスと影パスは、可視セルの連続範囲ごとに描く（最大64）。範囲が多いときも先頭〜末尾の巨大スパンや会場全体の IB にはフォールバックしない。
+7. **初期ロード中は 2D のみ**: `Game_Draw` はコア完了まで SSAO とシーンRTを使わない。スカイドーム FBX はキックオフ直後にメインスレッドで1回読む。GLB直接デコードは Assimp を使わないのでワーカーと重ねられる。
 8. **小さいモデルだけ結合影を作る**: `TryBuildSmallCombinedShadow` は結合頂点＋インデックスが 8MB 以下のときだけ同期 `CreateBuffer` する。タクシー `flytaxi.glb` は Assimp で 0 フレーム姿勢を焼いたあと会場と同じマテリアル結合へ渡し、影の 61×3 発行を避ける。会場 LOD2／床の数百 MB 結合は作らない。
 9. **遠景LOD2はタイル1メッシュ**: ユニーク写真が何枚でも `CollapsePreparedMeshes(1)` で最大テクスチャのメッシュへ幾何を載せる。距離があるため見た目の優先は発行回数。hidden が空のときはバッチ範囲を分割せず IB 全体を1回描く。
 10. **アダプタ選択**: `InitRenderer` は `IDXGIFactory6::EnumAdapterByGpuPreference(HIGH_PERFORMANCE)` を優先し、だめなら専用 VRAM 最大。`EnumOutputs()` の有無では選ばない。`--gpu=high` は同じ高性能 GPU を明示するだけ。
@@ -295,7 +295,7 @@ Debug ビルドではウィンドウキャプションと `debug-frame-perf.log`
 スカイドームは会場の背景および太陽光方位の視覚的なアンカーとして機能する。モデルは [`asset/model/basic_skybox_3d.fbx`](../asset/model/basic_skybox_3d.fbx) を使用し、テクスチャは [`asset/texture/pizzo_pernice_puresky_4k.hdr`](../asset/texture/pizzo_pernice_puresky_4k.hdr) から生成する。
 
 - **アセット**: `asset/model/basic_skybox_3d.fbx`
-- **テクスチャ**: 太陽を除いた空の対数平均輝度がLDR中間調（約 `0.40`）になる露出を決め、簡易Reinhardでトーンマップして sRGB の `R8G8B8A8_UNORM` SRV を生成する。`Sunlight_Initialize` が `Field_SetSkyboxTexture` を呼び、`Sprite3D::SetCustomTexture` でFBX内蔵テクスチャを上書きし、マテリアル色は白にする。
+- **テクスチャ**: 太陽を除いた空の対数平均輝度がLDR中間調（約 `0.40`）になる露出を決め、簡易Reinhardでトーンマップして sRGB の `R8G8B8A8_UNORM` SRV を生成する。タイトル中の `Sunlight_PrepareAssets` が HDR 読込と太陽抽出を済ませ、`Field_SetSkyboxTexture` で受け渡す。`Sunlight_Initialize` は結果を適用するだけにする。`Sprite3D::SetCustomTexture` でFBX内蔵テクスチャを上書きし、マテリアル色は白にする。
 - **描画シェーダー**: `S_SKYBOX`（ライト・環境光・影の影響を受けず、ワールド方向から計算したUVで変換済みテクスチャ色を 100% 出力）。
 - **姿勢設定**:
   - スケール: `1000.0f`

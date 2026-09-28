@@ -592,6 +592,7 @@ int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 
 			if (steps > 0 && NeedsPresent())
 			{
+				Direct3D_WaitFrameLatency();
 				// 描画時間の計測（Present/VSync 待ちは含めない）
 				auto startDraw = std::chrono::high_resolution_clock::now();
 

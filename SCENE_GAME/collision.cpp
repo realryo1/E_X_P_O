@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 #include <deque>
+#include <map>
+#include <unordered_map>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -44,6 +46,7 @@ namespace
 	{
 		std::vector<CollisionTriangle> localTris;
 		std::vector<CollisionTriangle> worldTris;
+		std::vector<unsigned int> triangleBatchIds;
 		std::vector<XMFLOAT3> triMin;
 		std::vector<XMFLOAT3> triMax;
 		std::vector<int> largeTris;
@@ -66,27 +69,40 @@ namespace
 		bool useGrid;
 	};
 
+	struct LoadedCollisionData
+	{
+		std::vector<CollisionTriangle> triangles;
+		std::vector<unsigned int> triangleBatchIds;
+		bool hasBatchIds = false;
+	};
+
 	struct BakeJob
 	{
+		size_t sequence = 0;
 		std::string glbPath;
 		std::string binPath;
 		XMMATRIX world;
 		bool filterLattice;
+		std::vector<CollisionBatchYOffset> batchYOffsets;
 	};
 
 	struct BakeResult
 	{
+		size_t sequence = 0;
 		CollisionMesh mesh;
 		bool failed = false;
 	};
 
 	std::vector<CollisionMesh> g_Meshes;
 	std::deque<BakeJob> g_Jobs;
-	std::deque<BakeResult> g_Ready;
-	std::thread g_Worker;
+	std::map<size_t, BakeResult> g_Ready;
+	std::vector<std::thread> g_Workers;
 	std::mutex g_Mutex;
 	std::atomic<bool> g_WorkerActive{ false };
 	std::atomic<bool> g_WorkerJoinNeeded{ false };
+	std::atomic<int> g_ActiveWorkerCount{ 0 };
+	size_t g_NextJobSequence = 0;
+	size_t g_NextPumpSequence = 0;
 	std::atomic<size_t> g_ProgressDone{ 0 };
 	std::atomic<size_t> g_ProgressTotal{ 0 };
 	std::atomic<int> g_ProgressStage{ COLLISION_STAGE_IDLE };
@@ -297,18 +313,18 @@ namespace
 		return false;
 	}
 
-	std::vector<CollisionTriangle> LoadLocalTrisBin(const char* path)
+	LoadedCollisionData LoadLocalTrisBin(const char* path)
 	{
-		std::vector<CollisionTriangle> tris;
+		LoadedCollisionData data;
 		if (!FileExists(path))
 		{
-			return tris;
+			return data;
 		}
 
 		FILE* file = nullptr;
 		if (fopen_s(&file, path, "rb") != 0 || !file)
 		{
-			return tris;
+			return data;
 		}
 
 		char magic[4] = {};
@@ -325,7 +341,7 @@ namespace
 			|| version != 1)
 		{
 			fclose(file);
-			return tris;
+			return data;
 		}
 
 		std::vector<XMFLOAT3> verts(vertexCount);
@@ -334,7 +350,7 @@ namespace
 			if (fread(verts.data(), sizeof(XMFLOAT3), vertexCount, file) != vertexCount)
 			{
 				fclose(file);
-				return tris;
+				return data;
 			}
 		}
 		std::vector<unsigned int> indices(static_cast<size_t>(triangleCount) * 3);
@@ -343,12 +359,28 @@ namespace
 			if (fread(indices.data(), sizeof(unsigned int), indices.size(), file) != indices.size())
 			{
 				fclose(file);
-				return tris;
+				return data;
 			}
+		}
+		std::vector<unsigned int> batchIds;
+		if ((flags & 1u) != 0)
+		{
+			batchIds.resize(triangleCount);
+			if (triangleCount > 0 &&
+				fread(batchIds.data(), sizeof(unsigned int), triangleCount, file) != triangleCount)
+			{
+				fclose(file);
+				return LoadedCollisionData();
+			}
+			data.hasBatchIds = true;
 		}
 		fclose(file);
 
-		tris.reserve(triangleCount);
+		data.triangles.reserve(triangleCount);
+		if (data.hasBatchIds)
+		{
+			data.triangleBatchIds.reserve(triangleCount);
+		}
 		for (unsigned int i = 0; i < triangleCount; ++i)
 		{
 			const unsigned int ia = indices[i * 3 + 0];
@@ -374,36 +406,40 @@ namespace
 				verts[ib].y * ASSIMP_GLOBAL_SCALE,
 				-verts[ib].z * ASSIMP_GLOBAL_SCALE
 			};
-			tris.push_back(tri);
+			data.triangles.push_back(tri);
+			if (data.hasBatchIds)
+			{
+				data.triangleBatchIds.push_back(batchIds[i]);
+			}
 		}
-		return tris;
+		return data;
 	}
 
-	std::vector<CollisionTriangle> ImportLocalTris(const char* path)
+	LoadedCollisionData ImportLocalTris(const char* path)
 	{
-		std::vector<CollisionTriangle> tris;
+		LoadedCollisionData data;
 		if (!FileExists(path))
 		{
-			return tris;
+			return data;
 		}
 
 		std::vector<XMFLOAT3> vertices;
 		if (!GlbModel::ImportCollisionTriangles(path, &vertices) ||
 			vertices.size() < 3)
 		{
-			return tris;
+			return data;
 		}
 
-		tris.reserve(vertices.size() / 3);
+		data.triangles.reserve(vertices.size() / 3);
 		for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
 		{
 			CollisionTriangle tri;
 			tri.a = vertices[i + 0];
 			tri.b = vertices[i + 1];
 			tri.c = vertices[i + 2];
-			tris.push_back(tri);
+			data.triangles.push_back(tri);
 		}
-		return tris;
+		return data;
 	}
 
 	void BuildFlatGrid(CollisionMesh* mesh, int maxCellsPerTri)
@@ -567,10 +603,13 @@ namespace
 	CollisionMesh BakeMesh(
 		std::vector<CollisionTriangle> localTris,
 		const XMMATRIX& world,
-		bool filterLattice)
+		bool filterLattice,
+		const std::vector<unsigned int>& localBatchIds,
+		const std::vector<CollisionBatchYOffset>& batchYOffsets)
 	{
 		CollisionMesh mesh = {};
 		mesh.localTris = std::move(localTris);
+		mesh.triangleBatchIds.clear();
 		mesh.world = world;
 		mesh.yBias = 0.0f;
 		mesh.filterLattice = filterLattice;
@@ -596,6 +635,21 @@ namespace
 			worldTri.a = TransformPoint(mesh.localTris[i].a, world);
 			worldTri.b = TransformPoint(mesh.localTris[i].b, world);
 			worldTri.c = TransformPoint(mesh.localTris[i].c, world);
+			unsigned int batchId = 0xFFFFFFFFu;
+			if (i < localBatchIds.size())
+			{
+				batchId = localBatchIds[i];
+			}
+			for (const CollisionBatchYOffset& batch : batchYOffsets)
+			{
+				if (batch.batchId == batchId)
+				{
+					worldTri.a.y += batch.yOffset;
+					worldTri.b.y += batch.yOffset;
+					worldTri.c.y += batch.yOffset;
+					break;
+				}
+			}
 			if (filterLattice && !KeepRingCollisionTriangle(worldTri))
 			{
 				g_ProgressDone = i + 1;
@@ -603,6 +657,7 @@ namespace
 			}
 			ExpandBounds(&bMin, &bMax, worldTri);
 			mesh.worldTris.push_back(worldTri);
+			mesh.triangleBatchIds.push_back(batchId);
 			g_ProgressDone = i + 1;
 		}
 
@@ -624,7 +679,7 @@ namespace
 		return mesh;
 	}
 
-	std::vector<CollisionTriangle> LoadLocalTris(
+	LoadedCollisionData LoadLocalTris(
 		const BakeJob& job,
 		bool* loadedFromBin)
 	{
@@ -635,21 +690,21 @@ namespace
 		g_ProgressStage = COLLISION_STAGE_LOAD;
 		g_ProgressDone = 0;
 		g_ProgressTotal = 1;
-		std::vector<CollisionTriangle> tris;
+		LoadedCollisionData data;
 		if (!job.binPath.empty() && FileExists(job.binPath.c_str()))
 		{
-			tris = LoadLocalTrisBin(job.binPath.c_str());
-			if (!tris.empty() && loadedFromBin)
+			data = LoadLocalTrisBin(job.binPath.c_str());
+			if (!data.triangles.empty() && loadedFromBin)
 			{
 				*loadedFromBin = true;
 			}
 		}
-		if (tris.empty() && !job.glbPath.empty())
+		if (data.triangles.empty() && !job.glbPath.empty())
 		{
-			tris = ImportLocalTris(job.glbPath.c_str());
+			data = ImportLocalTris(job.glbPath.c_str());
 		}
 		g_ProgressDone = 1;
-		return tris;
+		return data;
 	}
 
 	void WorkerMain(void)
@@ -661,9 +716,12 @@ namespace
 				std::lock_guard<std::mutex> lock(g_Mutex);
 				if (g_Jobs.empty())
 				{
-					g_WorkerActive = false;
-					g_WorkerJoinNeeded = true;
-					g_ProgressStage = COLLISION_STAGE_IDLE;
+					if (g_ActiveWorkerCount.fetch_sub(1) == 1)
+					{
+						g_WorkerActive = false;
+						g_WorkerJoinNeeded = true;
+						g_ProgressStage = COLLISION_STAGE_IDLE;
+					}
 					return;
 				}
 				job = std::move(g_Jobs.front());
@@ -671,36 +729,45 @@ namespace
 			}
 
 			BakeResult result;
+			result.sequence = job.sequence;
 			bool loadedFromBin = false;
-			std::vector<CollisionTriangle> tris =
+			LoadedCollisionData data =
 				LoadLocalTris(job, &loadedFromBin);
-			if (tris.empty())
+			if (data.triangles.empty())
 			{
 				result.failed = true;
 			}
 			else
 			{
 				result.mesh = BakeMesh(
-					std::move(tris),
+					std::move(data.triangles),
 					job.world,
-					job.filterLattice);
+					job.filterLattice,
+					data.triangleBatchIds,
+					job.batchYOffsets);
 				result.mesh.sourceName = PathStem(job.glbPath);
 				result.mesh.loadedFromBin = loadedFromBin;
 				result.failed = result.mesh.worldTris.empty() && result.mesh.localTris.empty();
 			}
 			{
 				std::lock_guard<std::mutex> lock(g_Mutex);
-				g_Ready.push_back(std::move(result));
+				g_Ready.emplace(result.sequence, std::move(result));
 			}
 		}
 	}
 
 	void JoinWorkerIfNeeded(void)
 	{
-		if (g_WorkerJoinNeeded && g_Worker.joinable())
+		if (g_WorkerJoinNeeded.exchange(false))
 		{
-			g_Worker.join();
-			g_WorkerJoinNeeded = false;
+			for (std::thread& worker : g_Workers)
+			{
+				if (worker.joinable())
+				{
+					worker.join();
+				}
+			}
+			g_Workers.clear();
 		}
 	}
 
@@ -711,13 +778,23 @@ namespace
 		{
 			return;
 		}
-		if (g_Worker.joinable())
+		for (std::thread& worker : g_Workers)
 		{
-			g_Worker.join();
+			if (worker.joinable())
+			{
+				worker.join();
+			}
 		}
+		g_Workers.clear();
+		static const int kCollisionWorkerCount = 2;
+		g_ActiveWorkerCount = kCollisionWorkerCount;
 		g_WorkerActive = true;
 		g_WorkerJoinNeeded = false;
-		g_Worker = std::thread(WorkerMain);
+		g_Workers.reserve(kCollisionWorkerCount);
+		for (int i = 0; i < kCollisionWorkerCount; ++i)
+		{
+			g_Workers.emplace_back(WorkerMain);
+		}
 	}
 
 	bool AabbOverlap(const XMFLOAT3& aMin, const XMFLOAT3& aMax, const XMFLOAT3& bMin, const XMFLOAT3& bMax)
@@ -1312,7 +1389,8 @@ namespace
 bool Collision_StartAdd(
 	const char* glbPath,
 	const XMMATRIX& world,
-	bool filterLattice)
+	bool filterLattice,
+	const std::vector<CollisionBatchYOffset>* batchYOffsets)
 {
 	if (!glbPath)
 	{
@@ -1323,6 +1401,10 @@ bool Collision_StartAdd(
 	job.binPath = DeriveBinPath(glbPath);
 	job.world = world;
 	job.filterLattice = filterLattice;
+	if (batchYOffsets)
+	{
+		job.batchYOffsets = *batchYOffsets;
+	}
 	if (!FileExists(job.binPath.c_str()) && !FileExists(job.glbPath.c_str()))
 	{
 		return false;
@@ -1330,6 +1412,7 @@ bool Collision_StartAdd(
 
 	{
 		std::lock_guard<std::mutex> lock(g_Mutex);
+		job.sequence = g_NextJobSequence++;
 		g_Jobs.push_back(std::move(job));
 	}
 	EnsureWorker();
@@ -1349,10 +1432,12 @@ CollisionPumpResult Collision_Pump(int* outMeshId)
 	bool hasReady = false;
 	{
 		std::lock_guard<std::mutex> lock(g_Mutex);
-		if (!g_Ready.empty())
+		const auto readyIt = g_Ready.find(g_NextPumpSequence);
+		if (readyIt != g_Ready.end())
 		{
-			ready = std::move(g_Ready.front());
-			g_Ready.pop_front();
+			ready = std::move(readyIt->second);
+			g_Ready.erase(readyIt);
+			g_NextPumpSequence += 1;
 			hasReady = true;
 		}
 	}
@@ -1499,27 +1584,84 @@ void Collision_SetWorld(int meshId, const XMMATRIX& world)
 	}
 	const std::string sourceName = mesh.sourceName;
 	const bool loadedFromBin = mesh.loadedFromBin;
-	mesh = BakeMesh(mesh.localTris, world, mesh.filterLattice);
+	mesh = BakeMesh(
+		mesh.localTris,
+		world,
+		mesh.filterLattice,
+		std::vector<unsigned int>(),
+		std::vector<CollisionBatchYOffset>());
 	mesh.sourceName = sourceName;
 	mesh.loadedFromBin = loadedFromBin;
 }
 
+bool Collision_AdjustBatchY(int meshId, unsigned int batchId, float deltaY)
+{
+	if (meshId < 0 ||
+		meshId >= static_cast<int>(g_Meshes.size()) ||
+		!std::isfinite(deltaY) ||
+		deltaY == 0.0f)
+	{
+		return false;
+	}
+	CollisionMesh& mesh = g_Meshes[meshId];
+	if (mesh.triangleBatchIds.size() != mesh.worldTris.size())
+	{
+		return false;
+	}
+	bool adjusted = false;
+	for (size_t i = 0; i < mesh.worldTris.size(); ++i)
+	{
+		if (mesh.triangleBatchIds[i] != batchId)
+		{
+			continue;
+		}
+		mesh.worldTris[i].a.y += deltaY;
+		mesh.worldTris[i].b.y += deltaY;
+		mesh.worldTris[i].c.y += deltaY;
+		if (i < mesh.triMin.size())
+		{
+			mesh.triMin[i].y += deltaY;
+			mesh.triMax[i].y += deltaY;
+		}
+		adjusted = true;
+	}
+	if (!adjusted)
+	{
+		return false;
+	}
+	mesh.boundsMin.y = FLT_MAX;
+	mesh.boundsMax.y = -FLT_MAX;
+	for (const CollisionTriangle& tri : mesh.worldTris)
+	{
+		mesh.boundsMin.y = (std::min)(mesh.boundsMin.y, (std::min)(tri.a.y, (std::min)(tri.b.y, tri.c.y)));
+		mesh.boundsMax.y = (std::max)(mesh.boundsMax.y, (std::max)(tri.a.y, (std::max)(tri.b.y, tri.c.y)));
+	}
+	return true;
+}
+
 void Collision_Clear(void)
 {
-	if (g_Worker.joinable())
 	{
-		{
-			std::lock_guard<std::mutex> lock(g_Mutex);
-			g_Jobs.clear();
-		}
-		g_Worker.join();
+		std::lock_guard<std::mutex> lock(g_Mutex);
+		g_Jobs.clear();
 	}
+	for (std::thread& worker : g_Workers)
+	{
+		if (worker.joinable())
+		{
+			worker.join();
+		}
+	}
+	g_Workers.clear();
 	g_WorkerActive = false;
 	g_WorkerJoinNeeded = false;
+	g_ActiveWorkerCount = 0;
 	{
 		std::lock_guard<std::mutex> lock(g_Mutex);
 		g_Jobs.clear();
 		g_Ready.clear();
+		g_NextJobSequence = 0;
+		g_NextPumpSequence = 0;
 	}
 	g_Meshes.clear();
 	g_FrameHitNames.clear();
@@ -1550,6 +1692,136 @@ bool Collision_GetBounds(int meshId, XMFLOAT3* bmin, XMFLOAT3* bmax)
 	*bmax = mesh.boundsMax;
 	bmin->y += mesh.yBias;
 	bmax->y += mesh.yBias;
+	return true;
+}
+
+bool Collision_SampleTopY(int meshId, float x, float z, float* outY)
+{
+	if (!outY ||
+		meshId < 0 ||
+		meshId >= static_cast<int>(g_Meshes.size()) ||
+		!std::isfinite(x) ||
+		!std::isfinite(z))
+	{
+		return false;
+	}
+	CollisionMesh& mesh = g_Meshes[meshId];
+	if (mesh.worldTris.empty())
+	{
+		return false;
+	}
+	if (x < mesh.boundsMin.x || x > mesh.boundsMax.x ||
+		z < mesh.boundsMin.z || z > mesh.boundsMax.z)
+	{
+		return false;
+	}
+	bool found = false;
+	float bestY = -FLT_MAX;
+	auto consider = [&](int triIndex)
+	{
+		if (triIndex < 0 ||
+			triIndex >= static_cast<int>(mesh.worldTris.size()))
+		{
+			return;
+		}
+		if (!mesh.visitStamp.empty())
+		{
+			if (static_cast<size_t>(triIndex) >= mesh.visitStamp.size())
+			{
+				return;
+			}
+			if (mesh.visitStamp[static_cast<size_t>(triIndex)] == mesh.visitGen)
+			{
+				return;
+			}
+			mesh.visitStamp[static_cast<size_t>(triIndex)] = mesh.visitGen;
+		}
+		const CollisionTriangle& tri = mesh.worldTris[static_cast<size_t>(triIndex)];
+		const float ax = tri.a.x;
+		const float az = tri.a.z;
+		const float bx = tri.b.x;
+		const float bz = tri.b.z;
+		const float cx = tri.c.x;
+		const float cz = tri.c.z;
+		const float denom = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+		if (fabsf(denom) < 1.0e-12f)
+		{
+			return;
+		}
+		const float l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / denom;
+		const float l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / denom;
+		const float l3 = 1.0f - l1 - l2;
+		const float eps = -1.0e-4f;
+		if (l1 < eps || l2 < eps || l3 < eps)
+		{
+			return;
+		}
+		const float y =
+			l1 * (tri.a.y + mesh.yBias) +
+			l2 * (tri.b.y + mesh.yBias) +
+			l3 * (tri.c.y + mesh.yBias);
+		if (!std::isfinite(y))
+		{
+			return;
+		}
+		if (!found || y > bestY)
+		{
+			bestY = y;
+			found = true;
+		}
+	};
+
+	if (mesh.useGrid && mesh.gridW > 0 && mesh.gridH > 0 && mesh.cellSize > 0.0f)
+	{
+		mesh.visitGen += 1;
+		if (mesh.visitGen == 0)
+		{
+			if (!mesh.visitStamp.empty())
+			{
+				memset(mesh.visitStamp.data(), 0, mesh.visitStamp.size() * sizeof(unsigned int));
+			}
+			mesh.visitGen = 1;
+		}
+		for (int triIndex : mesh.largeTris)
+		{
+			consider(triIndex);
+		}
+		const int centerX = GridCell(x, mesh.cellSize) - mesh.gridOriginX;
+		const int centerZ = GridCell(z, mesh.cellSize) - mesh.gridOriginZ;
+		for (int gx = centerX - 1; gx <= centerX + 1; ++gx)
+		{
+			if (gx < 0 || gx >= mesh.gridW)
+			{
+				continue;
+			}
+			for (int gz = centerZ - 1; gz <= centerZ + 1; ++gz)
+			{
+				if (gz < 0 || gz >= mesh.gridH)
+				{
+					continue;
+				}
+				const int cell = gz * mesh.gridW + gx;
+				const int start = mesh.cellStart[static_cast<size_t>(cell)];
+				const int end = mesh.cellStart[static_cast<size_t>(cell) + 1];
+				for (int it = start; it < end; ++it)
+				{
+					consider(mesh.cellItems[static_cast<size_t>(it)]);
+				}
+			}
+		}
+	}
+	else
+	{
+		for (int i = 0; i < static_cast<int>(mesh.worldTris.size()); ++i)
+		{
+			consider(i);
+		}
+	}
+	if (!found)
+	{
+		return false;
+	}
+	*outY = bestY;
 	return true;
 }
 
