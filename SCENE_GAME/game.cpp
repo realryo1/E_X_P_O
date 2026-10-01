@@ -185,19 +185,13 @@ void Game_Draw(void)
 		shadowFocus,
 		shadowRadius))
 	{
-		Field_DrawLocalShadow(
-			shadowView[0],
-			shadowProjection[0],
-			shadowFocus[0],
-			shadowRadius[0]);
-		Player_DrawLocalShadow(
-			shadowView[0],
-			shadowProjection[0],
-			shadowFocus[0],
-			shadowRadius[0]);
-		for (int i = 1; i < NUM_SHADOW_CASCADES; ++i)
+		for (int i = 0; i < NUM_SHADOW_CASCADES; ++i)
 		{
-			BeginShadowMapSlice(i);
+			// スライス0は BeginLocalShadow 後にそのまま描画する
+			if (i > 0)
+			{
+				BeginShadowMapSlice(i);
+			}
 			Field_DrawLocalShadow(
 				shadowView[i],
 				shadowProjection[i],

@@ -24,6 +24,14 @@ namespace
 	SunlightPhotoSettings g_PreviousLightSettings = {};
 	float g_PreviousFov = 55.0f;
 
+	void ResetEffects(void)
+	{
+		g_PosterizeLevels = 0.0f;
+		g_Noise = 0.0f;
+		g_FilmGrain = 0.0f;
+		g_RgbShift = 0.0f;
+	}
+
 	void ApplyPhotoState(void)
 	{
 		Sunlight_SetPhotoSettings(g_LightSettings);
@@ -53,10 +61,7 @@ void PhotoMode_Enter(void)
 	g_Fov = g_PreviousFov;
 	g_MoveSpeed = PlayerCamera_GetFreeCameraMoveSpeed();
 	g_ShowPlayer = true;
-	g_PosterizeLevels = 0.0f;
-	g_Noise = 0.0f;
-	g_FilmGrain = 0.0f;
-	g_RgbShift = 0.0f;
+	ResetEffects();
 
 	Player_SetControlEnabled(false);
 	PlayerCamera_SetFreeCameraActive(true);
@@ -200,10 +205,7 @@ void PhotoMode_DrawOverlay(void)
 
 		if (ImGui::Button("Reset Effects"))
 		{
-			g_PosterizeLevels = 0.0f;
-			g_Noise = 0.0f;
-			g_FilmGrain = 0.0f;
-			g_RgbShift = 0.0f;
+			ResetEffects();
 		}
 
 		Sunlight_SetPhotoSettings(g_LightSettings);

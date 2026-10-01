@@ -33,18 +33,21 @@ static int g_NextFace = 0;
 static int g_CapturedFaces = 0;
 static bool g_Ready = false;
 
-void EnvProbe_Initialize(void)
+static void ResetProbeState(void)
 {
 	g_NextFace = 0;
 	g_CapturedFaces = 0;
 	g_Ready = false;
 }
 
+void EnvProbe_Initialize(void)
+{
+	ResetProbeState();
+}
+
 void EnvProbe_Finalize(void)
 {
-	g_NextFace = 0;
-	g_CapturedFaces = 0;
-	g_Ready = false;
+	ResetProbeState();
 }
 
 bool EnvProbe_IsReady(void)

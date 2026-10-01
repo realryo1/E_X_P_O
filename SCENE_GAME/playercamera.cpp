@@ -7,7 +7,6 @@
 #include "main.h"
 #include "mouse.h"
 #include "player.h"
-#include "input_manager.h"
 #include "imgui/imgui.h"
 #include "renderer.h"
 #include <cmath>
@@ -39,17 +38,30 @@ static void SyncRendererCamera(void)
 	}
 }
 
-static void ComputeFollowCamera(XMFLOAT3* outPos, XMFLOAT3* outLookAt)
+static float ClampPitch(float pitch)
 {
-	const XMFLOAT3 targetPos = Player_IsReady() ? Player_GetPos() : Field_GetLookTarget();
-	const float yawRad = XMConvertToRadians(g_Yaw);
-	const float pitchRad = XMConvertToRadians(g_Pitch);
-	const XMVECTOR lookDir = XMVectorSet(
+	if (pitch > 89.0f) pitch = 89.0f;
+	if (pitch < -89.0f) pitch = -89.0f;
+	return pitch;
+}
+
+// yaw/pitch（度）から視線方向ベクトルを求める
+static XMVECTOR ComputeLookDir(float yawDeg, float pitchDeg)
+{
+	const float yawRad = XMConvertToRadians(yawDeg);
+	const float pitchRad = XMConvertToRadians(pitchDeg);
+	return XMVectorSet(
 		sinf(yawRad) * cosf(pitchRad),
 		-sinf(pitchRad),
 		cosf(yawRad) * cosf(pitchRad),
 		0.0f
 	);
+}
+
+static void ComputeFollowCamera(XMFLOAT3* outPos, XMFLOAT3* outLookAt)
+{
+	const XMFLOAT3 targetPos = Player_IsReady() ? Player_GetPos() : Field_GetLookTarget();
+	const XMVECTOR lookDir = ComputeLookDir(g_Yaw, g_Pitch);
 	const XMFLOAT3 lookAt = {
 		targetPos.x,
 		targetPos.y + PLAYER_CAMERA_LOOK_Y,
@@ -61,23 +73,10 @@ static void ComputeFollowCamera(XMFLOAT3* outPos, XMFLOAT3* outLookAt)
 	*outLookAt = lookAt;
 }
 
-static void ClampDebugPitch(void)
-{
-	if (g_DebugPitch > 89.0f) g_DebugPitch = 89.0f;
-	if (g_DebugPitch < -89.0f) g_DebugPitch = -89.0f;
-}
-
 static void ApplyDebugView(void)
 {
-	ClampDebugPitch();
-	const float yawRad = XMConvertToRadians(g_DebugYaw);
-	const float pitchRad = XMConvertToRadians(g_DebugPitch);
-	const XMVECTOR lookDir = XMVectorSet(
-		sinf(yawRad) * cosf(pitchRad),
-		-sinf(pitchRad),
-		cosf(yawRad) * cosf(pitchRad),
-		0.0f
-	);
+	g_DebugPitch = ClampPitch(g_DebugPitch);
+	const XMVECTOR lookDir = ComputeLookDir(g_DebugYaw, g_DebugPitch);
 	const XMVECTOR posVec = XMLoadFloat3(&g_DebugPos);
 	const XMVECTOR atVec = XMVectorAdd(posVec, lookDir);
 	XMFLOAT3 atPos;
@@ -103,8 +102,7 @@ static void SnapDebugToPlayerCamera(void)
 	XMFLOAT3 lookAt;
 	ComputeFollowCamera(&g_DebugPos, &lookAt);
 	g_DebugYaw = g_Yaw;
-	g_DebugPitch = g_Pitch;
-	ClampDebugPitch();
+	g_DebugPitch = ClampPitch(g_Pitch);
 }
 
 static void SetDebugActive(bool active)
@@ -233,9 +231,7 @@ void PlayerCamera_Initialize(float startYaw, float startPitch)
 void PlayerCamera_SetLookAngles(float yaw, float pitch)
 {
 	g_Yaw = yaw;
-	g_Pitch = pitch;
-	if (g_Pitch > 89.0f) g_Pitch = 89.0f;
-	if (g_Pitch < -89.0f) g_Pitch = -89.0f;
+	g_Pitch = ClampPitch(pitch);
 	RequestRedraw();
 }
 
@@ -279,10 +275,7 @@ void PlayerCamera_UpdateInput(void)
 
 	const Input_Vector2 look = Input_GetLookVector();
 	g_Yaw += look.x * PLAYER_CAMERA_STICK_LOOK;
-	g_Pitch -= look.y * PLAYER_CAMERA_STICK_LOOK;
-
-	if (g_Pitch > 89.0f) g_Pitch = 89.0f;
-	if (g_Pitch < -89.0f) g_Pitch = -89.0f;
+	g_Pitch = ClampPitch(g_Pitch - look.y * PLAYER_CAMERA_STICK_LOOK);
 }
 
 void PlayerCamera_Update(void)

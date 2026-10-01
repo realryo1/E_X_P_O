@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -135,6 +136,9 @@ static float g_ExpoSkyboxYaw = 0.0f;
 static bool g_ExpoSkyboxEnabled = true;
 static std::vector<float> g_TileBaseY;
 static std::vector<float> g_FarTileBaseY;
+// 遠景の非表示バッチを決める入力（遠景モデルとパビリオン参照）の前回値。
+// 変化がなければ毎フレームの集合の再構築を省く。遠景モデル解放時は必ず破棄する。
+static std::vector<uintptr_t> g_FarBatchSignature;
 static std::vector<float> g_PavilionBaseY;
 static float g_RingBaseY = 0.0f;
 static float g_FloorBaseY = 0.0f;
@@ -408,7 +412,7 @@ static LONGLONG GetPerformanceCounter(void)
 	return counter.QuadPart;
 }
 
-static LONGLONG GetLoadDeadline(double budgetMilliseconds = EXPO_LOAD_BUDGET_MILLISECONDS)
+static LONGLONG GetPerformanceFrequency(void)
 {
 	static LONGLONG frequency = 0;
 	if (frequency == 0)
@@ -417,6 +421,12 @@ static LONGLONG GetLoadDeadline(double budgetMilliseconds = EXPO_LOAD_BUDGET_MIL
 		QueryPerformanceFrequency(&value);
 		frequency = value.QuadPart;
 	}
+	return frequency;
+}
+
+static LONGLONG GetLoadDeadline(double budgetMilliseconds = EXPO_LOAD_BUDGET_MILLISECONDS)
+{
+	const LONGLONG frequency = GetPerformanceFrequency();
 	if (frequency <= 0)
 	{
 		return GetPerformanceCounter() + 1;
@@ -434,13 +444,7 @@ static bool HasLoadTime(const LONGLONG deadline)
 
 static double LoadElapsedMilliseconds(void)
 {
-	static LONGLONG frequency = 0;
-	if (frequency == 0)
-	{
-		LARGE_INTEGER value = {};
-		QueryPerformanceFrequency(&value);
-		frequency = value.QuadPart;
-	}
+	const LONGLONG frequency = GetPerformanceFrequency();
 	if (frequency <= 0 || g_LoadStartCounter == 0)
 	{
 		return 0.0;
@@ -569,20 +573,12 @@ static void ResetDrawJobs(void)
 		SAFE_DELETE(job->nameLabel);
 		if (job->result && job->result != g_ExpoFloor && job->result != g_ExpoRing)
 		{
-			bool owned = false;
-			for (Sprite3D* model : g_ExpoTiles)
+			Sprite3D* const result = job->result;
+			const auto holds = [result](const std::vector<Sprite3D*>& models)
 			{
-				if (model == job->result) owned = true;
-			}
-			for (Sprite3D* model : g_ExpoFarTiles)
-			{
-				if (model == job->result) owned = true;
-			}
-			for (Sprite3D* model : g_ExpoPavilions)
-			{
-				if (model == job->result) owned = true;
-			}
-			if (!owned)
+				return std::find(models.begin(), models.end(), result) != models.end();
+			};
+			if (!holds(g_ExpoTiles) && !holds(g_ExpoFarTiles) && !holds(g_ExpoPavilions))
 			{
 				SAFE_DELETE(job->result);
 			}
@@ -598,27 +594,25 @@ static bool IsModelLoaded(Sprite3D* model)
 	return modelSize.x > 0.0f && modelSize.y > 0.0f && modelSize.z > 0.0f;
 }
 
+static void DeleteAllModels(std::vector<Sprite3D*>* models)
+{
+	for (Sprite3D* model : *models)
+	{
+		SAFE_DELETE(model);
+	}
+	models->clear();
+}
+
 static void ClearExpoTiles(void)
 {
 	ResetDrawJobs();
 	SAFE_DELETE(g_ExpoFloor);
-	for (Sprite3D* model : g_ExpoTiles)
-	{
-		SAFE_DELETE(model);
-	}
-	g_ExpoTiles.clear();
+	DeleteAllModels(&g_ExpoTiles);
 	g_TileBaseY.clear();
-	for (Sprite3D* model : g_ExpoFarTiles)
-	{
-		SAFE_DELETE(model);
-	}
-	g_ExpoFarTiles.clear();
+	DeleteAllModels(&g_ExpoFarTiles);
 	g_FarTileBaseY.clear();
-	for (Sprite3D* model : g_ExpoPavilions)
-	{
-		SAFE_DELETE(model);
-	}
-	g_ExpoPavilions.clear();
+	g_FarBatchSignature.clear();
+	DeleteAllModels(&g_ExpoPavilions);
 	g_PavilionBaseY.clear();
 	g_Null2Pavilion = nullptr;
 	SAFE_DELETE(g_ExpoRing);
@@ -976,23 +970,6 @@ static XMMATRIX BuildMeshRotation(const XMMATRIX& ecefToEnu, bool lhsFlipZ)
 	return rotation;
 }
 
-static XMFLOAT3 RtcToWorldPosition(
-	const ExpoTileSet& tileSet,
-	const ExpoTileDesc& tile,
-	const XMMATRIX& ecefToEnu)
-{
-	const double unitScale = static_cast<double>(tileSet.modelScale) * static_cast<double>(tileSet.glbGlobalScale);
-	const XMVECTOR delta = XMVectorSet(
-		static_cast<float>((tile.rtcX - tileSet.refRtcX) * unitScale),
-		static_cast<float>((tile.rtcY - tileSet.refRtcY) * unitScale),
-		static_cast<float>((tile.rtcZ - tileSet.refRtcZ) * unitScale),
-		0.0f);
-	const XMVECTOR world = XMVector3TransformNormal(delta, ecefToEnu);
-	XMFLOAT3 position;
-	XMStoreFloat3(&position, world);
-	return position;
-}
-
 static XMFLOAT3 EcefToWorldPosition(
 	const ExpoTileSet& tileSet,
 	double ecefX,
@@ -1010,6 +987,14 @@ static XMFLOAT3 EcefToWorldPosition(
 	XMFLOAT3 position = {};
 	XMStoreFloat3(&position, XMVector3TransformNormal(delta, ecefToEnu));
 	return position;
+}
+
+static XMFLOAT3 RtcToWorldPosition(
+	const ExpoTileSet& tileSet,
+	const ExpoTileDesc& tile,
+	const XMMATRIX& ecefToEnu)
+{
+	return EcefToWorldPosition(tileSet, tile.rtcX, tile.rtcY, tile.rtcZ, ecefToEnu);
 }
 
 static bool RegionPointToWorld(
@@ -2026,6 +2011,16 @@ static bool AllDrawJobsSettled(void)
 	return true;
 }
 
+// ワーカーの進行状態を未開始に戻す（再インポート可能にする）
+static void ResetJobWorkerState(ExpoDrawJob* job)
+{
+	job->started = false;
+	job->joined = false;
+	job->workerDone = false;
+	job->workerFailed = false;
+	job->workerCancelled = false;
+}
+
 static void PumpPavilionStreaming(const LONGLONG deadline)
 {
 	Camera* camera = GetCamera();
@@ -2048,11 +2043,7 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 				{
 					job->worker.join();
 				}
-				job->workerDone = false;
-				job->workerFailed = false;
-				job->workerCancelled = false;
-				job->started = false;
-				job->joined = false;
+				ResetJobWorkerState(job);
 				job->failureReason.clear();
 			}
 			else if (job->failed && job->finished && !job->result &&
@@ -2070,13 +2061,9 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 				}
 				delete job->gpuModel;
 				job->gpuModel = nullptr;
-				job->started = false;
-				job->joined = false;
+				ResetJobWorkerState(job);
 				job->finished = false;
 				job->failed = false;
-				job->workerDone = false;
-				job->workerFailed = false;
-				job->workerCancelled = false;
 				job->failureReason.clear();
 				job->retryCount += 1;
 				job->retryAfterMs =
@@ -2099,11 +2086,7 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 			{
 				job->worker.join();
 			}
-			job->workerDone = false;
-			job->workerFailed = false;
-			job->workerCancelled = false;
-			job->started = false;
-			job->joined = false;
+			ResetJobWorkerState(job);
 			continue;
 		}
 
@@ -2150,13 +2133,9 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 				delete job->gpuModel;
 				job->gpuModel = nullptr;
 			}
+			ResetJobWorkerState(job);
 			job->finished = false;
-			job->started = false;
-			job->joined = false;
 			job->failed = false;
-			job->workerDone = false;
-			job->workerFailed = false;
-			job->workerCancelled = false;
 			return;
 		}
 
@@ -2172,13 +2151,9 @@ static void PumpPavilionStreaming(const LONGLONG deadline)
 			}
 			delete job->gpuModel;
 			job->gpuModel = nullptr;
+			ResetJobWorkerState(job);
 			job->finished = false;
-			job->started = false;
-			job->joined = false;
 			job->failed = false;
-			job->workerDone = false;
-			job->workerFailed = false;
-			job->workerCancelled = false;
 			return;
 		}
 	}
@@ -3231,6 +3206,32 @@ static void ClearFarBatchVisibility(void)
 
 static void UpdateFarBatchVisibility(void)
 {
+	static std::vector<uintptr_t> signature;
+	signature.clear();
+	signature.push_back(g_ExpoFarTiles.size());
+	for (Sprite3D* model : g_ExpoFarTiles)
+	{
+		signature.push_back(reinterpret_cast<uintptr_t>(model));
+	}
+	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+	{
+		const ExpoDrawJob* job = holder.get();
+		if (!job || job->kind != ExpoDrawKind::Pavilion || !job->result)
+		{
+			continue;
+		}
+		for (const std::pair<int, int>& ref : job->farBatchRefs)
+		{
+			signature.push_back(static_cast<uintptr_t>(static_cast<unsigned int>(ref.first)));
+			signature.push_back(static_cast<uintptr_t>(static_cast<unsigned int>(ref.second)));
+		}
+	}
+	if (signature == g_FarBatchSignature)
+	{
+		return;
+	}
+	g_FarBatchSignature = signature;
+
 	std::vector<std::unordered_set<int>> hiddenByTile(g_ExpoFarTiles.size());
 	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
 	{

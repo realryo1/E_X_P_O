@@ -64,6 +64,8 @@ namespace
 		XMFLOAT3 boundsMin;
 		XMFLOAT3 boundsMax;
 		std::string sourceName;
+		bool isHighDetailGate;	// sourceName から決まる種別。SetMeshSourceName で設定する
+		bool isLod2;
 		bool loadedFromBin;
 		bool filterLattice;
 		bool useGrid;
@@ -285,6 +287,71 @@ namespace
 	int GridCell(float v, float cellSize)
 	{
 		return static_cast<int>(floorf(v / cellSize));
+	}
+
+	// sourceName を設定し、衝突判定の毎回の文字列比較を避けるため種別を保持する
+	void SetMeshSourceName(CollisionMesh* mesh, std::string name)
+	{
+		mesh->sourceName = std::move(name);
+		mesh->isHighDetailGate =
+			mesh->sourceName == "expo_pavilion_east_gate" ||
+			mesh->sourceName == "expo_pavilion_west_gate";
+		mesh->isLod2 = mesh->sourceName.find("expo_tile_lod2_") == 0;
+	}
+
+	// 訪問済みスタンプの世代を進める（オーバーフロー時はスタンプを初期化）
+	void NextVisitGen(CollisionMesh& mesh)
+	{
+		mesh.visitGen += 1;
+		if (mesh.visitGen == 0)
+		{
+			if (!mesh.visitStamp.empty())
+			{
+				memset(mesh.visitStamp.data(), 0, mesh.visitStamp.size() * sizeof(unsigned int));
+			}
+			mesh.visitGen = 1;
+		}
+	}
+
+	// グリッドセル範囲（グリッド原点基準）[x0,x1]x[z0,z1] を範囲内に丸めて、
+	// 各セルに登録された三角形インデックスを fn に渡す
+	template <typename Fn>
+	void ForEachGridItem(const CollisionMesh& mesh, int x0, int x1, int z0, int z1, Fn&& fn)
+	{
+		if (x0 < 0) x0 = 0;
+		if (z0 < 0) z0 = 0;
+		if (x1 >= mesh.gridW) x1 = mesh.gridW - 1;
+		if (z1 >= mesh.gridH) z1 = mesh.gridH - 1;
+		for (int gx = x0; gx <= x1; ++gx)
+		{
+			for (int gz = z0; gz <= z1; ++gz)
+			{
+				const int cell = gz * mesh.gridW + gx;
+				const int start = mesh.cellStart[static_cast<size_t>(cell)];
+				const int end = mesh.cellStart[static_cast<size_t>(cell) + 1];
+				for (int it = start; it < end; ++it)
+				{
+					fn(mesh.cellItems[static_cast<size_t>(it)]);
+				}
+			}
+		}
+	}
+
+	// ワールド座標AABBに重なるグリッドセルの三角形を fn に渡す
+	template <typename Fn>
+	void ForEachGridItemInAabb(
+		const CollisionMesh& mesh,
+		const XMFLOAT3& aabbMin,
+		const XMFLOAT3& aabbMax,
+		Fn&& fn)
+	{
+		ForEachGridItem(
+			mesh,
+			GridCell(aabbMin.x, mesh.cellSize) - mesh.gridOriginX,
+			GridCell(aabbMax.x, mesh.cellSize) - mesh.gridOriginX,
+			GridCell(aabbMin.z, mesh.cellSize) - mesh.gridOriginZ,
+			GridCell(aabbMax.z, mesh.cellSize) - mesh.gridOriginZ,
+			fn);
 	}
 
 	bool KeepRingCollisionTriangle(const CollisionTriangle& tri)
@@ -518,18 +585,25 @@ namespace
 			return z * gridW + x;
 		};
 
-		for (size_t i = 0; i < count; ++i)
+		// 三角形 i が占めるセル範囲を求める。広すぎる三角形は false（largeTris 行き）
+		auto triCellRange = [&](size_t i, int* x0, int* x1, int* z0, int* z1) -> bool
 		{
-			const int x0 = GridCell(mesh->triMin[i].x, cellSize);
-			const int x1 = GridCell(mesh->triMax[i].x, cellSize);
-			const int z0 = GridCell(mesh->triMin[i].z, cellSize);
-			const int z1 = GridCell(mesh->triMax[i].z, cellSize);
-			const int spanX = x1 - x0 + 1;
-			const int spanZ = z1 - z0 + 1;
-			if (spanX > 0 && spanZ > 0
+			*x0 = GridCell(mesh->triMin[i].x, cellSize);
+			*x1 = GridCell(mesh->triMax[i].x, cellSize);
+			*z0 = GridCell(mesh->triMin[i].z, cellSize);
+			*z1 = GridCell(mesh->triMax[i].z, cellSize);
+			const int spanX = *x1 - *x0 + 1;
+			const int spanZ = *z1 - *z0 + 1;
+			return spanX > 0 && spanZ > 0
 				&& spanX <= maxCellsPerTri
 				&& spanZ <= maxCellsPerTri
-				&& spanX * spanZ <= maxCellsPerTri)
+				&& spanX * spanZ <= maxCellsPerTri;
+		};
+
+		for (size_t i = 0; i < count; ++i)
+		{
+			int x0, x1, z0, z1;
+			if (triCellRange(i, &x0, &x1, &z0, &z1))
 			{
 				for (int cx = x0; cx <= x1; ++cx)
 				{
@@ -562,16 +636,8 @@ namespace
 
 		for (size_t i = 0; i < count; ++i)
 		{
-			const int x0 = GridCell(mesh->triMin[i].x, cellSize);
-			const int x1 = GridCell(mesh->triMax[i].x, cellSize);
-			const int z0 = GridCell(mesh->triMin[i].z, cellSize);
-			const int z1 = GridCell(mesh->triMax[i].z, cellSize);
-			const int spanX = x1 - x0 + 1;
-			const int spanZ = z1 - z0 + 1;
-			if (!(spanX > 0 && spanZ > 0
-				&& spanX <= maxCellsPerTri
-				&& spanZ <= maxCellsPerTri
-				&& spanX * spanZ <= maxCellsPerTri))
+			int x0, x1, z0, z1;
+			if (!triCellRange(i, &x0, &x1, &z0, &z1))
 			{
 				continue;
 			}
@@ -745,7 +811,7 @@ namespace
 					job.filterLattice,
 					data.triangleBatchIds,
 					job.batchYOffsets);
-				result.mesh.sourceName = PathStem(job.glbPath);
+				SetMeshSourceName(&result.mesh, PathStem(job.glbPath));
 				result.mesh.loadedFromBin = loadedFromBin;
 				result.failed = result.mesh.worldTris.empty() && result.mesh.localTris.empty();
 			}
@@ -806,13 +872,12 @@ namespace
 
 	bool IsHighDetailGate(const CollisionMesh& mesh)
 	{
-		return mesh.sourceName == "expo_pavilion_east_gate" ||
-			mesh.sourceName == "expo_pavilion_west_gate";
+		return mesh.isHighDetailGate;
 	}
 
 	bool IsLod2Mesh(const CollisionMesh& mesh)
 	{
-		return mesh.sourceName.find("expo_tile_lod2_") == 0;
+		return mesh.isLod2;
 	}
 
 	bool IsInsideHighDetailGate(
@@ -1021,15 +1086,7 @@ namespace
 
 			if (mesh.useGrid)
 			{
-				mesh.visitGen += 1;
-				if (mesh.visitGen == 0)
-				{
-					if (!mesh.visitStamp.empty())
-					{
-						memset(mesh.visitStamp.data(), 0, mesh.visitStamp.size() * sizeof(unsigned int));
-					}
-					mesh.visitGen = 1;
-				}
+				NextVisitGen(mesh);
 
 				auto consider = [&](int triIndex)
 				{
@@ -1056,27 +1113,7 @@ namespace
 
 				if (mesh.gridW > 0 && mesh.gridH > 0 && mesh.cellSize > 0.0f)
 				{
-					int x0 = GridCell(aabbMin.x, mesh.cellSize) - mesh.gridOriginX;
-					int x1 = GridCell(aabbMax.x, mesh.cellSize) - mesh.gridOriginX;
-					int z0 = GridCell(aabbMin.z, mesh.cellSize) - mesh.gridOriginZ;
-					int z1 = GridCell(aabbMax.z, mesh.cellSize) - mesh.gridOriginZ;
-					if (x0 < 0) x0 = 0;
-					if (z0 < 0) z0 = 0;
-					if (x1 >= mesh.gridW) x1 = mesh.gridW - 1;
-					if (z1 >= mesh.gridH) z1 = mesh.gridH - 1;
-					for (int gx = x0; gx <= x1; ++gx)
-					{
-						for (int gz = z0; gz <= z1; ++gz)
-						{
-							const int cell = gz * mesh.gridW + gx;
-							const int start = mesh.cellStart[static_cast<size_t>(cell)];
-							const int end = mesh.cellStart[static_cast<size_t>(cell) + 1];
-							for (int it = start; it < end; ++it)
-							{
-								consider(mesh.cellItems[static_cast<size_t>(it)]);
-							}
-						}
-					}
+					ForEachGridItemInAabb(mesh, aabbMin, aabbMax, consider);
 				}
 			}
 			else
@@ -1341,15 +1378,7 @@ namespace
 			return;
 		}
 
-		mesh.visitGen += 1;
-		if (mesh.visitGen == 0)
-		{
-			if (!mesh.visitStamp.empty())
-			{
-				memset(mesh.visitStamp.data(), 0, mesh.visitStamp.size() * sizeof(unsigned int));
-			}
-			mesh.visitGen = 1;
-		}
+		NextVisitGen(mesh);
 
 		for (int triIndex : mesh.largeTris)
 		{
@@ -1361,27 +1390,7 @@ namespace
 			return;
 		}
 
-		int x0 = GridCell(aabbMin.x, mesh.cellSize) - mesh.gridOriginX;
-		int x1 = GridCell(aabbMax.x, mesh.cellSize) - mesh.gridOriginX;
-		int z0 = GridCell(aabbMin.z, mesh.cellSize) - mesh.gridOriginZ;
-		int z1 = GridCell(aabbMax.z, mesh.cellSize) - mesh.gridOriginZ;
-		if (x0 < 0) x0 = 0;
-		if (z0 < 0) z0 = 0;
-		if (x1 >= mesh.gridW) x1 = mesh.gridW - 1;
-		if (z1 >= mesh.gridH) z1 = mesh.gridH - 1;
-		for (int gx = x0; gx <= x1; ++gx)
-		{
-			for (int gz = z0; gz <= z1; ++gz)
-			{
-				const int cell = gz * mesh.gridW + gx;
-				const int start = mesh.cellStart[static_cast<size_t>(cell)];
-				const int end = mesh.cellStart[static_cast<size_t>(cell) + 1];
-				for (int it = start; it < end; ++it)
-				{
-					consider(mesh.cellItems[static_cast<size_t>(it)]);
-				}
-			}
-		}
+		ForEachGridItemInAabb(mesh, aabbMin, aabbMax, consider);
 	}
 #endif
 }
@@ -1590,7 +1599,7 @@ void Collision_SetWorld(int meshId, const XMMATRIX& world)
 		mesh.filterLattice,
 		std::vector<unsigned int>(),
 		std::vector<CollisionBatchYOffset>());
-	mesh.sourceName = sourceName;
+	SetMeshSourceName(&mesh, sourceName);
 	mesh.loadedFromBin = loadedFromBin;
 }
 
@@ -1773,42 +1782,14 @@ bool Collision_SampleTopY(int meshId, float x, float z, float* outY)
 
 	if (mesh.useGrid && mesh.gridW > 0 && mesh.gridH > 0 && mesh.cellSize > 0.0f)
 	{
-		mesh.visitGen += 1;
-		if (mesh.visitGen == 0)
-		{
-			if (!mesh.visitStamp.empty())
-			{
-				memset(mesh.visitStamp.data(), 0, mesh.visitStamp.size() * sizeof(unsigned int));
-			}
-			mesh.visitGen = 1;
-		}
+		NextVisitGen(mesh);
 		for (int triIndex : mesh.largeTris)
 		{
 			consider(triIndex);
 		}
 		const int centerX = GridCell(x, mesh.cellSize) - mesh.gridOriginX;
 		const int centerZ = GridCell(z, mesh.cellSize) - mesh.gridOriginZ;
-		for (int gx = centerX - 1; gx <= centerX + 1; ++gx)
-		{
-			if (gx < 0 || gx >= mesh.gridW)
-			{
-				continue;
-			}
-			for (int gz = centerZ - 1; gz <= centerZ + 1; ++gz)
-			{
-				if (gz < 0 || gz >= mesh.gridH)
-				{
-					continue;
-				}
-				const int cell = gz * mesh.gridW + gx;
-				const int start = mesh.cellStart[static_cast<size_t>(cell)];
-				const int end = mesh.cellStart[static_cast<size_t>(cell) + 1];
-				for (int it = start; it < end; ++it)
-				{
-					consider(mesh.cellItems[static_cast<size_t>(it)]);
-				}
-			}
-		}
+		ForEachGridItem(mesh, centerX - 1, centerX + 1, centerZ - 1, centerZ + 1, consider);
 	}
 	else
 	{

@@ -57,6 +57,12 @@ static float Approach(float current, float target, float amount)
 	return fmaxf(current - amount, target);
 }
 
+// 目標が現在値より大きければ加速量、そうでなければ減速量で近づける
+static float ApproachAccel(float current, float target, float acceleration, float deceleration)
+{
+	return Approach(current, target, target > current ? acceleration : deceleration);
+}
+
 static float NormalizeAngle(float angle)
 {
 	while (angle > 180.0f) angle -= 360.0f;
@@ -97,12 +103,9 @@ void Player_Initialize(XMFLOAT3 startPos)
 	g_PlayerModel->SetReceiveShadow(true);
 
 	const XMFLOAT3 display = g_PlayerModel->GetDisplaySize();
-	g_HalfExtents.x = display.x * 0.5f;
-	g_HalfExtents.y = display.y * 0.5f;
-	g_HalfExtents.z = display.z * 0.5f;
-	if (g_HalfExtents.x < PLAYER_MIN_HALF_EXTENT) g_HalfExtents.x = PLAYER_MIN_HALF_EXTENT;
-	if (g_HalfExtents.y < PLAYER_MIN_HALF_EXTENT) g_HalfExtents.y = PLAYER_MIN_HALF_EXTENT;
-	if (g_HalfExtents.z < PLAYER_MIN_HALF_EXTENT) g_HalfExtents.z = PLAYER_MIN_HALF_EXTENT;
+	g_HalfExtents.x = fmaxf(display.x * 0.5f, PLAYER_MIN_HALF_EXTENT);
+	g_HalfExtents.y = fmaxf(display.y * 0.5f, PLAYER_MIN_HALF_EXTENT);
+	g_HalfExtents.z = fmaxf(display.z * 0.5f, PLAYER_MIN_HALF_EXTENT);
 	GameAudio_PlaySpawn();
 }
 
@@ -214,15 +217,7 @@ void Player_Update(void)
 		PlayerCamera_LockMouse();
 	}
 
-	if (PlayerCamera_IsDebugActive())
-	{
-		g_ForwardSpeed = 0.0f;
-		g_VerticalSpeed = 0.0f;
-		GameAudio_UpdateHover(false, 0.0f);
-		return;
-	}
-
-	if (!g_ControlEnabled)
+	if (PlayerCamera_IsDebugActive() || !g_ControlEnabled)
 	{
 		g_ForwardSpeed = 0.0f;
 		g_VerticalSpeed = 0.0f;
@@ -232,11 +227,7 @@ void Player_Update(void)
 
 	if (g_DashTimer > 0.0f)
 	{
-		g_DashTimer -= 1.0f / FPS;
-		if (g_DashTimer < 0.0f)
-		{
-			g_DashTimer = 0.0f;
-		}
+		g_DashTimer = fmaxf(g_DashTimer - 1.0f / FPS, 0.0f);
 	}
 
 	const float targetDashVelocity =
@@ -254,13 +245,11 @@ void Player_Update(void)
 
 	const float forwardInput = fmaxf(move.y, 0.0f);
 	const float targetForwardSpeed = forwardInput * g_MoveSpeed;
-	const float forwardSpeedStep = targetForwardSpeed > g_ForwardSpeed
-		? PLAYER_FORWARD_ACCELERATION
-		: PLAYER_FORWARD_DECELERATION;
-	g_ForwardSpeed = Approach(
+	g_ForwardSpeed = ApproachAccel(
 		g_ForwardSpeed,
 		targetForwardSpeed,
-		forwardSpeedStep);
+		PLAYER_FORWARD_ACCELERATION,
+		PLAYER_FORWARD_DECELERATION);
 
 	float verticalInput = 0.0f;
 	if (Input_IsActionDown(INPUT_ACTION_JUMP))
@@ -272,20 +261,17 @@ void Player_Update(void)
 		verticalInput -= 1.0f;
 	}
 	const float targetVerticalSpeed = verticalInput * g_MoveSpeed;
-	const float verticalSpeedStep = targetVerticalSpeed > g_VerticalSpeed
-		? PLAYER_VERTICAL_ACCELERATION
-		: PLAYER_VERTICAL_DECELERATION;
-	g_VerticalSpeed = Approach(
+	g_VerticalSpeed = ApproachAccel(
 		g_VerticalSpeed,
 		targetVerticalSpeed,
-		verticalSpeedStep);
+		PLAYER_VERTICAL_ACCELERATION,
+		PLAYER_VERTICAL_DECELERATION);
 
-	XMFLOAT3 delta = { 0.0f, 0.0f, 0.0f };
-	const float fx = sinf(moveYawRad);
-	const float fz = cosf(moveYawRad);
-	delta.x = fx * (g_ForwardSpeed + g_DashVelocity);
-	delta.y = g_VerticalSpeed;
-	delta.z = fz * (g_ForwardSpeed + g_DashVelocity);
+	const float horizontalSpeed = g_ForwardSpeed + g_DashVelocity;
+	const XMFLOAT3 delta = {
+		sinf(moveYawRad) * horizontalSpeed,
+		g_VerticalSpeed,
+		cosf(moveYawRad) * horizontalSpeed };
 
 	const float verticalRatio = fmaxf(
 		-1.0f,

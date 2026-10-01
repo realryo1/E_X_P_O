@@ -11,7 +11,7 @@ $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 $vsPath = $null
 
 if (Test-Path $vswhere) {
-    $vsPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -property installationPath
+    $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
 }
 
 $msbuild = $null

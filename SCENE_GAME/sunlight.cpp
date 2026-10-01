@@ -127,6 +127,58 @@ static float Saturate(float value)
 	return value;
 }
 
+static float Luminance(float red, float green, float blue)
+{
+	return 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+}
+
+// 方位角・仰角（度）から太陽方向（光源側を向く単位ベクトル）を求める
+static XMFLOAT3 ComputeSunVector(float azimuthDeg, float elevationDeg)
+{
+	const float azimuthRad = XMConvertToRadians(azimuthDeg);
+	const float elevationRad = XMConvertToRadians(elevationDeg);
+	const float cosEl = cosf(elevationRad);
+	return {
+		cosEl * sinf(azimuthRad),
+		sinf(elevationRad),
+		cosEl * cosf(azimuthRad)
+	};
+}
+
+static void ResetSunlightDefaults(void)
+{
+	g_Azimuth = SUN_AZIMUTH_DEFAULT;
+	g_Elevation = SUN_ELEVATION_DEFAULT;
+	g_Color = SUN_FALLBACK_COLOR;
+	g_Intensity = SUN_DEFAULT_INTENSITY;
+	g_AmbientScale = SUN_AMBIENT_SCALE_DEFAULT;
+	g_SkyYawOffset = SUN_SKY_YAW_OFFSET_DEFAULT;
+	g_Roughness = SUN_ROUGHNESS_DEFAULT;
+	g_Metallic = SUN_METALLIC_DEFAULT;
+	g_ShadowRadius = SUN_SHADOW_RADIUS_DEFAULT;
+	g_ShadowCascadeDistances[0] = SUN_SHADOW_CASCADE_1_DEFAULT;
+	g_ShadowCascadeDistances[1] = SUN_SHADOW_CASCADE_2_DEFAULT;
+	g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
+	g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
+	g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
+	g_SsaoEnabled = SUN_SSAO_ENABLED_DEFAULT;
+	g_SsaoIntensity = SUN_SSAO_INTENSITY_DEFAULT;
+	g_SsaoRadius = SUN_SSAO_RADIUS_DEFAULT;
+	g_SsaoBias = SUN_SSAO_BIAS_DEFAULT;
+	g_SsaoPower = SUN_SSAO_POWER_DEFAULT;
+	g_FogColor = FOG_COLOR_DEFAULT;
+	g_FogStart = FOG_START_DEFAULT;
+	g_FogEnd = FOG_END_DEFAULT;
+	g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
+	g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
+	g_FogDensity = FOG_DENSITY_DEFAULT;
+	g_Null2Amount = NULL2_AMOUNT_DEFAULT;
+	g_Null2Speed = NULL2_SPEED_DEFAULT;
+	g_Null2Displace = NULL2_DISPLACE_DEFAULT;
+	g_Null2Normal = NULL2_NORMAL_DEFAULT;
+	g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
+}
+
 struct SunlightComponent
 {
 	double luminanceSum = 0.0;
@@ -190,7 +242,7 @@ static bool ExtractSunlightFromHDR(
 		const float red = image.rgba[i * 4 + 0];
 		const float green = image.rgba[i * 4 + 1];
 		const float blue = image.rgba[i * 4 + 2];
-		const float luminance = 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+		const float luminance = Luminance(red, green, blue);
 		if (std::isfinite(luminance) && luminance > maxLuminance)
 		{
 			maxLuminance = luminance;
@@ -212,7 +264,7 @@ static bool ExtractSunlightFromHDR(
 		const float red = image.rgba[i * 4 + 0];
 		const float green = image.rgba[i * 4 + 1];
 		const float blue = image.rgba[i * 4 + 2];
-		const float luminance = 0.2126f * red + 0.7152f * green + 0.0722f * blue;
+		const float luminance = Luminance(red, green, blue);
 		if (std::isfinite(luminance) && luminance >= threshold)
 		{
 			bright[i] = 1;
@@ -289,8 +341,7 @@ static bool ExtractSunlightFromHDR(
 			const float red = image.rgba[pixelIndex * 4 + 0];
 			const float green = image.rgba[pixelIndex * 4 + 1];
 			const float blue = image.rgba[pixelIndex * 4 + 2];
-			const float luminance =
-				0.2126f * red + 0.7152f * green + 0.0722f * blue;
+			const float luminance = Luminance(red, green, blue);
 			const double weight = (std::max)(static_cast<double>(luminance), 0.0);
 			const double longitude =
 				(2.0 * XM_PI * (static_cast<double>(x) + 0.5)) /
@@ -391,18 +442,11 @@ static bool ExtractSunlightFromHDR(
 
 static void ApplySunlightState(void)
 {
-	const float azimuthRad = XMConvertToRadians(g_Azimuth);
-	const float elevationRad = XMConvertToRadians(g_Elevation);
-	const float cosEl = cosf(elevationRad);
-	const float sinEl = sinf(elevationRad);
-	const XMFLOAT3 sunVec = {
-		cosEl * sinf(azimuthRad),
-		sinEl,
-		cosEl * cosf(azimuthRad)
-	};
+	const XMFLOAT3 sunVec = ComputeSunVector(g_Azimuth, g_Elevation);
 
+	// sunVec.y は sin(仰角) と等しい
 	const float elevFactor =
-		SUN_AMBIENT_MIN + (1.0f - SUN_AMBIENT_MIN) * Saturate(sinEl);
+		SUN_AMBIENT_MIN + (1.0f - SUN_AMBIENT_MIN) * Saturate(sunVec.y);
 	const XMFLOAT3 skyTint = { 0.55f, 0.70f, 1.0f };
 	const float ambientMix = 0.35f;
 	const XMFLOAT3 ambientColor = {
@@ -501,36 +545,7 @@ void Sunlight_PrepareAssets(void)
 
 void Sunlight_Initialize(void)
 {
-	g_Azimuth = SUN_AZIMUTH_DEFAULT;
-	g_Elevation = SUN_ELEVATION_DEFAULT;
-	g_Color = SUN_FALLBACK_COLOR;
-	g_Intensity = SUN_DEFAULT_INTENSITY;
-	g_AmbientScale = SUN_AMBIENT_SCALE_DEFAULT;
-	g_SkyYawOffset = SUN_SKY_YAW_OFFSET_DEFAULT;
-	g_Roughness = SUN_ROUGHNESS_DEFAULT;
-	g_Metallic = SUN_METALLIC_DEFAULT;
-	g_ShadowRadius = SUN_SHADOW_RADIUS_DEFAULT;
-	g_ShadowCascadeDistances[0] = SUN_SHADOW_CASCADE_1_DEFAULT;
-	g_ShadowCascadeDistances[1] = SUN_SHADOW_CASCADE_2_DEFAULT;
-	g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
-	g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
-	g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
-	g_SsaoEnabled = SUN_SSAO_ENABLED_DEFAULT;
-	g_SsaoIntensity = SUN_SSAO_INTENSITY_DEFAULT;
-	g_SsaoRadius = SUN_SSAO_RADIUS_DEFAULT;
-	g_SsaoBias = SUN_SSAO_BIAS_DEFAULT;
-	g_SsaoPower = SUN_SSAO_POWER_DEFAULT;
-	g_FogColor = FOG_COLOR_DEFAULT;
-	g_FogStart = FOG_START_DEFAULT;
-	g_FogEnd = FOG_END_DEFAULT;
-	g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
-	g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
-	g_FogDensity = FOG_DENSITY_DEFAULT;
-	g_Null2Amount = NULL2_AMOUNT_DEFAULT;
-	g_Null2Speed = NULL2_SPEED_DEFAULT;
-	g_Null2Displace = NULL2_DISPLACE_DEFAULT;
-	g_Null2Normal = NULL2_NORMAL_DEFAULT;
-	g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
+	ResetSunlightDefaults();
 	PrepareSunlightAssets();
 	if (g_HasExtractedSunlight)
 	{
@@ -759,15 +774,7 @@ bool Sunlight_BeginLocalShadow(
 		return false;
 	}
 
-	const float azimuthRad = XMConvertToRadians(g_Azimuth);
-	const float elevationRad = XMConvertToRadians(g_Elevation);
-	const float cosEl = cosf(elevationRad);
-	const float sinEl = sinf(elevationRad);
-	XMFLOAT3 sunVec = {
-		cosEl * sinf(azimuthRad),
-		sinEl,
-		cosEl * cosf(azimuthRad)
-	};
+	const XMFLOAT3 sunVec = ComputeSunVector(g_Azimuth, g_Elevation);
 	XMVECTOR lightDir = XMVector3Normalize(XMVectorSet(
 		-sunVec.x, -sunVec.y, -sunVec.z, 0.0f));
 	if (XMVectorGetX(XMVector3LengthSq(lightDir)) < 0.0001f)
@@ -943,36 +950,7 @@ void Sunlight_DrawDebug(void)
 	}
 	if (ImGui::Button("Reset"))
 	{
-		g_Azimuth = SUN_AZIMUTH_DEFAULT;
-		g_Elevation = SUN_ELEVATION_DEFAULT;
-		g_Color = SUN_FALLBACK_COLOR;
-		g_Intensity = SUN_DEFAULT_INTENSITY;
-		g_AmbientScale = SUN_AMBIENT_SCALE_DEFAULT;
-		g_SkyYawOffset = SUN_SKY_YAW_OFFSET_DEFAULT;
-		g_Roughness = SUN_ROUGHNESS_DEFAULT;
-		g_Metallic = SUN_METALLIC_DEFAULT;
-		g_ShadowRadius = SUN_SHADOW_RADIUS_DEFAULT;
-		g_ShadowCascadeDistances[0] = SUN_SHADOW_CASCADE_1_DEFAULT;
-		g_ShadowCascadeDistances[1] = SUN_SHADOW_CASCADE_2_DEFAULT;
-		g_ShadowCascadeDistances[2] = SUN_SHADOW_RADIUS_DEFAULT;
-		g_ShadowBias = SUN_SHADOW_BIAS_DEFAULT;
-		g_ShadowBrightness = SUN_SHADOW_BRIGHTNESS_DEFAULT;
-		g_SsaoEnabled = SUN_SSAO_ENABLED_DEFAULT;
-		g_SsaoIntensity = SUN_SSAO_INTENSITY_DEFAULT;
-		g_SsaoRadius = SUN_SSAO_RADIUS_DEFAULT;
-		g_SsaoBias = SUN_SSAO_BIAS_DEFAULT;
-		g_SsaoPower = SUN_SSAO_POWER_DEFAULT;
-		g_FogColor = FOG_COLOR_DEFAULT;
-		g_FogStart = FOG_START_DEFAULT;
-		g_FogEnd = FOG_END_DEFAULT;
-		g_FogHeightMin = FOG_HEIGHT_MIN_DEFAULT;
-		g_FogHeightRange = FOG_HEIGHT_RANGE_DEFAULT;
-		g_FogDensity = FOG_DENSITY_DEFAULT;
-		g_Null2Amount = NULL2_AMOUNT_DEFAULT;
-		g_Null2Speed = NULL2_SPEED_DEFAULT;
-		g_Null2Displace = NULL2_DISPLACE_DEFAULT;
-		g_Null2Normal = NULL2_NORMAL_DEFAULT;
-		g_Null2CubeSize = NULL2_CUBE_SIZE_DEFAULT;
+		ResetSunlightDefaults();
 		changed = true;
 	}
 	ImGui::End();

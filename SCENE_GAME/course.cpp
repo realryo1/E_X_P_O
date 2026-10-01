@@ -230,7 +230,7 @@ namespace
 			loaded.name = path.substr(begin, end - begin);
 		}
 
-		*course = loaded;
+		*course = std::move(loaded);
 		return true;
 	}
 
@@ -404,7 +404,7 @@ namespace
 					std::string(COURSE_DIRECTORY) + "\\" + findData.cFileName;
 				if (LoadCourseFile(path, &course))
 				{
-					g_Courses.push_back(course);
+					g_Courses.push_back(std::move(course));
 				}
 			} while (FindNextFileA(findHandle, &findData));
 			FindClose(findHandle);
@@ -705,6 +705,14 @@ namespace
 		return radiusSquared <= COURSE_GATE_RADIUS * COURSE_GATE_RADIUS;
 	}
 
+	float DistanceSquared(const XMFLOAT3& a, const XMFLOAT3& b)
+	{
+		const float dx = a.x - b.x;
+		const float dy = a.y - b.y;
+		const float dz = a.z - b.z;
+		return dx * dx + dy * dy + dz * dz;
+	}
+
 	void EnterGoal(void)
 	{
 		g_RaceElapsed = std::chrono::duration<double>(
@@ -741,12 +749,7 @@ namespace
 		RebuildRings(g_RaceCourse.points);
 
 		const XMFLOAT3 startPosition = g_RaceCourse.points[0];
-		const XMFLOAT3 playerPos = Player_GetPos();
-		const float warpDx = playerPos.x - startPosition.x;
-		const float warpDy = playerPos.y - startPosition.y;
-		const float warpDz = playerPos.z - startPosition.z;
-		const bool needWarp =
-			warpDx * warpDx + warpDy * warpDy + warpDz * warpDz > 0.25f;
+		const bool needWarp = DistanceSquared(Player_GetPos(), startPosition) > 0.25f;
 		if (needWarp)
 		{
 			Player_WarpTo(startPosition);
@@ -772,6 +775,14 @@ namespace
 		GameAudio_PlayCountdown();
 	}
 
+	// カウントダウン・走行中・ゴール後のいずれか
+	bool IsRaceMode(void)
+	{
+		return g_Mode == CourseMode::RaceCountdown ||
+			g_Mode == CourseMode::RaceRunning ||
+			g_Mode == CourseMode::RaceGoal;
+	}
+
 	std::string MakeCourseLabel(int index)
 	{
 		return "コース" + std::to_string(index + 1);
@@ -787,9 +798,7 @@ namespace
 
 	int GetMenuItemCount(void)
 	{
-		if (g_Mode == CourseMode::RaceCountdown ||
-			g_Mode == CourseMode::RaceRunning ||
-			g_Mode == CourseMode::RaceGoal)
+		if (IsRaceMode())
 		{
 			return 2;
 		}
@@ -860,9 +869,7 @@ namespace
 				"編集に戻る",
 			};
 		}
-		else if (g_Mode == CourseMode::RaceCountdown ||
-			g_Mode == CourseMode::RaceRunning ||
-			g_Mode == CourseMode::RaceGoal)
+		else if (IsRaceMode())
 		{
 			lines = { "レースを中止", "フォトモード" };
 		}
@@ -914,9 +921,7 @@ namespace
 			{
 				title = "コース作成";
 			}
-			else if (g_Mode == CourseMode::RaceCountdown ||
-				g_Mode == CourseMode::RaceRunning ||
-				g_Mode == CourseMode::RaceGoal)
+			else if (IsRaceMode())
 			{
 				title = "レース";
 			}
@@ -1077,9 +1082,7 @@ namespace
 			return;
 		}
 
-		if (g_Mode == CourseMode::RaceCountdown ||
-			g_Mode == CourseMode::RaceRunning ||
-			g_Mode == CourseMode::RaceGoal)
+		if (IsRaceMode())
 		{
 			if (item == 0)
 			{
@@ -1159,10 +1162,7 @@ namespace
 			const XMFLOAT3 before = Player_GetPos();
 			Player_WarpToStart();
 			const XMFLOAT3 after = Player_GetPos();
-			const float warpDx = before.x - after.x;
-			const float warpDy = before.y - after.y;
-			const float warpDz = before.z - after.z;
-			if (warpDx * warpDx + warpDy * warpDy + warpDz * warpDz > 0.25f)
+			if (DistanceSquared(before, after) > 0.25f)
 			{
 				GameAudio_PlayWarp();
 			}
@@ -1530,10 +1530,7 @@ void Course_Draw(void)
 	{
 		return;
 	}
-	const bool racing =
-		g_Mode == CourseMode::RaceCountdown ||
-		g_Mode == CourseMode::RaceRunning ||
-		g_Mode == CourseMode::RaceGoal;
+	const bool racing = IsRaceMode();
 	XMFLOAT3 cameraPos = {};
 	Camera* camera = GetCamera();
 	if (camera)
@@ -1547,10 +1544,7 @@ void Course_Draw(void)
 		{
 			return true;
 		}
-		const float dx = pos.x - cameraPos.x;
-		const float dy = pos.y - cameraPos.y;
-		const float dz = pos.z - cameraPos.z;
-		return dx * dx + dy * dy + dz * dz <= markerCullSq;
+		return DistanceSquared(pos, cameraPos) <= markerCullSq;
 	};
 	if (g_StartMarker && (!racing || isNearCamera(g_StartMarker->GetPos())))
 	{
@@ -1591,9 +1585,7 @@ void Course_DrawHud(void)
 	{
 		hudKind = CourseMode::CourseCreate;
 	}
-	else if (g_Mode == CourseMode::RaceCountdown ||
-		g_Mode == CourseMode::RaceRunning ||
-		g_Mode == CourseMode::RaceGoal)
+	else if (IsRaceMode())
 	{
 		hudKind = CourseMode::RaceRunning;
 	}
@@ -1630,9 +1622,7 @@ void Course_DrawHud(void)
 		g_pCourseHintText->Draw();
 	}
 
-	if (g_Mode == CourseMode::RaceCountdown ||
-		g_Mode == CourseMode::RaceRunning ||
-		g_Mode == CourseMode::RaceGoal)
+	if (IsRaceMode())
 	{
 		if (g_Mode == CourseMode::RaceRunning ||
 			g_Mode == CourseMode::RaceGoal)
