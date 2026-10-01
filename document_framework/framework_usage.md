@@ -202,7 +202,7 @@ LockMouse();
 UnLockMouse();
 ```
 
-相対モードでは `Mouse_GetState` がフレームあたり1回だけ `dx`/`dy` を返す。2回目以降は 0 になる。`SCENE_GAME` ではロック中の `GetState` は `playercamera.cpp` のみ。解除判定は `Mouse_IsVisible()` で行い、ロック中は `game.cpp` が `GetState` しない。
+相対モードでは `Mouse_GetState` がフレームあたり1回だけ `dx`/`dy` を返す。2回目以降は 0 になる。`dx`/`dy` は前回の読み出し以降に届いた Raw Input の移動量の合計で、取りこぼしはない（詳細は [mouse_camera_implementation_flow.md](mouse_camera_implementation_flow.md)）。Debug ビルドは `debug-mouse.log` に検証用ログを出す。`SCENE_GAME` ではロック中の `GetState` は `playercamera.cpp` のみ。解除判定は `Mouse_IsVisible()` で行い、ロック中は `game.cpp` が `GetState` しない。
 
 ### Gamepad
 

@@ -35,6 +35,43 @@ static int                gRelativeX = INT32_MAX;
 static int                gRelativeY = INT32_MAX;
 static bool               gInFocus = true;
 
+#if defined(_DEBUG)
+// 視点の引っ掛かり調査用ログ（debug-mouse.log）。
+// WM_INPUT は上書き代入なので、論理フレーム間に複数イベントが来ると
+// 最後の1件以外が捨てられる。その損失量を記録して検証する。
+#include <chrono>
+#include <fstream>
+static std::ofstream gDbgLog;
+static std::chrono::steady_clock::time_point gDbgStart;
+static long long gDbgEvents = 0;   // 前回読み出し以降の WM_INPUT 件数
+static long long gDbgRawSumX = 0;  // 同期間の生の移動量合計
+static long long gDbgRawSumY = 0;
+static long long gDbgRows = 0;
+
+static void DbgMouseLogRead(int deliveredX, int deliveredY)
+{
+    if (!gDbgLog.is_open())
+    {
+        gDbgLog.open("debug-mouse.log", std::ios::out | std::ios::trunc);
+        gDbgStart = std::chrono::steady_clock::now();
+        gDbgLog << "tMs,events,rawSumX,rawSumY,deliveredX,deliveredY,lostX,lostY\n";
+    }
+    const double tMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - gDbgStart).count();
+    gDbgLog << tMs << ',' << gDbgEvents << ','
+        << gDbgRawSumX << ',' << gDbgRawSumY << ','
+        << deliveredX << ',' << deliveredY << ','
+        << (gDbgRawSumX - deliveredX) << ',' << (gDbgRawSumY - deliveredY) << '\n';
+    if ((++gDbgRows % 60) == 0)
+    {
+        gDbgLog.flush();
+    }
+    gDbgEvents = 0;
+    gDbgRawSumX = 0;
+    gDbgRawSumY = 0;
+}
+#endif
+
 
 static void clipToWindow(void);
 
@@ -102,7 +139,13 @@ void Mouse_GetState(Mouse_State* pState)
             pState->dy = 0;
         }
         else {
+#if defined(_DEBUG)
+            DbgMouseLogRead(pState->dx, pState->dy);
+#endif
             SetEvent(gRelativeRead);
+            // 渡した分は消費済み。次の読み出しまで WM_INPUT で再び蓄積する
+            gState.dx = 0;
+            gState.dy = 0;
         }
     }
     else {
@@ -287,8 +330,14 @@ void Mouse_ProcessMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
                 if (!(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
 
-                    gState.dx = raw.data.mouse.lLastX;
-                    gState.dy = raw.data.mouse.lLastY;
+                    // 次の読み出しまでに届いた移動量を取りこぼさず蓄積する
+                    gState.dx += raw.data.mouse.lLastX;
+                    gState.dy += raw.data.mouse.lLastY;
+#if defined(_DEBUG)
+                    gDbgEvents += 1;
+                    gDbgRawSumX += raw.data.mouse.lLastX;
+                    gDbgRawSumY += raw.data.mouse.lLastY;
+#endif
 
                     ResetEvent(gRelativeRead);
                 }
@@ -301,12 +350,9 @@ void Mouse_ProcessMessage(UINT message, WPARAM wParam, LPARAM lParam)
                     int x = (int)((raw.data.mouse.lLastX / 65535.0f) * width);
                     int y = (int)((raw.data.mouse.lLastY / 65535.0f) * height);
 
-                    if (gRelativeX == INT32_MAX) {
-                        gState.dx = gState.dy = 0;
-                    }
-                    else {
-                        gState.dx = x - gRelativeX;
-                        gState.dy = y - gRelativeY;
+                    if (gRelativeX != INT32_MAX) {
+                        gState.dx += x - gRelativeX;
+                        gState.dy += y - gRelativeY;
                     }
 
                     gRelativeX = x;
