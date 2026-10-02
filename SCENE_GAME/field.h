@@ -24,6 +24,7 @@ void Field_DrawLocalShadow(
 DirectX::XMFLOAT3 Field_GetSpawnPos(void);
 DirectX::XMFLOAT3 Field_GetLookTarget(void);
 bool Field_HasFloor(void);
+bool Field_SampleGroundY(float x, float z, float* outY);
 int Field_GetRingCollisionId(void);
 
 void Field_GetLoadStatus(char* out, size_t outSize);

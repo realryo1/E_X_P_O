@@ -43,6 +43,10 @@ pizzo_pernice_puresky_4k.hdr：スカイドーム・太陽光解析用HDR / http
 
 icon.ico,makulogo.png：アプリアイコン用・輪くぐり用輪 / 例のロゴ風自作テクスチャ
 
+https://www.a23d.co/decal/deciduoustree-0109510
+https://www.vecteezy.com/photo/69297134-tree-isolated-on-white-background
+https://www.vecteezy.com/photo/6754804-isolated-tree-on-white-background
+
 ## フォント
 ZenKakuGothicNew-Medium.ttf / 日本語 UI フォント - https://fonts.google.com/specimen/Zen+Kaku+Gothic+New
 

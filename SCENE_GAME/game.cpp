@@ -10,6 +10,7 @@
 #include "sunlight.h"
 #include "envprobe.h"
 #include "ui.h"
+#include "vegetation.h"
 #include "mouse.h"
 #include "fade.h"
 #include "keyboard.h"
@@ -79,6 +80,7 @@ void Game_Initialize(void)
 	Field_Initialize();
 	GameAudio_Initialize();
 	Course_Initialize();
+	Vegetation_Initialize();
 	Sunlight_Initialize();
 	EnvProbe_Initialize();
 	Ui_Initialize();
@@ -133,6 +135,10 @@ void Game_Update(void)
 	{
 		PhotoMode_Update();
 		if (!PhotoMode_IsActive())
+		{
+			Vegetation_Update();
+		}
+		if (!PhotoMode_IsActive() && !Vegetation_IsEditing())
 		{
 			Course_Update();
 		}
@@ -217,6 +223,7 @@ void Game_Draw(void)
 #endif
 	Player_Draw();
 	Course_Draw();
+	Vegetation_Draw();
 #if defined(_DEBUG)
 	if (Player_IsReady())
 	{
@@ -243,6 +250,7 @@ void Game_Draw(void)
 		PlayerCamera_DrawDebug();
 	}
 	PhotoMode_DrawOverlay();
+	Vegetation_DrawOverlay();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_UI);
 #endif
@@ -251,6 +259,7 @@ void Game_Draw(void)
 void Game_Finalize(void)
 {
 	PhotoMode_Exit();
+	Vegetation_Finalize();
 	Course_Finalize();
 	Player_Finalize();
 	GameAudio_Finalize();

@@ -437,6 +437,7 @@ bb->SetBillboardMode(false);       // 固定板
 bb->SetReceiveShadow(true);        // 影受け（床など）
 bb->SetNormalMap("asset/texture/Normal.png");
 bb->SetUVAnimation(4, 0.1f);       // 横コマ数, 1コマ秒数
+bb->SetDrawSize(XMFLOAT2(3, 4));   // バッファを作り直さずサイズだけ変更（同じBillboardを別サイズで描き回す用）
 bb->DrawShadowMap(lightView, lightProj);
 delete bb;
 ```

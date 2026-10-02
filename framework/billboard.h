@@ -64,6 +64,10 @@ public:
 	}
 	XMFLOAT2 GetSize(void) { return m_Size; }
 
+	// 頂点バッファを作り直さずサイズだけ変える（頂点は単位クアッドでサイズは描画時スケール）。
+	// 同じBillboardを大量の別サイズで描き回すときに使う。
+	void SetDrawSize(XMFLOAT2 size) { m_Size = size; }
+
 	void SetRotation(XMFLOAT3 rot) { m_Rot = rot; }
 	XMFLOAT3 GetRotation(void) { return m_Rot; }
 

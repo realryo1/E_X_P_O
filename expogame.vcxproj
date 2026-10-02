@@ -214,6 +214,7 @@
     <ClCompile Include="SCENE_GAME\sunlight.cpp" />
     <ClCompile Include="SCENE_GAME\envprobe.cpp" />
     <ClCompile Include="SCENE_GAME\course.cpp" />
+    <ClCompile Include="SCENE_GAME\vegetation.cpp" />
     <ClCompile Include="SCENE_RESULT\result.cpp" />
     <ClCompile Include="app\scene.cpp" />
     <ClCompile Include="shader\renderer.cpp" />
@@ -286,6 +287,7 @@
     <ClInclude Include="SCENE_GAME\sunlight.h" />
     <ClInclude Include="SCENE_GAME\envprobe.h" />
     <ClInclude Include="SCENE_GAME\course.h" />
+    <ClInclude Include="SCENE_GAME\vegetation.h" />
     <ClInclude Include="app\scene.h" />
     <ClInclude Include="SCENE_RESULT\result.h" />
     <ClInclude Include="shader\shadermanager.h" />

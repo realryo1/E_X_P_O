@@ -84,6 +84,7 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [x] `cursor-no-debugger-run`: 実行とデバッグの `Debug Clean (No Debugger)` / `Release Clean (No Debugger)`。`hal::dout` は `EXPO_VERBOSE_DEBUG_LOG` があるDebugだけ OutputDebugString
 - [x] `ssao-crevice`: シーン色を内部RTへ描き、オン時のみ1/4解像度SSAOと深度依存ぼかしを合成。起動既定はOFF。`Expo Sunlight` から調整。UIはAO対象外
 - [x] `photo-mode`: ゲームメニューからReleaseでも使えるフリーカメラ、ライティング調整、ポスタライズ・ノイズ・フィルムグレイン・RGBずらし、およびエフェクト込みのF2撮影を追加
+- [x] `vegetation-editor`: F9で入るImGuiマップエディタ。木・草ビルボードをブラシで配置・削除し、`asset/vegetation/placement.txt`へ保存（画像は`asset/vegetation/`へ置くだけで種類が増える。画像は未用意）
 - [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [ ] GLB直接読み込み失敗の謎に迫る
 - [x] オルソ床に起伏を付ける（CityGML dem TINの相対起伏を4mグリッドへ焼く。中央値基準、±3.0m切詰、被覆端40mなじませ）

@@ -124,6 +124,9 @@
     <ClCompile Include="SCENE_GAME\course.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
+    <ClCompile Include="SCENE_GAME\vegetation.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
     <ClCompile Include="app\scene.cpp">
       <Filter>フレームワーク\etc</Filter>
     </ClCompile>
@@ -301,6 +304,9 @@
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\course.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\vegetation.h">
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="app\scene.h">

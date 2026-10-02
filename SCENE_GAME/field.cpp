@@ -3475,6 +3475,12 @@ bool Field_HasFloor(void)
 	return g_ExpoFloor != nullptr;
 }
 
+bool Field_SampleGroundY(float x, float z, float* outY)
+{
+	return g_FloorCollisionId >= 0 &&
+		Collision_SampleTopY(g_FloorCollisionId, x, z, outY);
+}
+
 int Field_GetRingCollisionId(void)
 {
 	return g_RingCollisionId;
