@@ -47,6 +47,16 @@ static bool g_Visible = true;
 static float g_DashTimer = 0.0f;
 static float g_DashVelocity = 0.0f;
 static bool g_WasGrounded = false;
+static float g_RumbleStrength = 0.0f;
+static float g_RumbleTimer = 0.0f;
+static float g_RumbleApplied = 0.0f;
+static const float PLAYER_RUMBLE_LEFT_RATIO = 0.6f;//左モーターは右の6割で鳴らす（低音と高音を分ける）
+static const float PLAYER_HIT_RUMBLE_STRENGTH = 0.25f;
+static const float PLAYER_HIT_RUMBLE_SECONDS = 0.1f;
+static const float PLAYER_HIT_SHAKE_AMPLITUDE = 0.06f;
+static const float PLAYER_LAND_RUMBLE_STRENGTH = 0.4f;
+static const float PLAYER_LAND_RUMBLE_SECONDS = 0.15f;
+static const float PLAYER_LAND_SHAKE_AMPLITUDE = 0.03f;
 
 static float Approach(float current, float target, float amount)
 {
@@ -68,6 +78,31 @@ static float NormalizeAngle(float angle)
 	while (angle > 180.0f) angle -= 360.0f;
 	while (angle < -180.0f) angle += 360.0f;
 	return angle;
+}
+
+// 振動はモーター値が変わったときだけ XInput へ送る
+static void ApplyRumble(void)
+{
+	const float target = g_RumbleTimer > 0.0f ? g_RumbleStrength : 0.0f;
+	if (target == g_RumbleApplied)
+	{
+		return;
+	}
+	g_RumbleApplied = target;
+	Input_SetRumble(target * PLAYER_RUMBLE_LEFT_RATIO, target);
+}
+
+static void UpdateRumble(void)
+{
+	if (g_RumbleTimer > 0.0f)
+	{
+		g_RumbleTimer = fmaxf(g_RumbleTimer - 1.0f / FPS, 0.0f);
+	}
+	if (g_RumbleTimer <= 0.0f)
+	{
+		g_RumbleStrength = 0.0f;
+	}
+	ApplyRumble();
 }
 
 void Player_Initialize(XMFLOAT3 startPos)
@@ -114,6 +149,9 @@ void Player_Finalize(void)
 	g_ControlEnabled = true;
 	g_DashTimer = 0.0f;
 	g_DashVelocity = 0.0f;
+	g_RumbleStrength = 0.0f;
+	g_RumbleTimer = 0.0f;
+	ApplyRumble();
 	SAFE_DELETE(g_PlayerModel);
 }
 
@@ -153,6 +191,14 @@ void Player_ActivateDash(void)
 {
 	g_DashTimer = PLAYER_DASH_DURATION;
 	g_DashVelocity = PLAYER_DASH_VELOCITY;
+	PlayerCamera_AddFovKick();
+}
+
+void Player_Rumble(float strength, float seconds)
+{
+	g_RumbleStrength = fmaxf(g_RumbleStrength, strength);
+	g_RumbleTimer = fmaxf(g_RumbleTimer, seconds);
+	ApplyRumble();
 }
 
 void Player_WarpTo(XMFLOAT3 pos)
@@ -207,6 +253,8 @@ void Player_SetVisible(bool visible)
 
 void Player_Update(void)
 {
+	UpdateRumble();
+
 	if (!Player_IsReady())
 	{
 		if (!Field_IsLoadComplete())
@@ -295,10 +343,14 @@ void Player_Update(void)
 	if (blockedXz > 0.0005f)
 	{
 		GameAudio_PlayHit();
+		PlayerCamera_AddShake(PLAYER_HIT_SHAKE_AMPLITUDE);
+		Player_Rumble(PLAYER_HIT_RUMBLE_STRENGTH, PLAYER_HIT_RUMBLE_SECONDS);
 	}
 	if (grounded && !g_WasGrounded)
 	{
 		GameAudio_PlayLand();
+		PlayerCamera_AddShake(PLAYER_LAND_SHAKE_AMPLITUDE);
+		Player_Rumble(PLAYER_LAND_RUMBLE_STRENGTH, PLAYER_LAND_RUMBLE_SECONDS);
 	}
 	g_WasGrounded = grounded;
 	g_Pos = nextPos;

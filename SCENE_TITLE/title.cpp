@@ -41,6 +41,9 @@ static SoundData* g_pTitleBgm = nullptr;
 static TitleAnimPhase g_AnimPhase = TITLE_ANIM_WAIT;
 static float g_AnimT = 0.0f;
 static float g_BobTime = 0.0f;
+static float g_HintBlinkTime = 0.0f;
+static const float kHintBlinkPeriod = 1.2f;
+static const float kHintBlinkOnRatio = 0.6f;
 
 static const XMFLOAT2 kTaxiSize = { 500.0f, 500.0f };
 static const XMFLOAT2 kTaxiRest = { 700.0f, 500.0f };
@@ -72,6 +75,7 @@ void Title_Initialize(void)
 	g_AnimPhase = TITLE_ANIM_WAIT;
 	g_AnimT = 0.0f;
 	g_BobTime = 0.0f;
+	g_HintBlinkTime = 0.0f;
 	Field_Initialize();
 	Sunlight_PrepareAssets();
 
@@ -180,6 +184,7 @@ void Title_Update(void)
 #endif
 
 	const float dt = 1.0f / FPS;
+	g_HintBlinkTime += dt;
 
 	if (g_AnimPhase == TITLE_ANIM_WAIT)
 	{
@@ -252,7 +257,8 @@ void Title_Draw(void)
 	if (g_pTaxi) g_pTaxi->Draw();
 	if (g_pExpoText) g_pExpoText->Draw();
 	if (g_pRaceText) g_pRaceText->Draw();
-	if (g_pHintText) g_pHintText->Draw();
+	// 色は変えず、表示のオン・オフで点滅させる
+	if (g_pHintText && fmodf(g_HintBlinkTime, kHintBlinkPeriod) < kHintBlinkPeriod * kHintBlinkOnRatio) g_pHintText->Draw();
 #if defined(_DEBUG)
 	if (g_pLoadDebugText) g_pLoadDebugText->Draw();
 #endif

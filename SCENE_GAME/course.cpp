@@ -99,6 +99,27 @@ namespace
 	DrawFont* g_pMenuHintText = nullptr;
 	MultiLineClickFont* g_pMenuText = nullptr;
 	Sprite2D* g_pMenuBackground = nullptr;
+	Sprite2D* g_pMenuCursorBar = nullptr;
+	Sprite2D* g_pGoalRankHighlight = nullptr;
+	DrawFont* g_pGoText = nullptr;
+	float g_GoalAnimTime = 0.0f;
+	int g_GoalRankHighlightLine = -1;
+	float g_MenuAnim = 0.0f;
+	XMFLOAT2 g_MenuCursorBarPos = {};
+	bool g_MenuCursorBarReady = false;
+
+	const float COURSE_COUNTDOWN_POP_SCALE = 0.6f;
+	const float COURSE_GO_SECONDS = 0.8f;
+	const float COURSE_GO_POP_SCALE = 0.8f;
+	const float COURSE_GATE_RUMBLE_STRENGTH = 0.5f;
+	const float COURSE_GATE_RUMBLE_SECONDS = 0.25f;
+	const float COURSE_GOAL_RUMBLE_STRENGTH = 0.9f;
+	const float COURSE_GOAL_RUMBLE_SECONDS = 0.6f;
+	const float COURSE_MENU_ANIM_SECONDS = 0.2f;
+	const float COURSE_MENU_SLIDE_PIXELS = 36.0f;
+	const float COURSE_MENU_BACK_ALPHA = 0.55f;
+	const XMFLOAT4 RING_NORMAL_COLOR = { 1.0f, 1.0f, 1.0f, 1.0f };
+	const XMFLOAT4 RING_NEXT_COLOR = { 1.0f, 0.82f, 0.25f, 1.0f };
 
 	std::string Trim(const std::string& value)
 	{
@@ -574,6 +595,7 @@ namespace
 	void RefreshGoalRanking(void)
 	{
 		g_GoalRecordUpdated = false;
+		g_GoalRankHighlightLine = -1;
 		if (!g_pGoalRankingText)
 		{
 			return;
@@ -641,6 +663,7 @@ namespace
 			if (hasCurrent && entries[i].logIndex == currentIndex)
 			{
 				ranking << "  ★";
+				g_GoalRankHighlightLine = i + 1;
 			}
 		}
 		if (showCount == 0)
@@ -731,6 +754,8 @@ namespace
 		Player_SetControlEnabled(true);
 		g_Mode = CourseMode::RaceGoal;
 		GameAudio_PlayGoal();
+		Player_Rumble(COURSE_GOAL_RUMBLE_STRENGTH, COURSE_GOAL_RUMBLE_SECONDS);
+		g_GoalAnimTime = 0.0f;
 		GameAudio_SetBgmGoal();
 	}
 
@@ -781,6 +806,27 @@ namespace
 		return g_Mode == CourseMode::RaceCountdown ||
 			g_Mode == CourseMode::RaceRunning ||
 			g_Mode == CourseMode::RaceGoal;
+	}
+
+	// 次に通るリングだけ強調する。色は差分があるときだけ変える（Billboard::SetColor はバッファを作り直す）
+	void UpdateRingHighlight(void)
+	{
+		const bool racing = IsRaceMode();
+		for (size_t i = 0; i < g_Rings.size(); ++i)
+		{
+			Billboard* ring = g_Rings[i];
+			if (!ring)
+			{
+				continue;
+			}
+			const bool isNext = racing && static_cast<int>(i) + 1 == g_NextGate;
+			const XMFLOAT4 wanted = isNext ? RING_NEXT_COLOR : RING_NORMAL_COLOR;
+			const XMFLOAT4 current = ring->GetColor();
+			if (current.x != wanted.x || current.y != wanted.y || current.z != wanted.z)
+			{
+				ring->SetColor(wanted);
+			}
+		}
 	}
 
 	std::string MakeCourseLabel(int index)
@@ -1018,6 +1064,7 @@ namespace
 			g_MenuPage = MenuPage::Root;
 			g_MenuWaitRelease = true;
 			UnLockMouse();
+			g_MenuCursorBarReady = false;
 			if (g_pMenuText)
 			{
 				g_pMenuText->ClearClick();
@@ -1047,6 +1094,102 @@ namespace
 		g_MenuCursor = (g_MenuCursor + direction + itemCount) % itemCount;
 		RefreshMenuText();
 		GameAudio_PlayCursor();
+	}
+
+	void EnterPhotoModeFromMenu(void)
+	{
+		// 写真モード中はメニューを更新しないため、閉じる途中の状態を残さない
+		g_MenuAnim = 0.0f;
+		PhotoMode_Enter();
+	}
+
+	// メニューの開閉。g_MenuAnim は 0（閉）〜1（開）を動かし、背景・見出し・項目を上からスライドさせる
+	void UpdateMenuAnimation(void)
+	{
+		const float target = g_MenuOpen ? 1.0f : 0.0f;
+		const float step = 1.0f / (FPS * COURSE_MENU_ANIM_SECONDS);
+		if (g_MenuAnim < target)
+		{
+			g_MenuAnim = fminf(g_MenuAnim + step, target);
+		}
+		else
+		{
+			g_MenuAnim = fmaxf(g_MenuAnim - step, target);
+		}
+
+		const float inv = 1.0f - g_MenuAnim;
+		const float eased = 1.0f - inv * inv * inv;
+		const float slide = (1.0f - eased) * COURSE_MENU_SLIDE_PIXELS;
+		if (g_pMenuBackground)
+		{
+			g_pMenuBackground->SetPos({ SCREEN_X * 0.5f, SCREEN_Y * 0.5f - slide });
+			g_pMenuBackground->SetColor({ 0.0f, 0.0f, 0.0f, COURSE_MENU_BACK_ALPHA * eased });
+		}
+		if (g_pMenuTitleText)
+		{
+			g_pMenuTitleText->SetPos({ SCREEN_X * 0.5f, 120.0f - slide });
+		}
+		if (g_pMenuText)
+		{
+			g_pMenuText->SetPos({ SCREEN_X * 0.5f, SCREEN_Y * 0.5f - slide });
+		}
+		if (g_pMenuCursorBar)
+		{
+			g_pMenuCursorBar->SetColor({ 1.0f, 0.85f, 0.25f, 0.22f * eased });
+		}
+	}
+
+	// カーソル行へ帯を寄せる。項目の矩形は MultiLineClickFont の Update で組み直された値を使う
+	void UpdateMenuCursorBar(void)
+	{
+		if (!g_pMenuCursorBar || !g_pMenuText || !g_MenuOpen)
+		{
+			return;
+		}
+		const std::vector<FontLineRect>& rects = g_pMenuText->GetLineRects();
+		const int cursorLine = MenuItemToLine(g_MenuCursor);
+		if (cursorLine < 0 || cursorLine >= static_cast<int>(rects.size()))
+		{
+			return;
+		}
+		const FontLineRect& rect = rects[cursorLine];
+		const XMFLOAT2 target = { SCREEN_X * 0.5f, (rect.top + rect.bottom) * 0.5f };
+		if (!g_MenuCursorBarReady)
+		{
+			g_MenuCursorBarPos = target;
+			g_MenuCursorBarReady = true;
+		}
+		else
+		{
+			// 項目が変わると帯が滑らかに移動する
+			g_MenuCursorBarPos.y += (target.y - g_MenuCursorBarPos.y) * 0.35f;
+		}
+		g_pMenuCursorBar->SetPos(g_MenuCursorBarPos);
+		g_pMenuCursorBar->SetSize({ rect.right - rect.left + 48.0f, (rect.bottom - rect.top) * 0.9f });
+	}
+
+	// ゴール後の演出。ランキングの自己記録行の帯を脈動させ、時間を進める
+	void UpdateGoalAnimation(void)
+	{
+		if (g_Mode != CourseMode::RaceGoal)
+		{
+			return;
+		}
+		g_GoalAnimTime += 1.0f / FPS;
+		if (!g_pGoalRankHighlight || !g_pGoalRankingText || g_GoalRankHighlightLine < 0)
+		{
+			return;
+		}
+		const std::vector<FontLineRect>& rects = g_pGoalRankingText->GetLineRects();
+		if (g_GoalRankHighlightLine >= static_cast<int>(rects.size()))
+		{
+			return;
+		}
+		const FontLineRect& rect = rects[g_GoalRankHighlightLine];
+		g_pGoalRankHighlight->SetPos({ SCREEN_X * 0.5f, (rect.top + rect.bottom) * 0.5f });
+		g_pGoalRankHighlight->SetSize({ rect.right - rect.left + 80.0f, (rect.bottom - rect.top) * 0.95f });
+		const float alpha = 0.35f + 0.15f * sinf(g_GoalAnimTime * 4.0f);
+		g_pGoalRankHighlight->SetColor({ 1.0f, 0.85f, 0.25f, alpha });
 	}
 
 	void ExecuteMenuItem(int item)
@@ -1093,7 +1236,7 @@ namespace
 			else if (item == 1)
 			{
 				SetMenuOpen(false);
-				PhotoMode_Enter();
+				EnterPhotoModeFromMenu();
 			}
 			return;
 		}
@@ -1175,7 +1318,7 @@ namespace
 			break;
 		case 4:
 			SetMenuOpen(false);
-			PhotoMode_Enter();
+			EnterPhotoModeFromMenu();
 			break;
 		case 5:
 			SetMenuOpen(false);
@@ -1223,6 +1366,7 @@ namespace
 		}
 
 		g_pMenuText->Update();
+		UpdateMenuCursorBar();
 		if (g_MenuWaitRelease)
 		{
 			if (IsMenuHoldBlocking())
@@ -1390,6 +1534,31 @@ void Course_Initialize(void)
 		{ 0.0f, 0.0f, 0.0f, 0.55f },
 		BLENDSTATE_ALFA,
 		L"asset\\texture\\fade.png");
+	g_pMenuCursorBar = new Sprite2D(
+		{ SCREEN_X * 0.5f, SCREEN_Y * 0.5f },
+		{ 0.0f, 0.0f },
+		0.0f,
+		{ 1.0f, 0.85f, 0.25f, 0.0f },
+		BLENDSTATE_ALFA,
+		L"asset\\texture\\fade.png");
+	g_pGoalRankHighlight = new Sprite2D(
+		{ SCREEN_X * 0.5f, 295.0f },
+		{ 0.0f, 0.0f },
+		0.0f,
+		{ 1.0f, 0.85f, 0.25f, 0.4f },
+		BLENDSTATE_ALFA,
+		L"asset\\texture\\fade.png");
+	g_pGoText = new DrawFont(
+		{ SCREEN_X * 0.5f, SCREEN_Y * 0.35f },
+		120.0f,
+		0.0f,
+		{ 0.35f, 1.0f, 0.45f, 1.0f },
+		"GO!",
+		TA_MIDDLE);
+	g_MenuAnim = 0.0f;
+	g_MenuCursorBarReady = false;
+	g_GoalRankHighlightLine = -1;
+	g_GoalAnimTime = 0.0f;
 }
 
 void Course_Finalize(void)
@@ -1413,6 +1582,11 @@ void Course_Finalize(void)
 	SAFE_DELETE(g_pMenuHintText);
 	SAFE_DELETE(g_pMenuText);
 	SAFE_DELETE(g_pMenuBackground);
+	SAFE_DELETE(g_pMenuCursorBar);
+	SAFE_DELETE(g_pGoalRankHighlight);
+	SAFE_DELETE(g_pGoText);
+	g_MenuAnim = 0.0f;
+	g_GoalRankHighlightLine = -1;
 	g_Courses.clear();
 	g_WorkingCourse = {};
 	g_RaceCourse = {};
@@ -1434,6 +1608,10 @@ void Course_Update(void)
 			SetMenuOpen(!g_MenuOpen);
 		}
 	}
+
+	UpdateRingHighlight();
+	UpdateGoalAnimation();
+	UpdateMenuAnimation();
 
 	if (g_MenuOpen)
 	{
@@ -1508,6 +1686,7 @@ void Course_Update(void)
 			{
 				Player_ActivateDash();
 				GameAudio_PlayBoost();
+				Player_Rumble(COURSE_GATE_RUMBLE_STRENGTH, COURSE_GATE_RUMBLE_SECONDS);
 			}
 		}
 	}
@@ -1640,8 +1819,26 @@ void Course_DrawHud(void)
 			const int number = 3 - static_cast<int>(elapsed);
 			if (number > 0)
 			{
+				// 各カウントの頭で大きく現れ、次のカウントの直前に等倍へ戻る
+				const float phase = static_cast<float>(elapsed - std::floor(elapsed));
+				const float shrink = 1.0f - phase;
+				const float countScale = 1.0f + COURSE_COUNTDOWN_POP_SCALE * shrink * shrink * shrink;
+				g_pCountdownText->SetSize({ countScale, countScale });
 				g_pCountdownText->SetText(std::to_string(number));
 				g_pCountdownText->Draw();
+			}
+		}
+		if (g_Mode == CourseMode::RaceRunning && g_pGoText)
+		{
+			// スタート直後の0.8秒だけ「GO!」を大きく出す
+			const float age = static_cast<float>(std::chrono::duration<double>(
+				std::chrono::steady_clock::now() - g_RaceStarted).count());
+			if (age < COURSE_GO_SECONDS)
+			{
+				const float shrink = 1.0f - age / COURSE_GO_SECONDS;
+				const float goScale = 1.0f + COURSE_GO_POP_SCALE * shrink * shrink * shrink;
+				g_pGoText->SetSize({ goScale, goScale });
+				g_pGoText->Draw();
 			}
 		}
 		if (g_Mode == CourseMode::RaceGoal && g_pGoalBackground)
@@ -1656,7 +1853,17 @@ void Course_DrawHud(void)
 			g_GoalRecordUpdated &&
 			g_pGoalUpdateText)
 		{
-			g_pGoalUpdateText->Draw();
+			// 色は変えず（DrawFont は色変更でアトラスを作り直す）、拡大と表示のオン・オフで点滅させる
+			const float pulse = 1.0f + 0.08f * sinf(g_GoalAnimTime * 6.0f);
+			g_pGoalUpdateText->SetSize({ pulse, pulse });
+			if (fmodf(g_GoalAnimTime, 0.6f) < 0.45f)
+			{
+				g_pGoalUpdateText->Draw();
+			}
+		}
+		if (g_Mode == CourseMode::RaceGoal && g_pGoalRankHighlight && g_GoalRankHighlightLine >= 0)
+		{
+			g_pGoalRankHighlight->Draw();
 		}
 		if (g_Mode == CourseMode::RaceGoal && g_pGoalRankingText)
 		{
@@ -1671,12 +1878,14 @@ void Course_DrawHud(void)
 
 void Course_DrawMenu(void)
 {
-	if (Direct3D_IsTakingScreenshot() || !g_MenuOpen)
+	if (Direct3D_IsTakingScreenshot() || g_MenuAnim <= 0.0f)
 	{
 		return;
 	}
 
 	if (g_pMenuBackground) g_pMenuBackground->Draw();
+	// 閉じる途中はカーソル帯を出さない
+	if (g_pMenuCursorBar && g_MenuOpen) g_pMenuCursorBar->Draw();
 	if (g_pMenuTitleText) g_pMenuTitleText->Draw();
 	if (g_pMenuText) g_pMenuText->Draw();
 	if (g_pMenuHintText) g_pMenuHintText->Draw();

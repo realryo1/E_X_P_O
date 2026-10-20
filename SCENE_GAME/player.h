@@ -24,3 +24,5 @@ void Player_SetFacingYaw(float yaw);
 void Player_SetControlEnabled(bool enabled);
 void Player_ActivateDash(void);
 void Player_SetVisible(bool visible);
+// ゲームパッド振動を strength（0〜1）で seconds 秒鳴らす。重なった場合は強い方・長い方を採用する
+void Player_Rumble(float strength, float seconds);

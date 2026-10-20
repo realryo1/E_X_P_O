@@ -27,6 +27,7 @@ float GetLineSpacing() const { return m_LineSpacing; }
 bool IsHover() const { return m_IsHoverEx; }
 bool IsClick() const { return m_IsClickEx; }
 int GetClickedLineIndex() const { return m_ClickedLineIndex; }
+const std::vector<FontLineRect>& GetLineRects() const { return m_LineRects; }
 
 private:
 void RebuildLayout();

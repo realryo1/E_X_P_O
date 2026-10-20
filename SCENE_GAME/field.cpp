@@ -2769,17 +2769,8 @@ void Field_GetMemoryStatus(char* out, size_t outSize)
 		failed);
 }
 
-bool Field_GetNearestHighDetailName(
-	XMFLOAT3 pos,
-	char* out,
-	size_t outSize)
+static const ExpoDrawJob* FindNearestPavilionJob(XMFLOAT3 pos, float* outDistance)
 {
-	if (!out || outSize == 0)
-	{
-		return false;
-	}
-	out[0] = '\0';
-
 	const ExpoDrawJob* nearest = nullptr;
 	float bestDistSq = FLT_MAX;
 	float bestVolume = FLT_MAX;
@@ -2838,6 +2829,25 @@ bool Field_GetNearestHighDetailName(
 		}
 	}
 
+	if (outDistance)
+	{
+		*outDistance = nearest ? sqrtf(bestDistSq) : FLT_MAX;
+	}
+	return nearest;
+}
+
+bool Field_GetNearestHighDetailName(
+	XMFLOAT3 pos,
+	char* out,
+	size_t outSize)
+{
+	if (!out || outSize == 0)
+	{
+		return false;
+	}
+	out[0] = '\0';
+
+	const ExpoDrawJob* nearest = FindNearestPavilionJob(pos, nullptr);
 	if (!nearest)
 	{
 		return false;
@@ -2851,6 +2861,44 @@ bool Field_GetNearestHighDetailName(
 		dot != std::string::npos && dot > nameStart ? dot : path.size();
 	const std::string stem = path.substr(nameStart, nameEnd - nameStart);
 	strcpy_s(out, outSize, stem.c_str());
+	return true;
+}
+
+bool Field_GetNearestPavilionLabel(
+	XMFLOAT3 pos,
+	char* out,
+	size_t outSize,
+	float* outDistance)
+{
+	if (!out || outSize == 0)
+	{
+		return false;
+	}
+	out[0] = '\0';
+
+	const ExpoDrawJob* nearest = FindNearestPavilionJob(pos, outDistance);
+	if (!nearest)
+	{
+		return false;
+	}
+
+	const std::string fileName = PathFileName(nearest->path);
+	const auto found = g_PavilionOfficialNames.find(fileName);
+	std::string label = found != g_PavilionOfficialNames.end() ? found->second : std::string();
+	if (label.empty())
+	{
+		const size_t dot = fileName.find_last_of('.');
+		label = dot != std::string::npos && dot > 0 ? fileName.substr(0, dot) : fileName;
+	}
+	// 公式名は改行や長い説明を含むことがあるため、改行は空白へ置き換え、収まらない分は切り捨てる（assert させない）
+	for (char& c : label)
+	{
+		if (c == '\n')
+		{
+			c = ' ';
+		}
+	}
+	strncpy_s(out, outSize, label.c_str(), _TRUNCATE);
 	return true;
 }
 

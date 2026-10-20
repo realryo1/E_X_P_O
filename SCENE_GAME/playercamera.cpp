@@ -30,6 +30,14 @@ static float g_DebugYaw = 0.0f;
 static float g_DebugPitch = 20.0f;
 static float g_DebugMoveSpeed = DEBUG_CAMERA_MOVE_SPEED_DEFAULT;
 
+static const float PLAYER_CAMERA_FOV_KICK_DEGREES = 7.0f;
+static const float PLAYER_CAMERA_FOV_KICK_SECONDS = 0.35f;
+static const float PLAYER_CAMERA_SHAKE_SECONDS = 0.25f;
+static float g_FovKickTimer = 0.0f;
+static float g_ShakeTimer = 0.0f;
+static float g_ShakeAmplitude = 0.0f;
+static float g_ShakeTime = 0.0f;
+
 static void SyncRendererCamera(void)
 {
 	if (GetCamera())
@@ -56,6 +64,38 @@ static XMVECTOR ComputeLookDir(float yawDeg, float pitchDeg)
 		cosf(yawRad) * cosf(pitchRad),
 		0.0f
 	);
+}
+
+// 追従カメラ専用の演出。FOVキックは二次減衰、揺れは残り時間に比例して弱める
+static void UpdateFollowEffects(void)
+{
+	const float frameSeconds = 1.0f / FPS;
+	g_FovKickTimer = fmaxf(g_FovKickTimer - frameSeconds, 0.0f);
+	g_ShakeTimer = fmaxf(g_ShakeTimer - frameSeconds, 0.0f);
+	g_ShakeTime += frameSeconds;
+	if (g_ShakeTimer <= 0.0f)
+	{
+		g_ShakeAmplitude = 0.0f;
+	}
+
+	const float kickRate = g_FovKickTimer / PLAYER_CAMERA_FOV_KICK_SECONDS;
+	const float fov = EXPO_CAMERA_FOV + PLAYER_CAMERA_FOV_KICK_DEGREES * kickRate * kickRate;
+	if (GetCamera())
+	{
+		GetCamera()->SetFov(fov);
+	}
+}
+
+static XMFLOAT2 GetShakeOffset(void)
+{
+	if (g_ShakeTimer <= 0.0f)
+	{
+		return { 0.0f, 0.0f };
+	}
+	const float strength = g_ShakeAmplitude * (g_ShakeTimer / PLAYER_CAMERA_SHAKE_SECONDS);
+	return {
+		strength * sinf(g_ShakeTime * 71.0f),
+		strength * cosf(g_ShakeTime * 53.0f) };
 }
 
 static void ComputeFollowCamera(XMFLOAT3* outPos, XMFLOAT3* outLookAt)
@@ -226,6 +266,22 @@ void PlayerCamera_Initialize(float startYaw, float startPitch)
 	g_DebugActive = false;
 	g_DebugLooking = false;
 	g_DebugMoveSpeed = DEBUG_CAMERA_MOVE_SPEED_DEFAULT;
+	g_FovKickTimer = 0.0f;
+	g_ShakeTimer = 0.0f;
+	g_ShakeAmplitude = 0.0f;
+	g_ShakeTime = 0.0f;
+}
+
+void PlayerCamera_AddFovKick(void)
+{
+	g_FovKickTimer = PLAYER_CAMERA_FOV_KICK_SECONDS;
+}
+
+void PlayerCamera_AddShake(float amplitude)
+{
+	const float current = g_ShakeTimer > 0.0f ? g_ShakeAmplitude : 0.0f;
+	g_ShakeAmplitude = fmaxf(current, amplitude);
+	g_ShakeTimer = PLAYER_CAMERA_SHAKE_SECONDS;
 }
 
 void PlayerCamera_SetLookAngles(float yaw, float pitch)
@@ -289,6 +345,12 @@ void PlayerCamera_Update(void)
 	XMFLOAT3 camPos;
 	XMFLOAT3 lookAt;
 	ComputeFollowCamera(&camPos, &lookAt);
+	UpdateFollowEffects();
+	const XMFLOAT2 shake = GetShakeOffset();
+	camPos.x += shake.x;
+	camPos.y += shake.y;
+	lookAt.x += shake.x;
+	lookAt.y += shake.y;
 
 	if (GetCamera())
 	{

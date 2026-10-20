@@ -34,6 +34,12 @@ bool Field_GetNearestHighDetailName(
 	DirectX::XMFLOAT3 pos,
 	char* out,
 	size_t outSize);
+// 最も近いパビリオンの表示名（公式名。無ければファイル名）と、境界までの距離（m）
+bool Field_GetNearestPavilionLabel(
+	DirectX::XMFLOAT3 pos,
+	char* out,
+	size_t outSize,
+	float* outDistance);
 void Field_SetSkyboxYaw(float yawDegrees);
 void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture);
 void Field_SetSkyboxEnabled(bool enabled);
