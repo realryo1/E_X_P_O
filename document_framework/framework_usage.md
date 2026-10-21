@@ -855,7 +855,7 @@ point.Apply(ambient);  // 内部で SetLight(ToLIGHT(...))
 ## SCENE_DEBUGについて
 
 デバッグへは Title 右上の `DEBUG` をクリック。実装フォルダは `SCENE_DEBUG/`。
-`SCENE_DEBUG` 内は **Tab** でサブシーン循環（MODEL → LIGHTING）、右クリックで視点操作、移動はマイクラのクリエと同じ。
+`SCENE_DEBUG` 内は **Tab** でサブシーン循環（MODEL → LIGHTING → WAVE → BLOOM）、右クリックで視点操作、移動はマイクラのクリエと同じ。
 **Esc** で Title に戻る。
 
 - MODEL: `asset/model` と `asset/expomodel` 直下の `.fbx` と `.glb` を候補として列挙し、選択中の1体だけを表示する。`←` / `→` でモデル切替、`U` マウスロック、`B` 原点キューブ、`R` 再読み込み。

@@ -31,6 +31,8 @@ enum SHADERTYPE {
 	S_SSAO,
 	S_SSAO_BLUR,
 	S_SSAO_COMPOSITE,
+	S_BLOOM_EXTRACT,
+	S_BLOOM_COMPOSITE,
 	S_MAX,
 };
 
@@ -59,7 +61,9 @@ const std::string filenames[S_MAX] = {
 	"SkyboxTexture",
 	"Ssao",
 	"SsaoBlur",
-	"SsaoComposite"
+	"SsaoComposite",
+	"BloomExtract",
+	"BloomComposite"
 };
 
 class ShaderManager

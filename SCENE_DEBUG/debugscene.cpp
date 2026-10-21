@@ -2,6 +2,7 @@
 #include "debug_model_scene.h"
 #include "debug_lighting_scene.h"
 #include "debugwave.h"
+#include "debug_bloom_scene.h"
 #include "keyboard.h"
 #include "mouse.h"
 #include "fade.h"
@@ -14,6 +15,7 @@ enum DEBUG_TYPE {
 	DEBUG_MODEL = 0,
 	DEBUG_LIGHTING,
 	DEBUG_WAVE,
+	DEBUG_BLOOM,
 	DEBUG_MAX
 };
 
@@ -31,6 +33,9 @@ void DebugScene_Initialize(void)
 		break;
 	case DEBUG_WAVE:
 		DebugWaveScene_Initialize();
+		break;
+	case DEBUG_BLOOM:
+		DebugBloomScene_Initialize();
 		break;
 	default:
 		break;
@@ -59,6 +64,9 @@ void DebugScene_Update(void)
 		case DEBUG_WAVE:
 			DebugWaveScene_Finalize();
 			break;
+		case DEBUG_BLOOM:
+			DebugBloomScene_Finalize();
+			break;
 		default:
 			break;
 		}
@@ -76,6 +84,9 @@ void DebugScene_Update(void)
 		case DEBUG_WAVE:
 			DebugWaveScene_Initialize();
 			break;
+		case DEBUG_BLOOM:
+			DebugBloomScene_Initialize();
+			break;
 		default:
 			break;
 		}
@@ -91,6 +102,9 @@ void DebugScene_Update(void)
 		break;
 	case DEBUG_WAVE:
 		DebugWaveScene_Update();
+		break;
+	case DEBUG_BLOOM:
+		DebugBloomScene_Update();
 		break;
 	default:
 		break;
@@ -110,6 +124,9 @@ void DebugScene_Draw(void)
 	case DEBUG_WAVE:
 		DebugWaveScene_Draw();
 		break;
+	case DEBUG_BLOOM:
+		DebugBloomScene_Draw();
+		break;
 	default:
 		break;
 	}
@@ -127,6 +144,9 @@ void DebugScene_Finalize(void)
 		break;
 	case DEBUG_WAVE:
 		DebugWaveScene_Finalize();
+		break;
+	case DEBUG_BLOOM:
+		DebugBloomScene_Finalize();
 		break;
 	default:
 		break;
