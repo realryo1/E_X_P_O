@@ -62,9 +62,6 @@ public:
 	void SetColor(XMFLOAT4 color) {
 		if (m_Color.x != color.x || m_Color.y != color.y || m_Color.z != color.z || m_Color.w != color.w) {
 			m_Color = color;
-			if (!m_ShareAtlas) {
-				UpdateAtlasTexture();
-			}
 			m_MeshDirty = true;
 			RequestRedraw();
 		}

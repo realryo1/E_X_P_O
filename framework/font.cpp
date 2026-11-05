@@ -305,12 +305,7 @@ bool DrawFont::BakeAtlas() {
 	desc.Usage = D3D11_USAGE_DEFAULT;
 	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-	for (int i = 0; i < m_AtlasWidth * m_AtlasHeight; i++) {
-		m_pAtlasRGBA[i * 4 + 0] = 255;
-		m_pAtlasRGBA[i * 4 + 1] = 255;
-		m_pAtlasRGBA[i * 4 + 2] = 255;
-		m_pAtlasRGBA[i * 4 + 3] = 255;
-	}
+	memset(m_pAtlasRGBA, 255, static_cast<size_t>(m_AtlasWidth) * m_AtlasHeight * 4);
 
 	D3D11_SUBRESOURCE_DATA initialData = {};
 	initialData.pSysMem = m_pAtlasRGBA;
@@ -478,9 +473,10 @@ bool DrawFont::AddGlyphToAtlas(int glyphIndex) {
 	m_AtlasNextX += glyph_width;
 	m_AtlasRowHeight = (std::max)(m_AtlasRowHeight, glyph_height);
 
-	const unsigned char r = m_ShareAtlas ? 255 : (unsigned char)(m_Color.x * 255.0f);
-	const unsigned char g = m_ShareAtlas ? 255 : (unsigned char)(m_Color.y * 255.0f);
-	const unsigned char b = m_ShareAtlas ? 255 : (unsigned char)(m_Color.z * 255.0f);
+	// 色は頂点色で掛けるため、アトラスは常に白で持つ（色変更でアトラスを書き換えない）
+	const unsigned char r = 255;
+	const unsigned char g = 255;
+	const unsigned char b = 255;
 	const int glyphX = static_cast<int>(info.x0);
 	const int glyphY = static_cast<int>(info.y0);
 	for (int y = 0; y < glyph_height; ++y) {
@@ -615,9 +611,9 @@ void DrawFont::UpdateAtlasTexture() {
 		return;
 	}
 
-	const unsigned char r = m_ShareAtlas ? 255 : (unsigned char)(m_Color.x * 255.0f);
-	const unsigned char g = m_ShareAtlas ? 255 : (unsigned char)(m_Color.y * 255.0f);
-	const unsigned char b = m_ShareAtlas ? 255 : (unsigned char)(m_Color.z * 255.0f);
+	const unsigned char r = 255;
+	const unsigned char g = 255;
+	const unsigned char b = 255;
 	const int pixelCount = m_AtlasWidth * m_AtlasHeight;
 	for (int i = 0; i < pixelCount; i++) {
 		m_pAtlasRGBA[i * 4 + 0] = r;
@@ -786,6 +782,11 @@ void DrawFont::RebuildMesh() {
 	const float co = cosf(rad);
 	const float si = sinf(rad);
 
+	// 非共有アトラスは従来「アトラスに焼いた色 × 頂点色」で c^2 になっていたため見た目を維持する
+	const XMFLOAT4 vertexColor = m_ShareAtlas
+		? m_Color
+		: XMFLOAT4(m_Color.x * m_Color.x, m_Color.y * m_Color.y, m_Color.z * m_Color.z, m_Color.w);
+
 	// 最大頂点数を見積もって一度だけ Map する（グリフあたり三角形2枚 = 6頂点）
 	if (m_Text.empty()) {
 		return;
@@ -870,7 +871,7 @@ void DrawFont::RebuildMesh() {
 			for (int qi = 0; qi < 4; ++qi) {
 				float rx = lx[qi] * co - ly[qi] * si;
 				float ry = lx[qi] * si + ly[qi] * co;
-				quad[qi] = { { rx + pivotX, ry + pivotY, 0.0f }, { 0, 0, 0 }, m_Color, uv[qi] };
+				quad[qi] = { { rx + pivotX, ry + pivotY, 0.0f }, { 0, 0, 0 }, vertexColor, uv[qi] };
 			}
 
 			// 三角形リスト: 0-1-2, 1-3-2
@@ -955,7 +956,6 @@ void DrawFont::PreCacheGlyphs() {
 	if (!m_Ready || !g_FtFace) return;
 	if (!EnsurePixelSize()) return;
 
-	bool atlasUpdated = false;
 	size_t idx = 0;
 	while (idx < m_Text.length()) {
 		int codepoint = UTF8ToCodePoint(m_Text, idx);
@@ -968,12 +968,6 @@ void DrawFont::PreCacheGlyphs() {
 
 		if (GlyphCache().find((int)glyph_index) != GlyphCache().end()) continue;
 
-		if (AddGlyphToAtlasBatch((int)glyph_index)) {
-			atlasUpdated = true;
-		}
-	}
-
-	if (atlasUpdated) {
-		UpdateAtlasTexture();
+		AddGlyphToAtlas((int)glyph_index);
 	}
 }

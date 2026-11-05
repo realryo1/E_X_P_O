@@ -43,6 +43,8 @@ bool Field_GetNearestPavilionLabel(
 void Field_SetSkyboxYaw(float yawDegrees);
 void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture);
 void Field_SetSkyboxEnabled(bool enabled);
+ID3D11ShaderResourceView* Field_GetSkyboxTexture(void);
+float Field_GetSkyboxYaw(void);
 void Field_DrawDebug(void);
 void Field_SetPavilionLabelsVisible(bool visible);
 bool Field_ArePavilionLabelsVisible(void);

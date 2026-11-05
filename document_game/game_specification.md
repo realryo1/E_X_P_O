@@ -44,6 +44,7 @@ BGM / SE のパスと発火地点は
 - レースモード：コースの1つ目の座標へ移動し、3秒のカウントダウン後に計測を開始する。2つ目以降の輪を座標順に通過し、左上へ`00:00:00`（分:秒:センチ秒）形式で表示する。ゴール時はタイムスタンプとタイムを`asset/course/*.yml`の`logs`へ追記し、リザルトにタイム昇順のTOP5を表示する。今回の記録には`★`を付け、過去ベストより速ければ`更新！`を出す。ゴール中は`Esc` / パッドSTARTでメニューを出さない。
 - フォトモード：メニューから入るとプレイヤー操作と三人称追従を停止し、WASD / Space / Shiftで移動するフリーカメラへ切り替える。右クリックまたは右スティックで視点を操作し、FOV、移動速度、プレイヤー表示、太陽光、ポスタライズ、ノイズ、フィルムグレイン、RGBずらしを調整できる。レース中は計測と通過判定を一時停止し、終了時に設定を入場前へ戻す。
 - 植生エディタ（Vegetation Editor）：ゲーム中に`F9`で入る（メニュー・フォトモード中は不可）。プレイヤー操作を止めてフリーカメラ（WASD / Space / Shift、右クリックで視点）へ切り替え、ImGuiの`Vegetation Editor`窓を出す。カーソル（視点操作中は画面中央）が指す床を中心に、半径内へ木や草のビルボードをランダム配置・削除する。左クリック / `F`長押しで配置、`Ctrl`+左クリック / `X`長押しで削除（0.05秒周期）、`Ctrl+Z`で元に戻す（20段）、`F9` / `Esc` / Exitで終了。窓では半径・密度・スケール幅・描画距離、種類ごとの有効チェックと高さ(m)を調整し、チェックした種類からランダムに選んで配置する。種類は`asset/vegetation/`の png / jpg / tga を列挙して作り、Rescan Imagesで再列挙できる（縦横比は画像から取得、足元が画像下端）。Saveで`asset/vegetation/placement.txt`へ保存し、起動時に読み込む。保存先は`asset`配下なのでリリースZIPへ同梱される。配置は床コリジョン上のみ。描画はY軸だけカメラへ向く固定板を奥から手前へ半透明で並べ、影とライティングは使わない。上限30000本。
+- 水面エディタ（Water Editor）：ゲーム中に`F8`で入る（メニュー・フォトモード・植生エディタ中は不可）。植生エディタと同じフリーカメラ（WASD / Space / Shift、右クリックで視点）とImGuiの`Water Editor`窓を使う。床をクリックして水域の輪郭の頂点を置き、閉じた多角形を水面にする。左クリック / `F`で選択中の頂点の次へ頂点を追加し、押したままドラッグで位置を決める。頂点の上でクリックすると選択・ドラッグ移動、`Shift`+辺のクリックで辺の途中へ挿入、`Del` / `Backspace` / `X`で選択頂点を削除、`Ctrl+Z`で元に戻す（30段）、`F8` / `Esc` / Exitで終了。水域は複数持て、窓の一覧で選択、New Areaで新しい水域（次のクリックから開始）、Delete Areaで削除する。水面は水域ごとに水平で、最初の頂点の床の高さ+0.02から始まり、窓の`Height`または`Fit Height to Ground`（輪郭頂点の床の平均+0.02）で調整する。3頂点未満の水域は描かず、輪郭が自己交差して三角形分割できない水域は赤く表示する。Saveで`asset/water/areas.txt`へ保存し、起動時に読み込む（`a <height>` の後に `v <x> <z>` を輪郭順に並べる）。保存先は`asset`配下なのでリリースZIPへ同梱される。見た目（色・波・反射）は Debug の ImGui `Expo Water` で調整する。
 - プレイヤーの通常移動速度は`0.12`。レース中にゴール以外の輪を通過すると、通常の前進速度へ`0.30`の速度を0.4秒間加算する。時間終了後も通常の減速幅で加算成分が滑らかに減衰し、急停止しない。次の輪を通過すると持続時間を更新する。
 - ゲームメニューには「フォトモード」を追加する。フォトモード中は機体を非表示にでき、F2撮影にはポスタライズ、ノイズ、フィルムグレイン、RGBずらしが反映される。
 - Debugビルド用ImGui（`Expo Player` / `Expo Sunlight`）：速度・ワープ操作、太陽・シャドウ・SSAO調整を行う。フリーカメラはゲームメニューのフォトモードで利用する。ReleaseビルドではDebug窓を表示しない。スカイドーム以外のモデルは `S_PBR` とglTF PBRマテリアルを使用し、全対象モデルが影を受ける。影の投影元は床、パンチ済みLOD2、リング、タクシーで、LOD3表示時も建物影はLOD2ベースとする。遠景LOD2は影パスに載せない。スカイドームは `S_SKYBOX`。起動既定は方位 `-170.0°`、仰角・色はHDR抽出値、強度 `2.0`、環境光倍率 `0.8`、ヨーオフセット `0`、粗さ `0.81`、金属度 `0`、シャドウ範囲 `0–20m / 20–70m / 70–160m`、バイアス `0.0005`、影の明るさ `0.25`、SSAOはOFF・強度 `0.85`・半径 `1.25m`・バイアス `0.04m`・Power `1.20`。
@@ -60,6 +61,7 @@ BGM / SE のパスと発火地点は
 | Game | W / 左スティック上で前進、Spaceで上昇、Shiftで下降、マウス左右で機体旋回、右スティックで視点。`Esc` / パッドSTARTでメニューを開閉し、矢印キー / 十字キーとEnter / パッドAでメニューを操作する。ゴール中はメニューを開かない。メニュー中は機体操作を停止する。上下移動は前進中なら斜め、停止中なら垂直になる。A/Dの横移動とSの後退は行わない。コース作成中は`P`で輪を配置し、`U`で最後の輪を取り消す |
 | Photo Mode | ゲームメニューの「フォトモード」から開始。WASD / Space / Shiftでカメラ移動、右クリックまたは右スティックで視点、`Esc`で終了、F2で撮影。Photo Modeパネルからカメラ・ライト・エフェクトを調整する |
 | Vegetation Editor | `F9`で開始 / 終了。WASD / Space / Shiftでカメラ移動、右クリックで視点。左クリック / `F`長押しで配置、`Ctrl`+左クリック / `X`長押しで削除、`Ctrl+Z`で取り消し、Saveで保存 |
+| Water Editor | `F8`で開始 / 終了。WASD / Space / Shiftでカメラ移動、右クリックで視点。左クリック / `F`で頂点追加（ドラッグで移動）、頂点クリックで選択・移動、`Shift`+辺クリックで挿入、`Del` / `X`で頂点削除、`Ctrl+Z`で取り消し、Saveで保存 |
 | Debug | `Tab` で MODEL → LIGHTING。`Esc` でマウスロック解除 |
 
 ### 触るファイル
@@ -75,7 +77,9 @@ BGM / SE のパスと発火地点は
 | [`SCENE_GAME/gameaudio.cpp`](../SCENE_GAME/gameaudio.cpp) | BGM 切替と SE 再生。`LoadMP3` / `PlaySound`。欠損ファイルは無音 |
 | [`SCENE_GAME/player.cpp`](../SCENE_GAME/player.cpp) | 空飛ぶタクシーの出現、ホバー移動、描画、ホバー／ヒット／着地 SE、`Player_DrawDebug`（速度・ワープ・`Warp to Slope`） |
 | [`SCENE_GAME/playercamera.cpp`](../SCENE_GAME/playercamera.cpp) | 三人称、Far 2000、`Camera_Initialize`、`SetCameraPosition`、フォトモード用フリーカメラ |
-| [`SCENE_GAME/vegetation.cpp`](../SCENE_GAME/vegetation.cpp) | 植生エディタ。画像列挙、床へのレイ判定、ブラシ配置・削除、Undo、`placement.txt`入出力、ビルボード描画、ImGui窓 |
+| [`SCENE_GAME/vegetation.cpp`](../SCENE_GAME/vegetation.cpp) | 植生エディタ。画像列挙、床へのレイ判定（`groundpick.cpp`）、ブラシ配置・削除、Undo、`placement.txt`入出力、ビルボード描画、ImGui窓 |
+| [`SCENE_GAME/water.cpp`](../SCENE_GAME/water.cpp) | 水面と水面エディタ。水域の多角形の頂点編集、耳刈り取りの三角形分割、Undo、`areas.txt`入出力、水面描画、ImGui窓（`Water Editor` / Debug の `Expo Water`） |
+| [`SCENE_GAME/groundpick.cpp`](../SCENE_GAME/groundpick.cpp) | 画面座標から床コリジョンへのレイ判定と、ワールド座標の画面投影。植生・水面エディタで共用 |
 | [`SCENE_GAME/envprobe.cpp`](../SCENE_GAME/envprobe.cpp) | null2 の動的キューブマップ撮影（起動既定 512²） |
 | [`SCENE_GAME/sunlight.cpp`](../SCENE_GAME/sunlight.cpp) | 平行太陽、連動環境光、スカイドームヨー連動、`Sunlight_DrawDebug`（窓名 `Expo Sunlight`） |
 | [`SCENE_GAME/ui.cpp`](../SCENE_GAME/ui.cpp) | DrawFont HUD。タイトル、操作案内、ロード状況、メモリ |

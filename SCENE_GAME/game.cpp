@@ -11,6 +11,7 @@
 #include "envprobe.h"
 #include "ui.h"
 #include "vegetation.h"
+#include "water.h"
 #include "mouse.h"
 #include "fade.h"
 #include "keyboard.h"
@@ -81,6 +82,7 @@ void Game_Initialize(void)
 	GameAudio_Initialize();
 	Course_Initialize();
 	Vegetation_Initialize();
+	Water_Initialize();
 	Sunlight_Initialize();
 	EnvProbe_Initialize();
 	Ui_Initialize();
@@ -134,11 +136,15 @@ void Game_Update(void)
 	if (fieldReady)
 	{
 		PhotoMode_Update();
-		if (!PhotoMode_IsActive())
+		if (!PhotoMode_IsActive() && !Water_IsEditing())
 		{
 			Vegetation_Update();
 		}
 		if (!PhotoMode_IsActive() && !Vegetation_IsEditing())
+		{
+			Water_Update();
+		}
+		if (!PhotoMode_IsActive() && !Vegetation_IsEditing() && !Water_IsEditing())
 		{
 			Course_Update();
 		}
@@ -224,6 +230,7 @@ void Game_Draw(void)
 	Player_Draw();
 	Course_Draw();
 	Vegetation_Draw();
+	Water_Draw();
 #if defined(_DEBUG)
 	if (Player_IsReady())
 	{
@@ -244,6 +251,7 @@ void Game_Draw(void)
 		Course_DrawHud();
 		Player_DrawDebug();
 		Field_DrawDebug();
+		Water_DrawDebug();
 		Collision_DrawDebug();
 		Course_DrawMenu();
 		Sunlight_DrawDebug();
@@ -251,6 +259,7 @@ void Game_Draw(void)
 	}
 	PhotoMode_DrawOverlay();
 	Vegetation_DrawOverlay();
+	Water_DrawOverlay();
 #if defined(_DEBUG)
 	Direct3D_DebugStageEnd(DIRECT3D_DEBUG_STAGE_UI);
 #endif
@@ -260,6 +269,7 @@ void Game_Finalize(void)
 {
 	PhotoMode_Exit();
 	Vegetation_Finalize();
+	Water_Finalize();
 	Course_Finalize();
 	Player_Finalize();
 	GameAudio_Finalize();

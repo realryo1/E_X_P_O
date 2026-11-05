@@ -307,6 +307,21 @@ Debug ビルドではウィンドウキャプションと `debug-frame-perf.log`
 
 ---
 
+## 6.5 水面（ウォータープラザなど）
+
+床はオルソ写真1枚のため、池は別の透明な多角形（[`SCENE_GAME/water.cpp`](../SCENE_GAME/water.cpp)）を重ねて表現する。`Game_Draw` で不透明物（`Player_Draw` / `Course_Draw` / `Vegetation_Draw`）の後、SSAO・ブルームの前に `Water_Draw` を呼ぶ。深度は読むだけで書かない。
+
+- **水域データ**: `F8` の水面エディタ（操作は [game_specification.md](game_specification.md)）で輪郭の頂点を置き、`asset/water/areas.txt` に保存する。水域ごとに水平な高さを1つ持つ。輪郭は耳刈り取り法で三角形分割し、全水域の頂点・インデックスを1本ずつのバッファへまとめる（編集で変わったときだけ作り直す）。自己交差した輪郭は分割できた分だけ描く。
+- **縁**: 全水域の輪郭の辺を `StructuredBuffer<float4>`（t2、xy:始点XZ zw:終点XZ）へ入れ、[`shader/WaterPS.hlsl`](../shader/WaterPS.hlsl) が水域ごとの範囲（`WaterShape.xy`）を走査して最短距離を求める。縁は `Edge Softness` でαを落として床写真になじませ、縁からの距離で浅瀬色→深場色に変える（`Depth Ramp`）。t2 は PBR の法線マップ枠なので、描画後に元のSRVへ戻す。
+- **波**: 方向と波長の違う正弦波6本の勾配から法線を作る。振れ幅は深水波の分散関係 `w = sqrt(g k)` に従い、波長 `60〜220` 波長分より遠い成分は消してちらつきを抑える。ワールド1単位 = 5m として波長をメートルで扱う。
+- **反射**: 波の法線で反射した視線を、スカイドームと同じ正距円筒UV（Yaw込み、`Field_GetSkyboxTexture` / `Field_GetSkyboxYaw`）でHDRスカイに当てる。割合は Schlick フレネル（F0 = 0.02）。建物や機体の映り込み（平面反射）は未対応。
+- **太陽**: 同じ法線のGGX（粗さ 0.06）できらめかせ、近傍シャドウ (`CalcCascadedShadow`) で建物の影に入る所は消す。水底にはコースティクス風の揺れる網目、縁には波打つ泡を足す。
+- **合成**: 透過 `(1 - F)(1 - bodyAlpha)` で下の床を残し、反射・水色・きらめきを加算する形を、通常の `SrcAlpha / InvSrcAlpha` に収まるよう `emitted / coverage` で出力する。距離フォグは `ApplyFog` で適用する。
+- **定数バッファ**: b0〜b13 が埋まっているため、SCENE_GAME で未使用の b9（4面ShadowMap用）を `WaterBuffer` として借りる。次フレームの `Clear` でレンダラーが b9 を張り直す。見た目の値は Debug の ImGui `Expo Water` で調整する（保存はしない）。
+- **未実装**: 噴水（水柱・飛沫・着水リップル）、水面下のドローン、岸との深度フェード。
+
+---
+
 ## 7. 定数バッファおよびリソーススロット構成
 
 DirectX 11 パイプラインにおけるシェーダースロットの割り当ては以下の通り整理されている。
@@ -404,6 +419,7 @@ SSAOの後処理シェーダーでは `t0` / `t1` を後処理用に再利用す
 | [`shader/PBRShaderVS.hlsl`](../shader/PBRShaderVS.hlsl) | `Parameter.w` に応じたライト空間座標計算。null2 は膜の頂点変位 |
 | [`shader/PBRShaderPS.hlsl`](../shader/PBRShaderPS.hlsl) | GGX 反射計算、直接光への影乗算、環境光との加算合成、距離＋高度フォグ。`TexMode >= 2.5` でキューブ鏡面。床とリングで式は共通 |
 | [`shader/renderer.h`](../shader/renderer.h) / [`.cpp`](../shader/renderer.cpp) | GPU アダプタ選択、シーンRT（バックバッファと同解像度）、`BeginShadowMap`, `EndShadowMap`, `BeginEnvCubeFace`, `EndEnvCubeFace`, `SetShadowMatrix`, `SetParameterW`, `SetFog`, `Direct3D_BeginScene`, `Direct3D_ApplySsao`、中間RT・深度SRV・定数バッファ管理。GPU タイムスタンプは Release でも有効 |
+| [`SCENE_GAME/water.h`](../SCENE_GAME/water.h) / [`.cpp`](../SCENE_GAME/water.cpp)、[`shader/WaterVS.hlsl`](../shader/WaterVS.hlsl) / [`WaterPS.hlsl`](../shader/WaterPS.hlsl) | 水面と水面エディタ（F8）。水域の多角形、三角形分割、輪郭の辺バッファ、波法線、HDRスカイ反射、太陽のきらめき、泡、コースティクス。ImGui「Water Editor」「Expo Water」 |
 | [`shader/SkyboxTextureVS.hlsl`](../shader/SkyboxTextureVS.hlsl) / [`shader/SkyboxTexturePS.hlsl`](../shader/SkyboxTexturePS.hlsl) | スカイドーム専用。ワールド方向から正距円筒UVを計算してHDR表示テクスチャをサンプル |
 | [`shader/Common.hlsl`](../shader/Common.hlsl) | `CalcShadow`（3×3 PCF、深度バイアス、ボーダー処理）、`ApplyFog`（距離＋高度フォグ） |
 | [`shader/SsaoVS.hlsl`](../shader/SsaoVS.hlsl)、[`shader/SsaoPS.hlsl`](../shader/SsaoPS.hlsl) | シーンの 1/4 解像度で深度をサンプリングし近傍遮蔽を推定する |

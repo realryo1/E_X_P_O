@@ -33,6 +33,7 @@ enum SHADERTYPE {
 	S_SSAO_COMPOSITE,
 	S_BLOOM_EXTRACT,
 	S_BLOOM_COMPOSITE,
+	S_WATER,		// ウォータープラザの水面（アルファブレンド・空反射）。
 	S_MAX,
 };
 
@@ -63,7 +64,8 @@ const std::string filenames[S_MAX] = {
 	"SsaoBlur",
 	"SsaoComposite",
 	"BloomExtract",
-	"BloomComposite"
+	"BloomComposite",
+	"Water"
 };
 
 class ShaderManager

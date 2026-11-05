@@ -60,6 +60,8 @@ static const float EXPO_PAVILION_LABEL_HEIGHT = 0.20f;
 static const float EXPO_PAVILION_LABEL_WORLD_Y = -6.12f;
 static const float EXPO_PAVILION_LABEL_DISTANCE = 27.1f;
 static const double EXPO_LOAD_BUDGET_MILLISECONDS = 6.0;
+static const double EXPO_PRELOAD_BUDGET_MILLISECONDS = 2.5; // タイトル中の先行ロード
+static bool g_PreloadBudgetActive = false;
 static const double EXPO_STREAM_AFTER_PRESENT_BUDGET_MS = 3.0;
 static const double EXPO_STREAM_SKIP_DRAW_MS = 8.0;
 static const float EXPO_STREAM_SKIP_GPU_MS = 8.0f;
@@ -1815,6 +1817,8 @@ static void StartDrawWorker(ExpoDrawJob* job)
 	const unsigned int generation = job->generation.load();
 	job->worker = std::thread([raw, generation]()
 	{
+		// 描画スレッドを奪わないよう、読み込みワーカーは優先度を下げる
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
 		GlbPreparedData* prepared = GlbModel::ImportPreparedFile(raw->path.c_str());
 		if (!prepared)
 		{
@@ -2919,7 +2923,8 @@ void Field_PumpLoad(void)
 	const bool loadingDuringFade =
 		!g_LoadComplete && fadeState != FADE_NONE && fadeState != FADE_IN;
 	const LONGLONG deadline = GetLoadDeadline(
-		loadingDuringFade ? 40.0 : EXPO_LOAD_BUDGET_MILLISECONDS);
+		loadingDuringFade ? 40.0 :
+		(g_PreloadBudgetActive ? EXPO_PRELOAD_BUDGET_MILLISECONDS : EXPO_LOAD_BUDGET_MILLISECONDS));
 	UpdatePrefetchPosition();
 	if (g_LoadComplete)
 	{
@@ -2996,9 +3001,21 @@ void Field_PumpPreload(void)
 
 	// TITLE は Field_Draw を通らないため、初期ロードの最初の描画待ちを
 	// 先行ロード専用に解除し、1回の更新ごとにポンプを再開する。
+	// 論理ステップが1フレームに複数回走っても、ポンプは間隔を空けて1回分に抑える。
+	static LONGLONG s_LastPreloadPump = 0;
+	const LONGLONG now = GetPerformanceCounter();
+	const LONGLONG minInterval = GetPerformanceFrequency() / 60;
+	if (s_LastPreloadPump != 0 && now - s_LastPreloadPump < minInterval)
+	{
+		return;
+	}
+	s_LastPreloadPump = now;
+
 	g_HasPresentedInitialLoadFrame = true;
 	g_PumpedThisFrame = false;
+	g_PreloadBudgetActive = true;
 	Field_PumpLoad();
+	g_PreloadBudgetActive = false;
 	g_PumpedThisFrame = false;
 }
 
@@ -3239,6 +3256,16 @@ void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture)
 void Field_SetSkyboxEnabled(bool enabled)
 {
 	g_ExpoSkyboxEnabled = enabled;
+}
+
+ID3D11ShaderResourceView* Field_GetSkyboxTexture(void)
+{
+	return g_PendingSkyboxTexture;
+}
+
+float Field_GetSkyboxYaw(void)
+{
+	return g_ExpoSkyboxYaw;
 }
 
 static void ClearFarBatchVisibility(void)

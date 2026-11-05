@@ -88,7 +88,9 @@ BGM / SE は [audio_needs.md](audio_needs.md)、
 - [ ] `pbr-ibl-fog-day-night`: IBL、昼夜サイクル、プレイヤーへの環境マッピング
 - [ ] GLB直接読み込み失敗の謎に迫る
 - [x] オルソ床に起伏を付ける（CityGML dem TINの相対起伏を4mグリッドへ焼く。中央値基準、±3.0m切詰、被覆端40mなじませ）
-- [ ] ウォータープラザに波と噴水を
+- [x] ウォータープラザの水面（`SCENE_GAME/water.*` と `shader/WaterVS/PS.hlsl`。動く法線の波・HDRスカイ反射・太陽のきらめき・縁の泡・コースティクス）
+- [x] `water-editor`: F8で入る水面エディタ。床をクリックして水域の多角形の頂点を置き、`asset/water/areas.txt`へ保存（水域ごとに水平な高さ。実際の池の輪郭はまだ置いていない）
+- [ ] ウォータープラザの噴水（水柱・飛沫・着水リップル）
 - [ ] LOD3モデルの読み込みをさらに高速化したい
 - [x] ロード短縮（タイトル中のフィールド／HDR／スカイドーム先行、初期ロードのインポート3・テクスチャ2・衝突2ワーカー化）
 - [x] Debug専用ロード進捗表示（タイトル左下 `TITLE PRELOAD`、フェード前面 `GAME LOAD`。`Field_GetLoadStatus`）
