@@ -78,6 +78,26 @@ character->PlayAnimationByIndex(0, true);
 
 ---
 
+## 別FBXのアニメーションを読み込む（LoadAnimationFile）
+
+Mixamo などで「メッシュ入りFBX」と「アニメだけのFBX」が別ファイルの場合は、
+モデル生成後に外部FBXを名前付きで登録し、`PlayAnimationByName()` で再生する。
+
+```cpp
+character->LoadAnimationFile("asset\debug\model\Akai_Idle.fbx", "Idle", "mixamorig:Hips");
+character->LoadAnimationFile("asset\debug\model\Akai_Run.fbx",  "Run",  "mixamorig:Hips");
+character->PlayAnimationByName("Idle", true);
+```
+
+- 第 3 引数 `rootMotionBone` を指定すると、そのボーンの水平(XZ)移動を最初のキー値に固定する（インプレース化）。前進をゲーム側の位置更新で行う場合に指定する。`nullptr` なら除去しない
+- ボーン名（ノード名）がモデル側と一致している必要がある
+- 同名のクリップが登録済みなら何もしない（`true` を返す）。FBX 内蔵アニメと同名にしないこと
+- 外部クリップは自前の「ノード名→トラック」対応表を持つため、FBX 内蔵アニメとのブレンドも可能
+- ブレンド中は遷移元・遷移先の両方の再生位置が進む。`SetAnimationBlendDuration()` の値が使われる
+- 非ループのクリップが終了して停止した後に別アニメへ切り替えた場合も、終了ポーズからブレンドする
+
+---
+
 ## アニメーション一覧の確認
 
 ```cpp

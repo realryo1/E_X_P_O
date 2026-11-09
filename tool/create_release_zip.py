@@ -203,6 +203,12 @@ def remove_expo_assets_from_release(staging_dir: Path) -> None:
         shutil.rmtree(expomodel_dir)
         print("[Collect] asset/expomodel をリリースから除外", flush=True)
 
+    # 権利が不明確なデバッグ用アセット（asset/debug）は配布物に含めない
+    debug_asset_dir = staging_dir / "asset" / "debug"
+    if debug_asset_dir.is_dir():
+        shutil.rmtree(debug_asset_dir)
+        print("[Collect] asset/debug をリリースから除外", flush=True)
+
     collision_dir = staging_dir / "asset" / "collision"
     for collision_file in collision_dir.glob("expo_*.bin"):
         collision_file.unlink()

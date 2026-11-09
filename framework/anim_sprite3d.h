@@ -29,6 +29,9 @@ struct AnimationClip {
 	double duration = 0.0;         // アニメーション長（単位: ティック）
 	double tps = 24.0;             // ティックスパーセコンド
 	std::vector<BoneKeyframes> tracks;  // ボーンごとのキーフレーム
+	// ノード名→tracks のインデックス。LoadAnimationFile で読んだ外部クリップだけが持つ。
+	// 空のクリップ（FBX内蔵アニメ）は従来どおり MODEL::NodeToAnimIndex を使う。
+	std::unordered_map<std::string, int> nodeToTrack;
 };
 
 // アニメーション再生状態
@@ -54,6 +57,7 @@ struct AnimationBlendState {
 	double blendDuration = 0.3;       // ブレンド時間（秒）
 	double blendElapsed = 0.0;        // ブレンド経過時間（秒）
 	const AnimationClip* targetClip = nullptr; // 遷移先アニメーションポインタ
+	double targetTime = 0.0;          // 遷移先アニメーションの再生位置（ブレンド中も進める）
 	AnimationState previousState;     // 遷移前のアニメーション状態（スナップショット）
 };
 
@@ -205,6 +209,11 @@ public:
 
 	// インデックスからアニメーションを再生
 	bool PlayAnimationByIndex(unsigned int index, bool loop = true);
+
+	// 別FBX（メッシュなし・アニメのみ）のアニメーションを name で登録する。
+	// 登録後は PlayAnimationByName(name) で再生できる。ボーン名はモデル側と一致している必要がある。
+	// rootMotionBone を指定すると、そのボーンの水平(XZ)移動を最初のキー値に固定する（インプレース化）。
+	bool LoadAnimationFile(const char* filePath, const char* name, const char* rootMotionBone = nullptr);
 
 	// ブレンド時間の設定（秒単位）
 	void SetAnimationBlendDuration(double duration)

@@ -1227,6 +1227,28 @@ MODEL* ModelLoad(const char* FileName)
 		if (texture)
 		{
 			model->Texture[texFileName] = texture;
+
+			// 半透明テクセルを持つか調べる（髪・まつ毛など。描画順の制御に使う）
+			bool translucent = false;
+			const DirectX::Image* img = image.GetImage(0, 0, 0);
+			if (img && img->pixels &&
+				(img->format == DXGI_FORMAT_R8G8B8A8_UNORM || img->format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+				 img->format == DXGI_FORMAT_B8G8R8A8_UNORM || img->format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB))
+			{
+				for (size_t y = 0; y < img->height && !translucent; y++)
+				{
+					const uint8_t* row = img->pixels + y * img->rowPitch;
+					for (size_t x = 0; x < img->width; x++)
+					{
+						if (row[x * 4 + 3] < 250)
+						{
+							translucent = true;
+							break;
+						}
+					}
+				}
+			}
+			model->TextureHasAlpha[texFileName] = translucent;
 		}
 		else
 		{
@@ -1282,6 +1304,8 @@ MODEL* ModelLoad(const char* FileName)
 			if (model->Texture.count(texPath))
 			{
 				model->MeshMaterials[m].textureView = model->Texture[texPath];
+				auto alphaIt = model->TextureHasAlpha.find(texPath);
+				model->MeshMaterials[m].hasAlpha = (alphaIt != model->TextureHasAlpha.end() && alphaIt->second);
 			}
 			else
 			{
@@ -1627,8 +1651,15 @@ void ModelAnimationDraw(MODEL* model, XMFLOAT3 pos, XMFLOAT3 rot, XMFLOAT3 scale
 		return;
 	}
 
+	// 不透明メッシュ → 半透明メッシュの順に描く。半透明は深度書き込みを切り、
+	// メッシュ順で手前のパーツが奥のパーツを隠してしまうのを防ぐ。
+	for (int pass = 0; pass < 2; pass++)
+	{
+	if (pass == 1) SetDepthWriteEnable(false);
 	for (unsigned int m = 0; m < model->AiScene->mNumMeshes; m++)
 	{
+		if (model->MeshMaterials[m].hasAlpha != (pass == 1)) continue;
+
 		XMFLOAT4 meshFinalColor;
 		if (useColorReplace)
 		{
@@ -1686,6 +1717,8 @@ void ModelAnimationDraw(MODEL* model, XMFLOAT3 pos, XMFLOAT3 rot, XMFLOAT3 scale
 			DrawIndexed(indexCount, 0, 0);
 		}
 	}
+	}
+	SetDepthWriteEnable(true);
 }
 
 XMFLOAT3 ModelGetSize(MODEL* model)

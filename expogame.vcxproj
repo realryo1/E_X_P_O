@@ -172,6 +172,9 @@
     <ClCompile Include="SCENE_DEBUG\debug_bloom_scene.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)'=='Release'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="SCENE_DEBUG\debug_meshfield.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)'=='Release'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="framework\anim_sprite3d.cpp" />
     <ClCompile Include="framework\billboard.cpp" />
     <ClCompile Include="framework\split_bilboard.cpp" />
@@ -240,6 +243,9 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="SCENE_DEBUG\debug_bloom_scene.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="SCENE_DEBUG\debug_meshfield.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="app\define.h" />

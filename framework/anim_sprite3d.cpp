@@ -67,16 +67,22 @@ static void CalcBoneMatricesRecursive(
 	XMMATRIX parentTransform,
 	const AnimationClip& clip,
 	double time,
-	const std::unordered_map<std::string, int>& nodeToAnimIndex,
+	const std::unordered_map<std::string, int>& modelNodeToAnimIndex,
 	MODEL* model,
 	BoneMatrices& outMatrices,
 	const AnimationClip* overrideClip = nullptr,
 	double overrideTime = 0.0,
-	const std::unordered_map<std::string, int>* overrideNodeToAnimIndex = nullptr,
+	const std::unordered_map<std::string, int>* modelOverrideNodeToAnimIndex = nullptr,
 	const std::vector<std::string>* overrideBoneNames = nullptr,
 	bool isOverrideActive = false)
 {
 	const char* nodeNameCStr = node->mName.data;
+
+	// 外部クリップは自前のノード→トラック対応表を使う。内蔵アニメはモデル側の表を使う。
+	const std::unordered_map<std::string, int>& nodeToAnimIndex =
+		!clip.nodeToTrack.empty() ? clip.nodeToTrack : modelNodeToAnimIndex;
+	const std::unordered_map<std::string, int>* overrideNodeToAnimIndex =
+		(overrideClip && !overrideClip->nodeToTrack.empty()) ? &overrideClip->nodeToTrack : modelOverrideNodeToAnimIndex;
 
 	// このノードのローカル変換（デフォルトはノードのバインドポーズ変換）
 	XMMATRIX nodeTransform = AiMatrixToXMMatrix(node->mTransformation);
@@ -193,12 +199,12 @@ static void CalcBoneMatricesRecursive(
 			globalTransform,
 			clip,
 			time,
-			nodeToAnimIndex,
+			modelNodeToAnimIndex,
 			model,
 			outMatrices,
 			overrideClip,
 			overrideTime,
-			overrideNodeToAnimIndex,
+			modelOverrideNodeToAnimIndex,
 			overrideBoneNames,
 			currentOverrideActive
 		);
@@ -351,6 +357,26 @@ XMFLOAT4 AnimSprite3D::InterpolateQuat(const std::vector<KeyQuat>& keys, double 
 	return result;
 }
 
+// クリップの再生位置を dt 秒進める（ループ時は巻き戻し、非ループ時は末尾で止める）
+static double AdvanceClipTime(const AnimationClip* clip, double time, float dt, bool loop)
+{
+	if (!clip) return time;
+	double tps = clip->tps > 0.0 ? clip->tps : 24.0;
+	time += dt * tps;
+	if (time >= clip->duration)
+	{
+		if (loop && clip->duration > 0.0)
+		{
+			time = fmod(time, clip->duration);
+		}
+		else
+		{
+			time = clip->duration;
+		}
+	}
+	return time;
+}
+
 void AnimSprite3D::UpdateAnimation(float dt)
 {
 	m_BoneMatricesUpdated = false;
@@ -359,6 +385,11 @@ void AnimSprite3D::UpdateAnimation(float dt)
 	if (m_BlendState.isBlending)
 	{
 		m_BlendState.blendElapsed += dt;
+		// ブレンド中も遷移元・遷移先の両方を進める（遷移先が時刻0で止まらないように）
+		m_BlendState.previousState.time = AdvanceClipTime(
+			m_BlendState.previousState.clip, m_BlendState.previousState.time, dt, m_BlendState.previousState.loop);
+		m_BlendState.targetTime = AdvanceClipTime(
+			m_BlendState.targetClip, m_BlendState.targetTime, dt, m_AnimState.loop);
 		
 		if (m_BlendState.blendElapsed >= m_BlendState.blendDuration)
 		{
@@ -366,6 +397,12 @@ void AnimSprite3D::UpdateAnimation(float dt)
 			m_BlendState.isBlending = false;
 			SetAnimationClip(m_BlendState.targetClip);
 			PlayAnimation(m_AnimState.loop);
+			m_AnimState.time = m_BlendState.targetTime;
+		}
+		else
+		{
+			UpdateBoneMatrices();
+			return;
 		}
 	}
 
@@ -457,7 +494,7 @@ void AnimSprite3D::UpdateBoneMatrices()
 		BoneMatrices targetMatrices;
 		AnimationState tempState;
 		tempState.clip = m_BlendState.targetClip;
-		tempState.time = 0.0;
+		tempState.time = m_BlendState.targetTime;
 		UpdateBoneMatricesForState(tempState, targetMatrices);
 		
 		float blendF = (float)blendT;
@@ -650,6 +687,16 @@ bool AnimSprite3D::PlayAnimationByName(const char* animName, bool loop)
     }
 
 
+    // LoadAnimationFile で登録済みの外部クリップを優先する
+    const AnimationClip* pExternalClip = nullptr;
+    {
+        auto ext = m_Model->AnimationClips.find(animName);
+        if (ext != m_Model->AnimationClips.end() && !ext->second->nodeToTrack.empty())
+        {
+            pExternalClip = ext->second;
+        }
+    }
+
     // FBX内から名前でアニメーションを検索（完全一致 → 部分一致の順）
     aiAnimation* foundAnim = nullptr;
 
@@ -666,7 +713,7 @@ bool AnimSprite3D::PlayAnimationByName(const char* animName, bool loop)
     }
 
     // 完全一致が見つからなかった場合、部分一致で検索
-    if (!foundAnim)
+    if (!pExternalClip && !foundAnim)
     {
         for (unsigned int i = 0; i < m_Model->AiScene->mNumAnimations; i++)
         {
@@ -681,42 +728,46 @@ bool AnimSprite3D::PlayAnimationByName(const char* animName, bool loop)
     }
 
     // アニメーションが1つだけの場合はそれを使用（名前不一致でも）
-    if (!foundAnim && m_Model->AiScene->mNumAnimations == 1)
+    if (!pExternalClip && !foundAnim && m_Model->AiScene->mNumAnimations == 1)
     {
         foundAnim = m_Model->AiScene->mAnimations[0];
     }
 
-    if (foundAnim)
+    if (pExternalClip || foundAnim)
     {
-        // NodeToAnimIndexを再生対象のアニメーションのチャンネルから再構築
-        m_Model->NodeToAnimIndex.clear();
-        for (unsigned int c = 0; c < foundAnim->mNumChannels; c++)
+        const AnimationClip* pClip = pExternalClip;
+        if (!pClip)
         {
-            m_Model->NodeToAnimIndex[foundAnim->mChannels[c]->mNodeName.data] = c;
-        }
+            // NodeToAnimIndexを再生対象のアニメーションのチャンネルから再構築
+            m_Model->NodeToAnimIndex.clear();
+            for (unsigned int c = 0; c < foundAnim->mNumChannels; c++)
+            {
+                m_Model->NodeToAnimIndex[foundAnim->mChannels[c]->mNodeName.data] = c;
+            }
 
-        // キャッシュから取得、無ければ生成
-        const AnimationClip* pClip = nullptr;
-        auto it = m_Model->AnimationClips.find(animName);
-        if (it != m_Model->AnimationClips.end())
-        {
-            pClip = it->second;
-        }
-        else
-        {
-            AnimationClip* newClip = new AnimationClip(ExtractAnimationFromAssimp(foundAnim));
-            m_Model->AnimationClips[animName] = newClip;
-            pClip = newClip;
+            // キャッシュから取得、無ければ生成
+            auto it = m_Model->AnimationClips.find(animName);
+            if (it != m_Model->AnimationClips.end())
+            {
+                pClip = it->second;
+            }
+            else
+            {
+                AnimationClip* newClip = new AnimationClip(ExtractAnimationFromAssimp(foundAnim));
+                m_Model->AnimationClips[animName] = newClip;
+                pClip = newClip;
+            }
         }
         
         // 別のアニメーションが再生中の場合、ブレンド遷移を開始
-        if (m_AnimState.play && m_AnimState.currentAnimName != animName)
+        if (m_AnimState.clip && m_AnimState.currentAnimName != animName)
         {
             m_BlendState.previousState = m_AnimState;
             m_BlendState.targetClip = pClip;
             m_BlendState.isBlending = true;
             m_BlendState.blendElapsed = 0.0;
-            m_BlendState.blendDuration = 0.3;
+            m_BlendState.targetTime = 0.0;
+            // blendDuration は SetAnimationBlendDuration の値をそのまま使う
         }
         else
         {
@@ -910,4 +961,62 @@ void AnimSprite3D::StopOverrideAnimation()
 {
 	m_OverrideAnimState.isActive = false;
 	m_OverrideAnimState.play = false;
+}
+
+// ============================================================
+// 外部FBX（アニメのみ）の読み込み
+// ============================================================
+
+bool AnimSprite3D::LoadAnimationFile(const char* filePath, const char* name, const char* rootMotionBone)
+{
+	if (!m_Model || !filePath || !name)
+	{
+		return false;
+	}
+
+	// 同名の登録済みクリップがあれば何もしない（二重読み込み・リーク防止）
+	if (m_Model->AnimationClips.find(name) != m_Model->AnimationClips.end())
+	{
+		return true;
+	}
+
+	// モデルと同じ座標系（左手系）で読む。メッシュは使わずアニメーションだけ取り出す。
+	const aiScene* scene = aiImportFile(filePath, aiProcess_ConvertToLeftHanded);
+	if (!scene || scene->mNumAnimations == 0)
+	{
+		if (scene) aiReleaseImport(scene);
+		return false;
+	}
+
+	const aiAnimation* aiAnim = scene->mAnimations[0];
+	AnimationClip* clip = new AnimationClip(ExtractAnimationFromAssimp(aiAnim));
+	for (unsigned int c = 0; c < aiAnim->mNumChannels; c++)
+	{
+		clip->nodeToTrack[aiAnim->mChannels[c]->mNodeName.data] = (int)c;
+	}
+
+	// ルートモーション除去：ルートボーン（Mixamoなら Hips）の XZ 移動を最初のキーに固定する。
+	// 前進は呼び出し側（ゲーム側の位置更新）が担当するため、アニメで二重に進ませない。
+	if (rootMotionBone)
+	{
+		const std::string base(rootMotionBone);
+		const std::string split = base + "_$AssimpFbx$_Translation";
+		for (const auto& pair : clip->nodeToTrack)
+		{
+			if (pair.first != base && pair.first != split) continue;
+			std::vector<KeyVec3>& keys = clip->tracks[pair.second].trans;
+			if (keys.empty()) continue;
+			const float x0 = keys.front().value.x;
+			const float z0 = keys.front().value.z;
+			for (KeyVec3& key : keys)
+			{
+				key.value.x = x0;
+				key.value.z = z0;
+			}
+		}
+	}
+
+	aiReleaseImport(scene);
+	m_Model->AnimationClips[name] = clip;
+	return true;
 }

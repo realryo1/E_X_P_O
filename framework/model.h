@@ -49,6 +49,7 @@ struct MeshMaterial
 	ID3D11ShaderResourceView* roughnessTextureView = nullptr;
 	ID3D11ShaderResourceView* emissiveTextureView = nullptr;
 	bool isFaceMesh = false;  // 顔テクスチャ差し替え対象かどうか
+	bool hasAlpha = false;    // 半透明テクセルを持つ（描画を不透明メッシュの後・深度書き込みなしにする）
 };
 
 struct MODEL
@@ -72,6 +73,7 @@ struct MODEL
 	XMMATRIX GlobalInverseTransform;
 
 	std::unordered_map<std::string, ID3D11ShaderResourceView*> Texture;
+	std::unordered_map<std::string, bool> TextureHasAlpha;	// 埋め込みテクスチャが半透明テクセルを持つか
 	ID3D11ShaderResourceView* FlatNormalTexture = nullptr;
 
 	// メッシュ単位のインデックス数
