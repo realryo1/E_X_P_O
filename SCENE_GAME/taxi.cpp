@@ -1,5 +1,6 @@
 ﻿#include "taxi.h"
 #include "field.h"
+#include "collision.h"
 #include "gameaudio.h"
 #include "player.h"
 #include "playercamera.h"
@@ -27,7 +28,7 @@ namespace
 	const char* TAXI_MARKER_TEXTURE = "asset\\texture\\makulogo.png";
 	const char* TAXI_BEST_PATH = "asset\\taxi_best.txt";
 
-	const float ROUND_SECONDS = 180.0f;
+	const float ROUND_SECONDS = 90.0f;
 	// ワールド単位は 1 = 5m（メートル→ワールド単位は 0.2。plateau.md 7.2）。
 	// 高度などの基準は実メートルで決め、ワールド単位へ直して使う。画面表示は実メートルに戻す
 	const float UNIT_METERS = 5.0f;
@@ -40,6 +41,12 @@ namespace
 	const float ENTRANCE_STEP = 1.5f;
 	const float ENTRANCE_MAX = 120.0f;
 	const float ARROW_SIZE = 72.0f;
+	const float PICKUP_SPEED_RATIO = 2.0f;	// 迎えに行く間の移動速度の倍率
+
+	// 大屋根リングの潜り抜けボーナス。屋根の下に入り、一定以上離れた位置で出たら成立（迎え中も送り中も有効）
+	const int RING_PASS_BONUS = 200;
+	const float RING_PASS_MIN_DISTANCE = 4.0f;	// 入った点と出た点の水平距離（20m）。出入りの揺れや引き返しを除く
+	const float RING_ROOF_CLEARANCE = 0.1f;
 	const float TRIP_SPEED_ESTIMATE = 6.5f;	// m/s。PLAYER_MOVE_SPEED_DEFAULT 0.12 x 60fps が約7.2
 	const float TRIP_MARGIN_SECONDS = 12.0f;
 	const float PICKUP_MIN = 60.0f;
@@ -121,6 +128,15 @@ namespace
 	int g_OrderWaypoint = -1;
 	bool g_OrderWaypointReached = false;
 	int g_OrderHitBase = 0;
+
+	// 迎え中の移動速度ブースト
+	bool g_SpeedBoosted = false;
+	float g_BaseMoveSpeed = 0.0f;
+
+	// 大屋根リングの潜り抜け
+	bool g_UnderRoof = false;
+	XMFLOAT3 g_RoofEnterPos = {};
+	int g_RingPasses = 0;
 
 	Billboard* g_Marker = nullptr;
 	std::vector<Billboard*> g_Pillar;
@@ -488,8 +504,26 @@ namespace
 		}
 	}
 
+	// 迎えに行く移動は退屈なので、その間だけ移動速度を2倍にする。送り中・終了時・中止時は元の速度に戻す。
+	// 元の速度は、倍にする直前の値を覚えておく（デバッグ窓で速度を変えていても壊さない）
+	void SetPickupSpeedBoost(bool on)
+	{
+		if (on && !g_SpeedBoosted)
+		{
+			g_BaseMoveSpeed = Player_GetMoveSpeed();
+			Player_SetMoveSpeed(g_BaseMoveSpeed * PICKUP_SPEED_RATIO);
+			g_SpeedBoosted = true;
+		}
+		else if (!on && g_SpeedBoosted)
+		{
+			Player_SetMoveSpeed(g_BaseMoveSpeed);
+			g_SpeedBoosted = false;
+		}
+	}
+
 	void BeginPickup(void)
 	{
+		SetPickupSpeedBoost(true);
 		const XMFLOAT3 from = Player_GetPos();
 		g_PickupSpot = PickSpot(from, PICKUP_MIN, PICKUP_MAX, -1);
 		g_PickupPoint = ComputeEntrance(g_PickupSpot, from);
@@ -503,6 +537,7 @@ namespace
 
 	void BeginDeliver(void)
 	{
+		SetPickupSpeedBoost(false);
 		g_DropSpot = PickSpot(g_Spots[g_PickupSpot].pos, DROP_MIN, DROP_MAX, g_PickupSpot);
 		g_TripDistance = DistanceXZ(g_Spots[g_PickupSpot].pos, g_Spots[g_DropSpot].pos);
 		g_DropPoint = ComputeEntrance(g_DropSpot, g_PickupPoint);
@@ -535,6 +570,7 @@ namespace
 
 	void FinishRound(void)
 	{
+		SetPickupSpeedBoost(false);
 		g_Phase = Phase::Result;
 		g_NewBest = g_Score > g_Best;
 		if (g_NewBest)
@@ -549,7 +585,8 @@ namespace
 		SetTextIf(
 			g_pResultLine2,
 			"送迎 " + std::to_string(g_Delivered) + " 件   注文達成 " +
-			std::to_string(g_OrdersDone) + " 件   時間切れ " +
+			std::to_string(g_OrdersDone) + " 件   リング潜り " +
+			std::to_string(g_RingPasses) + " 回   時間切れ " +
 			std::to_string(g_Failed) + " 件   ベスト " + std::to_string(g_Best));
 	}
 
@@ -664,6 +701,44 @@ namespace
 		}
 	}
 
+	// 機体がリングの屋根の下にいるか（その位置のリングの最高面が、機体より上にある）
+	bool IsUnderRingRoof(void)
+	{
+		const int ringId = Field_GetRingCollisionId();
+		if (ringId < 0)
+		{
+			return false;
+		}
+		const XMFLOAT3 pos = Player_GetPos();
+		float roofY = 0.0f;
+		if (!Collision_SampleTopY(ringId, pos.x, pos.z, &roofY))
+		{
+			return false;
+		}
+		return pos.y < roofY - RING_ROOF_CLEARANCE;
+	}
+
+	void UpdateRingPass(void)
+	{
+		const bool under = IsUnderRingRoof();
+		if (under && !g_UnderRoof)
+		{
+			g_RoofEnterPos = Player_GetPos();
+		}
+		else if (!under && g_UnderRoof &&
+			DistanceXZ(g_RoofEnterPos, Player_GetPos()) >= RING_PASS_MIN_DISTANCE)
+		{
+			++g_RingPasses;
+			g_Score += RING_PASS_BONUS;
+			Player_ActivateDash();
+			GameAudio_PlayBoost();
+			char text[64] = {};
+			snprintf(text, sizeof(text), "大屋根リング潜り抜け！ +%d", RING_PASS_BONUS);
+			ShowToast(text, { 1.0f, 0.85f, 0.4f, 1.0f });
+		}
+		g_UnderRoof = under;
+	}
+
 	void UpdateWaypoint(void)
 	{
 		if (!IsWaypointActive())
@@ -761,14 +836,14 @@ void Taxi_Initialize(void)
 
 	g_pResultBack = new Sprite2D(
 		{ cx, 370.0f },
-		{ 720.0f, 360.0f },
+		{ 960.0f, 360.0f },
 		0.0f,
 		{ 0.0f, 0.0f, 0.0f, 0.6f },
 		BLENDSTATE_ALFA,
 		L"asset\\texture\\fade.png");
 	g_pResultTitle = MakeFont(cx, 260.0f, 56.0f, { 1.0f, 0.9f, 0.3f, 1.0f }, TA_MIDDLE);
 	g_pResultLine1 = MakeFont(cx, 345.0f, 44.0f, { 1.0f, 1.0f, 1.0f, 1.0f }, TA_MIDDLE);
-	g_pResultLine2 = MakeFont(cx, 410.0f, 24.0f, { 0.85f, 0.85f, 0.85f, 1.0f }, TA_MIDDLE);
+	g_pResultLine2 = MakeFont(cx, 410.0f, 21.0f, { 0.85f, 0.85f, 0.85f, 1.0f }, TA_MIDDLE);
 	g_pResultNew = MakeFont(cx, 465.0f, 34.0f, { 1.0f, 0.35f, 0.2f, 1.0f }, TA_MIDDLE);
 	g_pResultNew->SetText("ベスト更新！");
 	g_pResultHint = MakeFont(cx, 520.0f, 24.0f, { 0.8f, 0.8f, 0.8f, 1.0f }, TA_MIDDLE);
@@ -814,6 +889,8 @@ bool Taxi_Start(void)
 	g_Delivered = 0;
 	g_Failed = 0;
 	g_OrdersDone = 0;
+	g_RingPasses = 0;
+	g_UnderRoof = false;
 	g_NewBest = false;
 	g_ToastTimer = 0.0f;
 	g_Anim = 0.0f;
@@ -867,6 +944,7 @@ bool Taxi_Start(void)
 
 void Taxi_Stop(void)
 {
+	SetPickupSpeedBoost(false);
 	g_Phase = Phase::Off;
 	g_Spots.clear();
 	SAFE_DELETE(g_Marker);
@@ -922,6 +1000,7 @@ void Taxi_Update(void)
 
 	UpdateAltitude(dt);
 	UpdateWaypoint();
+	UpdateRingPass();
 
 	if (g_Phase == Phase::Deliver)
 	{

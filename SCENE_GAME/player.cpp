@@ -31,6 +31,7 @@ static const float PLAYER_MAX_ROLL = 20.0f;
 static const float PLAYER_ROLL_PER_YAW = 0.8f;
 static const float PLAYER_ROLL_FOLLOW_RATE = 1.5f;
 static const float PLAYER_MIN_HALF_EXTENT = 0.01f;
+static const float PLAYER_BODY_RADIUS_RATIO = 0.8f;	// 当たりの円柱半径を見た目の平均半径に対して縮める比率
 
 static Sprite3D* g_PlayerModel = nullptr;
 static XMFLOAT3 g_Pos = { 0.0f, 0.0f, 0.0f };
@@ -140,7 +141,8 @@ void Player_Initialize(XMFLOAT3 startPos)
 
 	const XMFLOAT3 display = g_PlayerModel->GetDisplaySize();
 	// 当たりは円柱。機体が旋回しても水平の当たりが変わらないよう、半径は幅と奥行きの平均にする（x = z = 半径）
-	const float bodyRadius = fmaxf((display.x + display.z) * 0.25f, PLAYER_MIN_HALF_EXTENT);
+	// さらに 0.8 倍にして、見た目より少し細くする（ローターの先が壁に触れても通れる「ゲームの嘘」）
+	const float bodyRadius = fmaxf((display.x + display.z) * 0.25f * PLAYER_BODY_RADIUS_RATIO, PLAYER_MIN_HALF_EXTENT);
 	g_HalfExtents.x = bodyRadius;
 	g_HalfExtents.y = fmaxf(display.y * 0.5f, PLAYER_MIN_HALF_EXTENT);
 	g_HalfExtents.z = bodyRadius;
