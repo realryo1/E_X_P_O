@@ -40,6 +40,13 @@ bool Field_GetNearestPavilionLabel(
 	char* out,
 	size_t outSize,
 	float* outDistance);
+// 送迎ミッション用。公式名つきパビリオンの中心(XZ)と短い名前（最初の1行）を重複なしで列挙する
+struct FieldMissionSpot
+{
+	DirectX::XMFLOAT3 pos;
+	char name[96];
+};
+int Field_GetMissionSpots(FieldMissionSpot* out, int maxCount);
 void Field_SetSkyboxYaw(float yawDegrees);
 void Field_SetSkyboxTexture(ID3D11ShaderResourceView* texture);
 void Field_SetSkyboxEnabled(bool enabled);

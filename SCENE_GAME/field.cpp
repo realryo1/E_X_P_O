@@ -2906,6 +2906,69 @@ bool Field_GetNearestPavilionLabel(
 	return true;
 }
 
+int Field_GetMissionSpots(FieldMissionSpot* out, int maxCount)
+{
+	if (!out || maxCount <= 0)
+	{
+		return 0;
+	}
+	int count = 0;
+	for (const std::unique_ptr<ExpoDrawJob>& holder : g_DrawJobs)
+	{
+		const ExpoDrawJob* job = holder.get();
+		if (!job || job->kind != ExpoDrawKind::Pavilion || job->path.empty())
+		{
+			continue;
+		}
+		const std::string fileName = PathFileName(job->path);
+		if (fileName.find("expo_pavilion_") != 0 ||
+			fileName.find("expo_pavilion_expo_related") == 0 ||
+			fileName.find("expo_pavilion_group_rest_area") == 0)
+		{
+			continue;
+		}
+		const auto found = g_PavilionOfficialNames.find(fileName);
+		if (found == g_PavilionOfficialNames.end() || found->second.empty())
+		{
+			continue;
+		}
+		std::string name = found->second.substr(0, found->second.find('\n'));
+		if (name.empty())
+		{
+			continue;
+		}
+		bool duplicated = false;
+		for (int i = 0; i < count; ++i)
+		{
+			if (name == out[i].name)
+			{
+				duplicated = true;
+				break;
+			}
+		}
+		if (duplicated)
+		{
+			continue;
+		}
+		XMFLOAT3 origin = job->hasStreamCenter ? job->streamPosition : job->position;
+		if (job->result &&
+			job->result != job->placeholder &&
+			IsModelLoaded(job->result))
+		{
+			const XMFLOAT3 center = job->result->GetWorldCenter();
+			origin.x = center.x;
+			origin.z = center.z;
+		}
+		out[count].pos = origin;
+		strncpy_s(out[count].name, name.c_str(), _TRUNCATE);
+		if (++count >= maxCount)
+		{
+			break;
+		}
+	}
+	return count;
+}
+
 void Field_PumpLoad(void)
 {
 	if (g_PumpedThisFrame)

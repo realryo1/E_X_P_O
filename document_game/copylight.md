@@ -43,6 +43,8 @@ pizzo_pernice_puresky_4k.hdr：スカイドーム・太陽光解析用HDR / http
 
 icon.ico,makulogo.png：アプリアイコン用・輪くぐり用輪 / 例のロゴ風自作テクスチャ
 
+arrow.png：送迎ミッションの目的地の方向を示す矢印 / CC0（パブリックドメイン）
+
 https://www.a23d.co/decal/deciduoustree-0109510
 https://www.vecteezy.com/photo/69297134-tree-isolated-on-white-background
 https://www.vecteezy.com/photo/6754804-isolated-tree-on-white-background

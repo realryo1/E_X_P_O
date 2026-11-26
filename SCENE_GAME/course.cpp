@@ -4,6 +4,7 @@
 #include "player.h"
 #include "playercamera.h"
 #include "photomode.h"
+#include "taxi.h"
 #include "billboard.h"
 #include "sprite2d.h"
 #include "font.h"
@@ -55,6 +56,7 @@ namespace
 		RaceCountdown,
 		RaceRunning,
 		RaceGoal,
+		Taxi,
 	};
 
 	std::vector<CourseData> g_Courses;
@@ -473,6 +475,7 @@ namespace
 		g_Mode = CourseMode::FreeFlight;
 		g_NextGate = 0;
 		g_RaceElapsed = 0.0;
+		Taxi_Stop();
 		ClearRings();
 		SAFE_DELETE(g_StartMarker);
 		GameAudio_StopCountdown();
@@ -800,6 +803,11 @@ namespace
 		GameAudio_PlayCountdown();
 	}
 
+	bool IsTaxiMode(void)
+	{
+		return g_Mode == CourseMode::Taxi;
+	}
+
 	// カウントダウン・走行中・ゴール後のいずれか
 	bool IsRaceMode(void)
 	{
@@ -844,6 +852,10 @@ namespace
 
 	int GetMenuItemCount(void)
 	{
+		if (IsTaxiMode())
+		{
+			return 2;
+		}
 		if (IsRaceMode())
 		{
 			return 2;
@@ -860,7 +872,7 @@ namespace
 		{
 			return static_cast<int>(g_Courses.size()) + 2;
 		}
-		return 6;
+		return 7;
 	}
 
 	bool MenuHasBackGap(void)
@@ -915,6 +927,10 @@ namespace
 				"編集に戻る",
 			};
 		}
+		else if (IsTaxiMode())
+		{
+			lines = { "ミッションを中止", "フォトモード" };
+		}
 		else if (IsRaceMode())
 		{
 			lines = { "レースを中止", "フォトモード" };
@@ -937,6 +953,7 @@ namespace
 			lines = {
 				"レース開始",
 				"コース編集・追加",
+				"送迎ミッション",
 				"スタート地点へ戻る",
 				Field_ArePavilionLabelsVisible()
 					? "パビリオン名：表示"
@@ -966,6 +983,10 @@ namespace
 			if (g_Mode == CourseMode::CourseCreate)
 			{
 				title = "コース作成";
+			}
+			else if (IsTaxiMode())
+			{
+				title = "送迎ミッション";
 			}
 			else if (IsRaceMode())
 			{
@@ -1044,6 +1065,17 @@ namespace
 		{
 			GameAudio_SetBgmGoal();
 		}
+		else if (g_Mode == CourseMode::Taxi)
+		{
+			if (Taxi_IsFinished())
+			{
+				GameAudio_SetBgmGoal();
+			}
+			else
+			{
+				GameAudio_SetBgmRace();
+			}
+		}
 		else
 		{
 			GameAudio_SetBgmExplore();
@@ -1082,6 +1114,17 @@ namespace
 			GameAudio_PlayMenuClose();
 			ApplyModeBgm();
 		}
+	}
+
+	void StartTaxiMission(void)
+	{
+		if (!Taxi_Start())
+		{
+			GameAudio_PlayInvalid();
+			return;
+		}
+		g_Mode = CourseMode::Taxi;
+		SetMenuOpen(false);
 	}
 
 	void MoveMenuCursor(int direction)
@@ -1225,6 +1268,22 @@ namespace
 			return;
 		}
 
+		if (IsTaxiMode())
+		{
+			if (item == 0)
+			{
+				GameAudio_PlayRaceAbort();
+				ReturnToFreeFlight();
+				SetMenuOpen(false);
+			}
+			else if (item == 1)
+			{
+				SetMenuOpen(false);
+				EnterPhotoModeFromMenu();
+			}
+			return;
+		}
+
 		if (IsRaceMode())
 		{
 			if (item == 0)
@@ -1301,6 +1360,9 @@ namespace
 			SetMenuPage(MenuPage::EditSelect);
 			break;
 		case 2:
+			StartTaxiMission();
+			break;
+		case 3:
 		{
 			const XMFLOAT3 before = Player_GetPos();
 			Player_WarpToStart();
@@ -1312,15 +1374,15 @@ namespace
 			SetMenuOpen(false);
 			break;
 		}
-		case 3:
+		case 4:
 			Field_SetPavilionLabelsVisible(!Field_ArePavilionLabelsVisible());
 			RefreshMenuText();
 			break;
-		case 4:
+		case 5:
 			SetMenuOpen(false);
 			EnterPhotoModeFromMenu();
 			break;
-		case 5:
+		case 6:
 			SetMenuOpen(false);
 			break;
 		default:
@@ -1430,6 +1492,7 @@ void Course_Initialize(void)
 	g_MenuCursor = 0;
 	g_MenuPage = MenuPage::Root;
 	LoadCourseList();
+	Taxi_Initialize();
 
 	g_pTimerText = new DrawFont(
 		{ 40.0f, 40.0f },
@@ -1564,6 +1627,7 @@ void Course_Initialize(void)
 void Course_Finalize(void)
 {
 	SetMenuOpen(false);
+	Taxi_Finalize();
 	Player_SetControlEnabled(true);
 	ClearRings();
 	SAFE_DELETE(g_StartMarker);
@@ -1631,6 +1695,16 @@ void Course_Update(void)
 			g_WorkingCourse.points.pop_back();
 			RebuildRings(g_WorkingCourse.points);
 			GameAudio_PlayPointUndo();
+		}
+		return;
+	}
+
+	if (g_Mode == CourseMode::Taxi)
+	{
+		Taxi_Update();
+		if (Taxi_IsFinished() && Input_IsActionTrigger(INPUT_ACTION_DECIDE))
+		{
+			ReturnToFreeFlight();
 		}
 		return;
 	}
@@ -1705,6 +1779,11 @@ bool Course_IsRaceCountdown(void)
 
 void Course_Draw(void)
 {
+	if (g_Mode == CourseMode::Taxi)
+	{
+		Taxi_Draw();
+		return;
+	}
 	if (g_Mode == CourseMode::FreeFlight)
 	{
 		return;
@@ -1754,15 +1833,14 @@ void Course_Draw(void)
 
 void Course_DrawHud(void)
 {
-	if (Direct3D_IsTakingScreenshot())
-	{
-		return;
-	}
-
 	CourseMode hudKind = CourseMode::FreeFlight;
 	if (g_Mode == CourseMode::CourseCreate)
 	{
 		hudKind = CourseMode::CourseCreate;
+	}
+	else if (IsTaxiMode())
+	{
+		hudKind = CourseMode::Taxi;
 	}
 	else if (IsRaceMode())
 	{
@@ -1775,6 +1853,11 @@ void Course_DrawHud(void)
 		{
 			g_pModeLabelText->SetText("コース編集モード");
 			g_pModeLabelText->SetColor({ 1.0f, 0.55f, 0.12f, 1.0f });
+		}
+		else if (hudKind == CourseMode::Taxi)
+		{
+			g_pModeLabelText->SetText("送迎ミッション");
+			g_pModeLabelText->SetColor({ 1.0f, 0.85f, 0.2f, 1.0f });
 		}
 		else if (hudKind == CourseMode::RaceRunning)
 		{
@@ -1799,6 +1882,11 @@ void Course_DrawHud(void)
 	if (g_Mode == CourseMode::CourseCreate && g_pCourseHintText)
 	{
 		g_pCourseHintText->Draw();
+	}
+
+	if (g_Mode == CourseMode::Taxi)
+	{
+		Taxi_DrawHud();
 	}
 
 	if (IsRaceMode())
@@ -1878,7 +1966,7 @@ void Course_DrawHud(void)
 
 void Course_DrawMenu(void)
 {
-	if (Direct3D_IsTakingScreenshot() || g_MenuAnim <= 0.0f)
+	if (g_MenuAnim <= 0.0f)
 	{
 		return;
 	}

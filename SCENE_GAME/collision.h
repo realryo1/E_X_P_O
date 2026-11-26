@@ -46,6 +46,14 @@ bool Collision_MoveAABB(
 	DirectX::XMFLOAT3 delta,
 	DirectX::XMFLOAT3* outCenter,
 	bool* grounded);
+// 水平は半径 radius の円、縦は半高 halfHeight の円柱で動かす。向きに依らず水平の当たりが同じ
+bool Collision_MoveCylinder(
+	DirectX::XMFLOAT3 center,
+	float radius,
+	float halfHeight,
+	DirectX::XMFLOAT3 delta,
+	DirectX::XMFLOAT3* outCenter,
+	bool* grounded);
 void Collision_DrawWire(
 	DirectX::XMFLOAT3 center,
 	DirectX::XMFLOAT3 halfExtents);

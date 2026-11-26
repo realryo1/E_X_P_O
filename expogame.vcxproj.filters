@@ -130,6 +130,9 @@
     <ClCompile Include="SCENE_GAME\course.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
+    <ClCompile Include="SCENE_GAME\taxi.cpp">
+      <Filter>SCENE_GAME</Filter>
+    </ClCompile>
     <ClCompile Include="SCENE_GAME\vegetation.cpp">
       <Filter>SCENE_GAME</Filter>
     </ClCompile>
@@ -328,6 +331,9 @@
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\course.h">
+      <Filter>SCENE_GAME</Filter>
+    </ClInclude>
+    <ClInclude Include="SCENE_GAME\taxi.h">
       <Filter>SCENE_GAME</Filter>
     </ClInclude>
     <ClInclude Include="SCENE_GAME\vegetation.h">

@@ -983,6 +983,10 @@ namespace
 		return out;
 	}
 
+	// true の間は、プレイヤーの当たりを箱ではなく円柱（水平は半径 half.x の円、縦は half.y）として扱う。
+	// 機体の旋回に依らず水平の当たりが変わらない。Collision_MoveCylinder だけが立てる
+	bool g_ResolveCylinder = false;
+
 	bool ResolveTriangle(
 		CollisionMesh& mesh,
 		int triIndex,
@@ -1018,6 +1022,32 @@ namespace
 		const float nx = (dx < 0.0f) ? -dx : dx;
 		const float ny = (dy < 0.0f) ? -dy : dy;
 		const float nz = (dz < 0.0f) ? -dz : dz;
+		if (g_ResolveCylinder)
+		{
+			const float horizontal = sqrtf(dx * dx + dz * dz);
+			if (horizontal > half.x || ny > half.y)
+			{
+				return false;
+			}
+			const float penetrationH = half.x - horizontal;
+			const float penetrationY = half.y - ny;
+			if (horizontal > 1.0e-5f && penetrationH <= penetrationY)
+			{
+				// 円の外向き（三角形上の最近点から中心へ向かう方向）へ押し出す
+				const float push = penetrationH / horizontal;
+				center->x += dx * push;
+				center->z += dz * push;
+			}
+			else
+			{
+				center->y += (dy < 0.0f) ? -penetrationY : penetrationY;
+				if (dy > 0.0f && grounded)
+				{
+					*grounded = true;
+				}
+			}
+			return true;
+		}
 		if (nx > half.x || ny > half.y || nz > half.z)
 		{
 			return false;
@@ -1284,6 +1314,32 @@ namespace
 		for (int i = 0; i < 12; ++i)
 		{
 			PushWireLine(verts, p[edges[i][0]], p[edges[i][1]], color);
+		}
+	}
+
+	// 半径 half.x・半高 half.y の円柱。上下の円と4本の縦線
+	void PushWireCylinder(
+		std::vector<VERTEX_3D>& verts,
+		const XMFLOAT3& center,
+		const XMFLOAT3& half,
+		const XMFLOAT4& color)
+	{
+		const int segments = 24;
+		const float step = XM_2PI / static_cast<float>(segments);
+		for (int i = 0; i < segments; ++i)
+		{
+			const float a0 = step * static_cast<float>(i);
+			const float a1 = step * static_cast<float>(i + 1);
+			const float x0 = center.x + cosf(a0) * half.x;
+			const float z0 = center.z + sinf(a0) * half.x;
+			const float x1 = center.x + cosf(a1) * half.x;
+			const float z1 = center.z + sinf(a1) * half.x;
+			PushWireLine(verts, { x0, center.y + half.y, z0 }, { x1, center.y + half.y, z1 }, color);
+			PushWireLine(verts, { x0, center.y - half.y, z0 }, { x1, center.y - half.y, z1 }, color);
+			if (i % (segments / 4) == 0)
+			{
+				PushWireLine(verts, { x0, center.y - half.y, z0 }, { x0, center.y + half.y, z0 }, color);
+			}
 		}
 	}
 
@@ -1831,6 +1887,25 @@ bool Collision_MoveAABB(
 	return true;
 }
 
+bool Collision_MoveCylinder(
+	XMFLOAT3 center,
+	float radius,
+	float halfHeight,
+	XMFLOAT3 delta,
+	XMFLOAT3* outCenter,
+	bool* grounded)
+{
+	g_ResolveCylinder = true;
+	const bool result = Collision_MoveAABB(
+		center,
+		XMFLOAT3(radius, halfHeight, radius),
+		delta,
+		outCenter,
+		grounded);
+	g_ResolveCylinder = false;
+	return result;
+}
+
 void Collision_DrawWire(XMFLOAT3 center, XMFLOAT3 halfExtents)
 {
 #if defined(_DEBUG)
@@ -1891,7 +1966,8 @@ void Collision_DrawWire(XMFLOAT3 center, XMFLOAT3 halfExtents)
 
 	if (g_WireShowPlayerAabb)
 	{
-		PushWireAabb(verts, center, halfExtents, XMFLOAT4(1.0f, 0.2f, 0.2f, 1.0f));
+		// プレイヤーは円柱（半径 halfExtents.x）で判定している
+		PushWireCylinder(verts, center, halfExtents, XMFLOAT4(1.0f, 0.2f, 0.2f, 1.0f));
 	}
 
 	g_WireTriCount = triCount;
@@ -1988,7 +2064,7 @@ void Collision_DrawDebug(void)
 	{
 		RequestRedraw();
 	}
-	if (ImGui::Checkbox("Player AABB", &g_WireShowPlayerAabb))
+	if (ImGui::Checkbox("Player Body", &g_WireShowPlayerAabb))
 	{
 		RequestRedraw();
 	}

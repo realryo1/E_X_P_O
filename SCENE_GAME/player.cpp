@@ -57,6 +57,7 @@ static const float PLAYER_HIT_SHAKE_AMPLITUDE = 0.06f;
 static const float PLAYER_LAND_RUMBLE_STRENGTH = 0.4f;
 static const float PLAYER_LAND_RUMBLE_SECONDS = 0.15f;
 static const float PLAYER_LAND_SHAKE_AMPLITUDE = 0.03f;
+static int g_HitCount = 0;	// 壁などにぶつかったフレーム数（送迎ミッションの「ノンストップ」判定用）
 
 static float Approach(float current, float target, float amount)
 {
@@ -138,9 +139,11 @@ void Player_Initialize(XMFLOAT3 startPos)
 	g_PlayerModel->SetReceiveShadow(true);
 
 	const XMFLOAT3 display = g_PlayerModel->GetDisplaySize();
-	g_HalfExtents.x = fmaxf(display.x * 0.5f, PLAYER_MIN_HALF_EXTENT);
+	// 当たりは円柱。機体が旋回しても水平の当たりが変わらないよう、半径は幅と奥行きの平均にする（x = z = 半径）
+	const float bodyRadius = fmaxf((display.x + display.z) * 0.25f, PLAYER_MIN_HALF_EXTENT);
+	g_HalfExtents.x = bodyRadius;
 	g_HalfExtents.y = fmaxf(display.y * 0.5f, PLAYER_MIN_HALF_EXTENT);
-	g_HalfExtents.z = fmaxf(display.z * 0.5f, PLAYER_MIN_HALF_EXTENT);
+	g_HalfExtents.z = bodyRadius;
 	GameAudio_PlaySpawn();
 }
 
@@ -185,6 +188,11 @@ void Player_SetMoveSpeed(float speed)
 void Player_ResetMoveSpeed(void)
 {
 	g_MoveSpeed = PLAYER_MOVE_SPEED_DEFAULT;
+}
+
+int Player_GetHitCount(void)
+{
+	return g_HitCount;
 }
 
 void Player_ActivateDash(void)
@@ -336,13 +344,14 @@ void Player_Update(void)
 
 	XMFLOAT3 nextPos = g_Pos;
 	bool grounded = false;
-	Collision_MoveAABB(g_Pos, g_HalfExtents, delta, &nextPos, &grounded);
+	Collision_MoveCylinder(g_Pos, g_HalfExtents.x, g_HalfExtents.y, delta, &nextPos, &grounded);
 	const float blockedXz =
 		fabsf((g_Pos.x + delta.x) - nextPos.x) +
 		fabsf((g_Pos.z + delta.z) - nextPos.z);
 	if (blockedXz > 0.0005f)
 	{
 		GameAudio_PlayHit();
+		++g_HitCount;
 		PlayerCamera_AddShake(PLAYER_HIT_SHAKE_AMPLITUDE);
 		Player_Rumble(PLAYER_HIT_RUMBLE_STRENGTH, PLAYER_HIT_RUMBLE_SECONDS);
 	}

@@ -2393,6 +2393,69 @@ void Direct3D_ApplySsao(void)
 #include <time.h>
 #include <wincodec.h>
 #include "DirectXTex.h"
+#include "../framework/imgui/imgui.h"
+#include "../framework/imgui/imgui_impl_dx11.h"
+#include <vector>
+
+// 直前に描いたフレームの ImGui を、撮影ターゲット（SCREENSHOT_WIDTH x SCREENSHOT_HEIGHT）へ拡大して描き足す。
+// 撮影は ImGui::NewFrame() の外で走るので、ウィジェットは作り直せない。代わりに描画データを複製して使う。
+// フォトモード中は画面を作品として撮るため、ImGui は重ねない。
+extern bool PhotoMode_IsActive(void);
+static void DrawImGuiForScreenshot(void)
+{
+	if (!ImGui::GetCurrentContext() || PhotoMode_IsActive())
+	{
+		return;
+	}
+	ImDrawData* source = ImGui::GetDrawData();
+	if (!source || !source->Valid || source->TotalVtxCount <= 0 ||
+		source->DisplaySize.x <= 0.0f || source->DisplaySize.y <= 0.0f)
+	{
+		return;
+	}
+
+	const float scaleX = static_cast<float>(SCREENSHOT_WIDTH) / source->DisplaySize.x;
+	const float scaleY = static_cast<float>(SCREENSHOT_HEIGHT) / source->DisplaySize.y;
+	std::vector<ImDrawList*> clones;
+	ImDrawData scaled;
+	for (int i = 0; i < source->CmdListsCount; ++i)
+	{
+		ImDrawList* clone = source->CmdLists[i]->CloneOutput();
+		for (ImDrawVert& vertex : clone->VtxBuffer)
+		{
+			vertex.pos.x *= scaleX;
+			vertex.pos.y *= scaleY;
+		}
+		for (ImDrawCmd& command : clone->CmdBuffer)
+		{
+			command.ClipRect.x *= scaleX;
+			command.ClipRect.z *= scaleX;
+			command.ClipRect.y *= scaleY;
+			command.ClipRect.w *= scaleY;
+		}
+		clones.push_back(clone);
+		// AddDrawList は描画リストの書き込みポインタが末尾にあることを assert するが、
+		// CloneOutput の複製はそれを引き継がない。レンダラが読むのはバッファだけなので、直接積む
+		scaled.CmdLists.push_back(clone);
+		scaled.CmdListsCount = scaled.CmdLists.Size;
+		scaled.TotalVtxCount += clone->VtxBuffer.Size;
+		scaled.TotalIdxCount += clone->IdxBuffer.Size;
+	}
+	scaled.Valid = true;
+	scaled.DisplayPos = ImVec2(0.0f, 0.0f);
+	scaled.DisplaySize = ImVec2(static_cast<float>(SCREENSHOT_WIDTH), static_cast<float>(SCREENSHOT_HEIGHT));
+	scaled.FramebufferScale = ImVec2(1.0f, 1.0f);
+	scaled.OwnerViewport = source->OwnerViewport;
+	scaled.Textures = source->Textures;
+	if (scaled.TotalVtxCount > 0)
+	{
+		ImGui_ImplDX11_RenderDrawData(&scaled);
+	}
+	for (ImDrawList* clone : clones)
+	{
+		IM_DELETE(clone);
+	}
+}
 
 void TakeScreenshot(void)
 {
@@ -2663,6 +2726,7 @@ void TakeScreenshot(void)
 	SetDepthEnable(false);
 	extern void Fade_Draw(void);
 	Fade_Draw();
+	DrawImGuiForScreenshot();
 
 	// GPUの描画コマンド完了を保証するためFlushを呼ぶ
 	g_ImmediateContext->Flush();

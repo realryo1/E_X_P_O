@@ -23,6 +23,8 @@ void Player_WarpTo(DirectX::XMFLOAT3 pos);
 void Player_SetFacingYaw(float yaw);
 void Player_SetControlEnabled(bool enabled);
 void Player_ActivateDash(void);
+// 壁などにぶつかった累計フレーム数。差分を取って「ぶつからなかったか」を判定する
+int Player_GetHitCount(void);
 void Player_SetVisible(bool visible);
 // ゲームパッド振動を strength（0〜1）で seconds 秒鳴らす。重なった場合は強い方・長い方を採用する
 void Player_Rumble(float strength, float seconds);
